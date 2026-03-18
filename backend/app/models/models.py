@@ -1,0 +1,40 @@
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy.orm import relationship
+from datetime import datetime
+from app.db.database import Base
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lectures = relationship("Lecture", back_populates="owner")
+
+
+class Lecture(Base):
+    __tablename__ = "lectures"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    owner = relationship("User", back_populates="lectures")
+    result = relationship("Result", back_populates="lecture", uselist=False)
+
+
+class Result(Base):
+    __tablename__ = "results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lecture_id = Column(Integer, ForeignKey("lectures.id"), nullable=False)
+    summary = Column(Text, nullable=True)
+    key_concepts = Column(Text, nullable=True)  # JSON string
+    mcqs = Column(Text, nullable=True)           # JSON string
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lecture = relationship("Lecture", back_populates="result")
