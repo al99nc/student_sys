@@ -65,6 +65,8 @@ export default function ResultsPage() {
   // Per-question: track selected answer (revealed immediately on click)
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
   const [score, setScore] = useState(0);
+  const [shuffleMode, setShuffleMode] = useState(false);
+  const [shuffledMcqs, setShuffledMcqs] = useState<Array<MCQ & { _index: number }>>([]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
@@ -118,6 +120,16 @@ export default function ResultsPage() {
   const handleReset = () => {
     setSelectedAnswers({});
     setScore(0);
+  };
+
+  const handleToggleShuffle = () => {
+    if (!shuffleMode && results) {
+      const indexed = results.mcqs.map((mcq, i) => ({ ...mcq, _index: i }));
+      setShuffledMcqs([...indexed].sort(() => Math.random() - 0.5));
+      setShuffleMode(true);
+    } else {
+      setShuffleMode(false);
+    }
   };
 
   if (loading) {
@@ -178,6 +190,18 @@ export default function ResultsPage() {
                 Reset
               </button>
             )}
+            <button
+              onClick={handleToggleShuffle}
+              title={shuffleMode ? "Show sections" : "Shuffle all questions"}
+              className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-all ${
+                shuffleMode
+                  ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                  : "text-gray-500 border-gray-200 hover:border-blue-300 hover:text-blue-600"
+              }`}
+            >
+              <span>🔀</span>
+              <span>{shuffleMode ? "Sectioned" : "Shuffle"}</span>
+            </button>
             <button onClick={handleProcess} disabled={processing}
               className="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50">
               {processing ? "Regenerating..." : "Regenerate"}
@@ -229,18 +253,16 @@ export default function ResultsPage() {
           </div>
         )}
 
-        {/* MCQs grouped by topic */}
-        {Object.entries(grouped).map(([topic, mcqs]) => (
-          <div key={topic} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-            {/* Topic header */}
+        {/* MCQs — grouped by topic or shuffled flat list */}
+        {shuffleMode ? (
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
             <div className="bg-gray-50 border-b border-gray-100 px-6 py-3 flex items-center gap-2">
-              <span className="text-xl">{getEmoji(topic)}</span>
-              <h3 className="font-semibold text-gray-800">{topic}</h3>
-              <span className="ml-auto text-xs text-gray-400">{mcqs.length} questions</span>
+              <span className="text-xl">🔀</span>
+              <h3 className="font-semibold text-gray-800">All Questions (Shuffled)</h3>
+              <span className="ml-auto text-xs text-gray-400">{shuffledMcqs.length} questions</span>
             </div>
-
             <div className="p-4 space-y-5">
-              {(mcqs as Array<MCQ & { _index: number }>).map((mcq) => {
+              {shuffledMcqs.map((mcq, displayIdx) => {
                 const globalIdx = mcq._index;
                 const selected = selectedAnswers[globalIdx];
                 const isAnswered = selected !== undefined;
@@ -248,30 +270,21 @@ export default function ResultsPage() {
 
                 return (
                   <div key={globalIdx} className={`border rounded-xl p-4 transition-all ${isAnswered ? (isCorrect ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/30") : "border-gray-100"}`}>
-                    {/* Question */}
                     <p className="font-medium text-gray-900 text-sm mb-3">
-                      <span className="text-blue-500 font-bold mr-2">Q{globalIdx + 1}.</span>
+                      <span className="text-blue-500 font-bold mr-2">Q{displayIdx + 1}.</span>
                       {mcq.question}
                     </p>
-
-                    {/* Options */}
                     <div className="space-y-2">
                       {mcq.options.map((option, j) => {
                         const letter = option.charAt(0);
                         const isThisSelected = selected === letter;
                         const isThisCorrect = letter === mcq.answer;
-
                         let cls = "border border-gray-200 text-gray-700 cursor-pointer hover:border-blue-300 hover:bg-blue-50";
-                        if (!isAnswered) {
-                          cls = "border border-gray-200 text-gray-700 cursor-pointer hover:border-blue-300 hover:bg-blue-50";
-                        } else if (isThisCorrect) {
-                          cls = "border-green-500 bg-green-50 text-green-800 cursor-default";
-                        } else if (isThisSelected && !isThisCorrect) {
-                          cls = "border-red-400 bg-red-50 text-red-700 cursor-default";
-                        } else {
-                          cls = "border-gray-100 text-gray-400 cursor-default";
+                        if (isAnswered) {
+                          if (isThisCorrect) cls = "border-green-500 bg-green-50 text-green-800 cursor-default";
+                          else if (isThisSelected) cls = "border-red-400 bg-red-50 text-red-700 cursor-default";
+                          else cls = "border-gray-100 text-gray-400 cursor-default";
                         }
-
                         return (
                           <button key={j} onClick={() => handleSelectAnswer(globalIdx, letter)}
                             className={`w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all border ${cls}`}>
@@ -284,8 +297,6 @@ export default function ResultsPage() {
                         );
                       })}
                     </div>
-
-                    {/* Explanation — shown immediately after answering */}
                     {isAnswered && mcq.explanation && (
                       <div className={`mt-3 px-4 py-2.5 rounded-lg text-sm flex items-start gap-2 ${isCorrect ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
                         <span className="text-base flex-shrink-0">👉</span>
@@ -297,7 +308,72 @@ export default function ResultsPage() {
               })}
             </div>
           </div>
-        ))}
+        ) : (
+          Object.entries(grouped).map(([topic, mcqs]) => (
+            <div key={topic} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+              {/* Topic header */}
+              <div className="bg-gray-50 border-b border-gray-100 px-6 py-3 flex items-center gap-2">
+                <span className="text-xl">{getEmoji(topic)}</span>
+                <h3 className="font-semibold text-gray-800">{topic}</h3>
+                <span className="ml-auto text-xs text-gray-400">{mcqs.length} questions</span>
+              </div>
+
+              <div className="p-4 space-y-5">
+                {(mcqs as Array<MCQ & { _index: number }>).map((mcq) => {
+                  const globalIdx = mcq._index;
+                  const selected = selectedAnswers[globalIdx];
+                  const isAnswered = selected !== undefined;
+                  const isCorrect = selected === mcq.answer;
+
+                  return (
+                    <div key={globalIdx} className={`border rounded-xl p-4 transition-all ${isAnswered ? (isCorrect ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/30") : "border-gray-100"}`}>
+                      {/* Question */}
+                      <p className="font-medium text-gray-900 text-sm mb-3">
+                        <span className="text-blue-500 font-bold mr-2">Q{globalIdx + 1}.</span>
+                        {mcq.question}
+                      </p>
+
+                      {/* Options */}
+                      <div className="space-y-2">
+                        {mcq.options.map((option, j) => {
+                          const letter = option.charAt(0);
+                          const isThisSelected = selected === letter;
+                          const isThisCorrect = letter === mcq.answer;
+
+                          let cls = "border border-gray-200 text-gray-700 cursor-pointer hover:border-blue-300 hover:bg-blue-50";
+                          if (isAnswered) {
+                            if (isThisCorrect) cls = "border-green-500 bg-green-50 text-green-800 cursor-default";
+                            else if (isThisSelected) cls = "border-red-400 bg-red-50 text-red-700 cursor-default";
+                            else cls = "border-gray-100 text-gray-400 cursor-default";
+                          }
+
+                          return (
+                            <button key={j} onClick={() => handleSelectAnswer(globalIdx, letter)}
+                              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all border ${cls}`}>
+                              <span className="flex items-center justify-between">
+                                <span>{option}</span>
+                                {isAnswered && isThisCorrect && <span className="text-green-600 font-bold">✓</span>}
+                                {isAnswered && isThisSelected && !isThisCorrect && <span className="text-red-500 font-bold">✗</span>}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Explanation — shown immediately after answering */}
+                      {isAnswered && mcq.explanation && (
+                        <div className={`mt-3 px-4 py-2.5 rounded-lg text-sm flex items-start gap-2 ${isCorrect ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
+                          <span className="text-base flex-shrink-0">👉</span>
+                          <span><strong>Answer: {mcq.answer}</strong> — {mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )}
       </main>
     </div>
   );
