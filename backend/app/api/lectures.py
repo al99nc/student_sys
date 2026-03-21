@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from typing import List
 from app.db.database import get_db
@@ -11,7 +11,7 @@ from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus
 from app.api.deps import get_current_user
 from app.models.models import User
 from app.services.pdf_service import extract_text_from_pdf
-from app.services.ai_service import generate_study_content
+from app.services.ai_service import generate_study_content, _estimate_processing_time
 from app.core.config import settings
 
 router = APIRouter(tags=["lectures"])
@@ -63,11 +63,33 @@ def get_lectures(
 ):
     return db.query(Lecture).filter(Lecture.user_id == current_user.id).order_by(Lecture.created_at.desc()).all()
 
+@router.get("/estimate/{lecture_id}")
+async def estimate_lecture_processing(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    mode: str = Query("highyield", pattern="^(highyield|exam)$"),
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id, Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    try:
+        text = extract_text_from_pdf(lecture.file_path)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"PDF extraction failed: {str(e)}")
+
+    return _estimate_processing_time(text, mode)
+
+
 @router.post("/process/{lecture_id}", response_model=ProcessStatus)
 async def process_lecture(
     lecture_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    mode: str = Query("highyield", pattern="^(highyield|exam)$"),
 ):
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id
@@ -83,7 +105,7 @@ async def process_lecture(
 
     # Call AI
     try:
-        ai_data = await generate_study_content(text)
+        ai_data = await generate_study_content(text, mode=mode)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"AI processing failed: {str(e)}")
 
