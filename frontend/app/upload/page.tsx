@@ -1,10 +1,12 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { uploadLecture, processLecture } from "@/lib/api";
+import { uploadLecture, processLecture, estimateProcessing } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
 import { Suspense } from "react";
+
+type Mode = "highyield" | "exam";
 
 function UploadContent() {
   const router = useRouter();
@@ -17,15 +19,17 @@ function UploadContent() {
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
-  const [uploadedId, setUploadedId] = useState<number | null>(null);
   const [step, setStep] = useState<"upload" | "process" | "done">("upload");
+  const [mode, setMode] = useState<Mode>("highyield");
+  const [timeEstimate, setTimeEstimate] = useState<{ estimated_range: string; chunks: number } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/auth");
       return;
     }
-    // If we came here with a process ID, skip upload and process directly
     if (processId) {
       handleProcess(parseInt(processId));
     }
@@ -34,9 +38,22 @@ function UploadContent() {
   const handleProcess = async (id: number) => {
     setStep("process");
     setProcessing(true);
+    setElapsed(0);
     setError("");
+
+    // Fetch time estimate
     try {
-      await processLecture(id);
+      const est = await estimateProcessing(id, mode);
+      setTimeEstimate(est.data);
+    } catch {
+      // non-fatal — proceed without estimate
+    }
+
+    // Start elapsed timer
+    elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+
+    try {
+      await processLecture(id, mode);
       setStep("done");
       setTimeout(() => router.push(`/results/${id}`), 1500);
     } catch (err: unknown) {
@@ -45,6 +62,7 @@ function UploadContent() {
       setStep("upload");
     } finally {
       setProcessing(false);
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     }
   };
 
@@ -77,7 +95,6 @@ function UploadContent() {
     try {
       const res = await uploadLecture(file);
       const id = res.data.id;
-      setUploadedId(id);
       await handleProcess(id);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
@@ -89,6 +106,7 @@ function UploadContent() {
   };
 
   if (step === "process" || step === "done") {
+    const modeLabel = mode === "exam" ? "Exam Mode" : "High Yield";
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -96,7 +114,24 @@ function UploadContent() {
             <>
               <div className="animate-spin rounded-full h-14 w-14 border-b-2 border-blue-600 mx-auto mb-4" />
               <h2 className="text-xl font-semibold text-gray-900">Processing your lecture...</h2>
-              <p className="text-gray-500 text-sm mt-2">AI is generating MCQs, summary, and key concepts</p>
+              <p className="text-gray-500 text-sm mt-2">
+                AI is generating MCQs in <span className="font-medium text-blue-600">{modeLabel}</span>
+              </p>
+              {timeEstimate && (
+                <div className="mt-4 bg-blue-50 rounded-xl px-5 py-3 inline-block text-left">
+                  <p className="text-sm text-blue-700 font-medium">
+                    Estimated time: <span className="font-semibold">{timeEstimate.estimated_range}</span>
+                  </p>
+                  {timeEstimate.chunks > 1 && (
+                    <p className="text-xs text-blue-500 mt-0.5">
+                      Processing in {timeEstimate.chunks} chunks
+                    </p>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-3">
+                {elapsed}s elapsed
+              </p>
             </>
           ) : (
             <>
@@ -127,6 +162,52 @@ function UploadContent() {
       </header>
 
       <main className="max-w-2xl mx-auto px-6 py-10">
+
+        {/* Mode selector */}
+        <div className="mb-6">
+          <p className="text-sm font-medium text-gray-700 mb-3">Select generation mode</p>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => setMode("highyield")}
+              className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                mode === "highyield"
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              }`}
+            >
+              {mode === "highyield" && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500" />
+              )}
+              <p className={`font-semibold text-sm ${mode === "highyield" ? "text-blue-700" : "text-gray-800"}`}>
+                High Yield MCQs
+              </p>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                Systematic, topic-balanced questions. Covers all lecture sections with clinical vignettes, mechanism questions, and exception formats.
+              </p>
+            </button>
+
+            <button
+              onClick={() => setMode("exam")}
+              className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                mode === "exam"
+                  ? "border-red-500 bg-red-50"
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              }`}
+            >
+              {mode === "exam" && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500" />
+              )}
+              <p className={`font-semibold text-sm ${mode === "exam" ? "text-red-700" : "text-gray-800"}`}>
+                Exam Mode
+              </p>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                Simulates a real licensing exam. Heavy use of &ldquo;all FALSE EXCEPT&rdquo;, clinical vignettes, drug classification traps, and combination options.
+              </p>
+            </button>
+          </div>
+        </div>
+
+        {/* File drop zone */}
         <div
           className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer ${
             dragging ? "border-blue-400 bg-blue-50" : file ? "border-green-400 bg-green-50" : "border-gray-200 hover:border-gray-300 bg-white"
@@ -172,23 +253,39 @@ function UploadContent() {
           <button
             onClick={handleUpload}
             disabled={uploading}
-            className="mt-6 w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors"
+            className={`mt-6 w-full disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors ${
+              mode === "exam"
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
           >
             {uploading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                 Uploading...
               </span>
-            ) : "Upload & Process with AI"}
+            ) : mode === "exam" ? "Generate Exam Questions" : "Generate High Yield MCQs"}
           </button>
         )}
 
-        <div className="mt-6 bg-blue-50 rounded-xl p-4">
-          <p className="text-sm text-blue-800 font-medium mb-2">What happens next?</p>
-          <ul className="text-sm text-blue-700 space-y-1">
-            <li>1. Your PDF is uploaded and text is extracted</li>
-            <li>2. AI analyzes the content</li>
-            <li>3. You get MCQs, a summary, and key concepts</li>
+        <div className={`mt-6 rounded-xl p-4 ${mode === "exam" ? "bg-red-50" : "bg-blue-50"}`}>
+          <p className={`text-sm font-medium mb-2 ${mode === "exam" ? "text-red-800" : "text-blue-800"}`}>
+            {mode === "exam" ? "Exam Mode generates:" : "High Yield Mode generates:"}
+          </p>
+          <ul className={`text-sm space-y-1 ${mode === "exam" ? "text-red-700" : "text-blue-700"}`}>
+            {mode === "exam" ? (
+              <>
+                <li>1. &ldquo;All FALSE EXCEPT&rdquo; and exception questions (~40%)</li>
+                <li>2. Clinical vignettes with specific patient scenarios (~35%)</li>
+                <li>3. Exact mechanism and classification traps (~25%)</li>
+              </>
+            ) : (
+              <>
+                <li>1. Balanced mix across all lecture topics</li>
+                <li>2. Clinical vignettes, mechanism questions, and exception formats</li>
+                <li>3. Summary and key concepts</li>
+              </>
+            )}
           </ul>
         </div>
       </main>
