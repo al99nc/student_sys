@@ -107,7 +107,13 @@ async def process_lecture(
     try:
         ai_data = await generate_study_content(text, mode=mode)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"AI processing failed: {str(e)}")
+        err_str = str(e)
+        if "DAILY_LIMIT:" in err_str:
+            raise HTTPException(
+                status_code=429,
+                detail=err_str.replace("DAILY_LIMIT: ", ""),
+            )
+        raise HTTPException(status_code=503, detail=f"AI processing failed: {err_str}")
 
     # Save or update result
     existing = db.query(Result).filter(Result.lecture_id == lecture_id).first()
