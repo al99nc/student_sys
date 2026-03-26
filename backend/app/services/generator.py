@@ -26,8 +26,8 @@ OPENROUTER_URL = "https://api.groq.com/openai/v1/chat/completions"
 # ─────────────────────────────────────────────────────────────────
 # CHUNKING CONFIGURATION
 # ─────────────────────────────────────────────────────────────────
-CHUNK_SIZE = 8_000
-CHUNK_OVERLAP = 500
+CHUNK_SIZE = 3_000
+CHUNK_OVERLAP = 200
 MAX_CHUNKS = 20
 
 
