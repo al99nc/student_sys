@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     AI_API_KEY: str = ""
-    AI_API_KEYS: str = ""  # comma-separated extra keys: key1,key2,key3
+    AI_API_KEYS: str = ""  # comma-separated extra keys
     AI_MODEL: str = "openai/gpt-oss-120b"
     DATABASE_URL: str = "sqlite:///./students.db"
     UPLOAD_DIR: str = "uploads"
