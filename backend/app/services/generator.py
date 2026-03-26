@@ -170,6 +170,7 @@ async def _call_single_chunk(
     mode: str,
     chunk_index: int,
     total_chunks: int,
+    api_key: str | None = None,
     max_retries: int = 3,
 ) -> tuple[dict, float]:
     system_prompt, user_prompt_template = _get_prompts(mode)
@@ -184,7 +185,7 @@ async def _call_single_chunk(
 
     cfg = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])
     headers = {
-        "Authorization": f"Bearer {settings.AI_API_KEY}",
+        "Authorization": f"Bearer {api_key or settings.AI_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -209,10 +210,20 @@ async def _call_single_chunk(
                 resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
                 if not resp.is_success:
                     logger.error(f"[{mode}] HTTP {resp.status_code}: {resp.text[:300]}")
+                if resp.status_code == 429:
+                    body = resp.text
+                    if "per day" in body or "TPD" in body:
+                        retry_in = _parse_groq_retry_after(body)
+                        minutes = max(1, round(retry_in / 60))
+                        raise RuntimeError(
+                            f"DAILY_LIMIT: Daily token quota exhausted "
+                            f"(200 000 tokens/day). Try again in ~{minutes} minutes."
+                        )
                 resp.raise_for_status()
 
             elapsed = time.monotonic() - t_start
             raw = resp.json()["choices"][0]["message"].get("content") or ""
+            logger.debug(f"[{mode}] Raw AI response (first 500 chars): {raw[:500]!r}")
 
             if len(raw.strip()) < 50:
                 # Groq sometimes returns HTTP 200 with null/empty content when TPM is
@@ -241,18 +252,12 @@ async def _call_single_chunk(
         except Exception as e:
             last_error = e
             err_str = str(e)
-            is_429 = "429" in err_str
 
-            if is_429 and ("per day" in err_str or "TPD" in err_str):
-                # ── Daily token limit (TPD) exhausted ──────────────────────────
-                # Wait time is measured in tens of minutes — retrying in 65 s is
-                # pointless.  Parse the exact wait from the error and fail fast.
-                retry_in = _parse_groq_retry_after(err_str)
-                minutes = max(1, round(retry_in / 60))
-                raise RuntimeError(
-                    f"DAILY_LIMIT: Daily token quota exhausted "
-                    f"(200 000 tokens/day). Try again in ~{minutes} minutes."
-                )
+            # Daily limit — propagate immediately so caller can rotate key
+            if "DAILY_LIMIT" in err_str:
+                raise
+
+            is_429 = "429" in err_str
 
             # TPM (per-minute) or other 429 → wait for the window to reset.
             wait = 65 if is_429 else 2 ** attempt
@@ -377,9 +382,38 @@ def _merge_chunk_results(results: list[dict]) -> dict:
 # MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────
 
+async def _call_chunk_with_rotation(
+    available_keys: list[str],
+    text: str,
+    mode: str,
+    chunk_index: int,
+    total_chunks: int,
+) -> tuple[dict, float]:
+    """Call a single chunk, rotating to the next API key on daily-limit errors."""
+    last_error: Exception | None = None
+    for key in list(available_keys):
+        try:
+            return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
+        except RuntimeError as e:
+            if "DAILY_LIMIT" in str(e):
+                available_keys.remove(key)
+                logger.warning(
+                    f"[{mode}] Key ending ...{key[-6:]} hit daily limit — "
+                    f"rotating to next key ({len(available_keys)} remaining)"
+                )
+                last_error = e
+                continue
+            raise
+    raise RuntimeError(
+        "DAILY_LIMIT: All API keys have hit their daily token quota (200 000 tokens/day). "
+        "Add more keys to AI_API_KEYS in .env or wait until tomorrow."
+    ) if last_error else RuntimeError("No API keys available")
+
+
 async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str, Any]:
-    if not settings.AI_API_KEY:
-        logger.warning("AI_API_KEY is not set — returning mock data")
+    available_keys = settings.get_all_api_keys()
+    if not available_keys:
+        logger.warning("No API keys configured — returning mock data")
         return _get_mock_response()
 
     # Normalise unknown modes to highyield
@@ -401,7 +435,7 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
 
         if total_chunks == 1:
             # Single chunk — fastest path, no rate-limit concerns.
-            chunk_output = [await _call_single_chunk(chunks[0], mode, 0, 1)]
+            chunk_output = [await _call_chunk_with_rotation(available_keys, chunks[0], mode, 0, 1)]
         else:
             # Multi-chunk: process sequentially to stay within GROQ_TPM (8 000 tokens/min).
             # Each chunk uses ~_SAFE_TPM tokens; firing concurrently would exceed the budget
@@ -409,7 +443,7 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
             # so the TPM window fully resets before the next request fires.
             chunk_output = []
             for i, chunk in enumerate(chunks):
-                result = await _call_single_chunk(chunk, mode, i, total_chunks)
+                result = await _call_chunk_with_rotation(available_keys, chunk, mode, i, total_chunks)
                 chunk_output.append(result)
                 if i < total_chunks - 1:
                     elapsed = result[1]

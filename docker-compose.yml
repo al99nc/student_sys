@@ -1,0 +1,25 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/students.db:/app/students.db
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_API_KEYS=${AI_API_KEYS}
+      - AI_MODEL=${AI_MODEL:-openai/gpt-oss-120b}
+      - DATABASE_URL=sqlite:///./students.db
+      - UPLOAD_DIR=uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
