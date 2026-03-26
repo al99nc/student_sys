@@ -5,13 +5,13 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/uploads:/app/uploads
-      - ./backend/students.db:/app/students.db
+      - ./backend/db:/app/db
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - AI_API_KEY=${AI_API_KEY}
       - AI_API_KEYS=${AI_API_KEYS}
       - AI_MODEL=${AI_MODEL:-openai/gpt-oss-120b}
-      - DATABASE_URL=sqlite:///./students.db
+      - DATABASE_URL=sqlite:////app/db/students.db
       - UPLOAD_DIR=uploads
 
   frontend:
