@@ -1,12 +1,17 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { uploadLecture, processLecture, estimateProcessing } from "@/lib/api";
+import { uploadLecture, processLecture, estimateProcessing, Difficulty } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
 import { Suspense } from "react";
 
 type Mode = "highyield" | "exam";
+
+const modeToDifficulty: Record<Mode, Difficulty> = {
+  highyield: "high_yield_revision",
+  exam: "harder",
+};
 
 function UploadContent() {
   const router = useRouter();
@@ -43,7 +48,7 @@ function UploadContent() {
 
     // Fetch time estimate
     try {
-      const est = await estimateProcessing(id, mode);
+      const est = await estimateProcessing(id, modeToDifficulty[mode]);
       setTimeEstimate(est.data);
     } catch {
       // non-fatal — proceed without estimate
@@ -53,7 +58,7 @@ function UploadContent() {
     elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
 
     try {
-      await processLecture(id, mode);
+      await processLecture(id, modeToDifficulty[mode]);
       setStep("done");
       setTimeout(() => router.push(`/results/${id}`), 1500);
     } catch (err: unknown) {
