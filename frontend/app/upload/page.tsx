@@ -34,8 +34,23 @@ function UploadContent() {
     }
     if (processId) {
       handleProcess(parseInt(processId));
+      return;
     }
-  }, [processId, router]);
+    // Handle file shared via PWA share target
+    const isShared = searchParams.get("shared") === "1";
+    if (isShared) {
+      caches.open("share-target-v1").then(async (cache) => {
+        const response = await cache.match("/shared-file");
+        if (response) {
+          const blob = await response.blob();
+          const fileName = response.headers.get("X-File-Name") || "shared.pdf";
+          const sharedFile = new File([blob], fileName, { type: "application/pdf" });
+          setFile(sharedFile);
+          await cache.delete("/shared-file");
+        }
+      }).catch(() => {});
+    }
+  }, [processId, router, searchParams]);
 
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
