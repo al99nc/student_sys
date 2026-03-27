@@ -311,6 +311,84 @@ Lecture text:
 
 
 # ─────────────────────────────────────────────────────────────────
+# HARDER MODE PROMPTS  (kept compact to stay within Groq TPM budget)
+# ─────────────────────────────────────────────────────────────────
+HARDER_SYSTEM_PROMPT = (
+    "You write the hardest possible postgraduate medical licensing MCQs. "
+    "Every question must require precise specific knowledge — no guessing allowed.\n\n"
+
+    "=== FORMAT MANDATE (0% deviation) ===\n"
+    "  50% → 'All the following are FALSE EXCEPT' (3 false + 1 true, all plausible)\n"
+    "  30% → Multi-step clinical vignettes: diagnosis → mechanism → management (2-3 steps)\n"
+    "  20% → Classification/mechanism traps (receptor subtypes, drug class exceptions)\n"
+    "ZERO pure recall questions. ZERO FALSE EXCEPT = wrong output, rewrite.\n\n"
+
+    "=== FALSE EXCEPT RULES ===\n"
+    "ONE option true, THREE verifiably false but plausible. "
+    "Correct answer must not be the obvious one. "
+    "Use exact receptor/enzyme/transporter names. Verify each option individually.\n\n"
+
+    "=== VIGNETTE RULES ===\n"
+    "Include exact labs (Na 128, K 5.8, pH 7.28, Hb 7.2). "
+    "Include 2+ competing comorbidities. Never state the diagnosis. "
+    "Shortcutting any reasoning step must lead to wrong answer.\n\n"
+
+    "=== TRAP TYPES ===\n"
+    "Drug traps: same class, different receptor. Mechanism traps: correct drug, wrong receptor. "
+    "Exception traps: item that breaks class rule. Contraindication traps: right drug, wrong patient.\n\n"
+
+    "=== FORBIDDEN ===\n"
+    "Pure recall | 'All of the above' | 'None of the above' | 'Both X and Y' | "
+    "vignettes solvable in 1 step | vague labs | obvious answers | naming/trivia questions.\n\n"
+
+    "=== DISTRACTORS ===\n"
+    "Every wrong option correct in a DIFFERENT clinical context. "
+    "Most common student error must appear as a wrong option.\n\n"
+
+    "=== FACTUAL ACCURACY ===\n"
+    "  ✗ IDA = iron overload (wrong — IDA = depleted stores)\n"
+    "  ✗ IDA marrow = decreased erythropoiesis (wrong — absent iron stores + increased erythroid activity)\n"
+    "  ✗ ACD = normal/elevated serum iron (wrong — LOW iron + HIGH ferritin)\n"
+    "  ✗ Sickle cell = microcytic (wrong — normocytic)\n\n"
+
+    "OUTPUT: Return ONLY valid JSON. No markdown. "
+    "mcqs: [{topic, question, options:[A./B./C./D. prefixed], answer, explanation}]. "
+    "Explanation: letter + dash, why correct, why top wrong answer is wrong."
+)
+
+HARDER_USER_PROMPT = """No mercy MCQs from this lecture. Every question a potential fail point.
+
+QUANTITY: Dense lecture → 15 Qs max. Short → 8-12. Never pad with easy questions.
+
+FORMAT (count as you write, fix before output):
+- 50% → "All the following are FALSE EXCEPT" — 1 true, 3 false, all plausible
+- 30% → Multi-step vignettes: exact labs + 2+ comorbidities + 2-3 reasoning steps
+- 20% → Traps: receptor subtypes / drug class exceptions / mechanism specificity
+
+FALSE EXCEPT: ONE option true, THREE false. Verify individually. Correct answer not obvious.
+VIGNETTES: Exact values (Na, K, pH, Hb). 2+ comorbidities. Never state diagnosis. 2+ reasoning steps.
+TRAPS: Same-class drugs with different receptors. Correct drug, wrong mechanism. Class outliers.
+
+FORBIDDEN: Pure recall | "All of the above" | "None of the above" | "Both X and Y" |
+single-step vignettes | vague labs | trivial/naming/historical questions.
+
+DISTRACTORS: Every wrong option correct in another context. Most common error = one wrong option.
+
+FACTUAL BANS:
+- IDA ≠ iron overload. Marrow = absent iron stores + increased erythroid activity.
+- ACD = LOW serum iron + HIGH ferritin. Sickle cell = normocytic.
+
+VERIFY: FALSE EXCEPT ~50% (rewrite if zero). Each: 1 true, 3 false. Vignettes: exact labs + steps.
+A/B/C/D evenly distributed (15-35% each). Zero forbidden phrases.
+
+Return ONLY this JSON (mcqs FIRST):
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation"}}],"summary":"string","key_concepts":["string"]}}
+
+Lecture text:
+{text}"""
+
+
+# ─────────────────────────────────────────────────────────────────
 # PROMPT SELECTOR
 # ─────────────────────────────────────────────────────────────────
 
@@ -319,6 +397,8 @@ def _get_prompts(mode: str) -> tuple[str, str]:
     Falls back to highyield for any unknown mode string."""
     if mode == "exam":
         return EXAM_SYSTEM_PROMPT, EXAM_USER_PROMPT
+    if mode == "harder":
+        return HARDER_SYSTEM_PROMPT, HARDER_USER_PROMPT
     if mode == "revision":
         return REVISION_SYSTEM_PROMPT, REVISION_USER_PROMPT
     return HIGHYIELD_SYSTEM_PROMPT, HIGHYIELD_USER_PROMPT

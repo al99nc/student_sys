@@ -68,7 +68,7 @@ async def estimate_lecture_processing(
     lecture_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    mode: str = Query("highyield", pattern="^(highyield|exam)$"),
+    mode: str = Query("highyield", pattern="^(highyield|exam|harder)$"),
 ):
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id
@@ -89,7 +89,7 @@ async def process_lecture(
     lecture_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    mode: str = Query("highyield", pattern="^(highyield|exam)$"),
+    mode: str = Query("highyield", pattern="^(highyield|exam|harder)$"),
 ):
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id

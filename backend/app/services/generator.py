@@ -75,6 +75,14 @@ SPEED_CONFIG = {
         "presence_penalty": 0.3,
         "frequency_penalty": 0.3,
     },
+    "harder": {
+        # Budget: ~1 400 prompt tokens + ~750 chunk tokens = ~2 150 input.
+        # 8 000 TPM limit − 2 150 input = 5 850 headroom → cap at 4 500 for safety.
+        "max_tokens": 4_500,
+        "temperature": 0.40,
+        "presence_penalty": 0.4,
+        "frequency_penalty": 0.4,
+    },
     "revision": {
         "max_tokens": 3_500,   # revision output is short; no change needed
         "temperature": 0.25,
@@ -472,7 +480,7 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
 
         valid_mcqs = _fix_explanation_prefix(valid_mcqs)
         _warn_answer_distribution(valid_mcqs, mode)
-        if mode == "exam":
+        if mode in ("exam", "harder"):
             _warn_exam_format_distribution(valid_mcqs)
 
         merged["mcqs"] = valid_mcqs

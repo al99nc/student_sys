@@ -31,7 +31,7 @@ api.interceptors.response.use(
   }
 );
 
-export type Difficulty = "high_yield_revision" | "hard" | "harder";
+export type Difficulty = "highyield" | "exam" | "harder";
 
 // Auth
 export const signup = (email: string, password: string) =>
@@ -51,11 +51,11 @@ export const uploadLecture = (file: File) => {
 
 export const getLectures = () => api.get("/lectures");
 
-export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "hard") =>
-  api.get(`/estimate/${lectureId}?difficulty=${difficulty}`);
+export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "highyield") =>
+  api.get(`/estimate/${lectureId}?mode=${difficulty}`);
 
-export const processLecture = (lectureId: number, difficulty: Difficulty = "hard") =>
-  api.post(`/process/${lectureId}?difficulty=${difficulty}`);
+export const processLecture = (lectureId: number, difficulty: Difficulty = "highyield") =>
+  api.post(`/process/${lectureId}?mode=${difficulty}`);
 
 export const getResults = (lectureId: number) =>
   api.get(`/results/${lectureId}`);
