@@ -164,8 +164,23 @@ export default function SharedPage() {
     }
   };
 
+  const copyToClipboard = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+  };
+
   const handleCopyLink = async () => {
-    await navigator.clipboard.writeText(window.location.href);
+    await copyToClipboard(window.location.href);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -447,19 +462,39 @@ export default function SharedPage() {
       </div>}
 
       {/* ── Mobile main nav: permanent app navigation ── */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/95 backdrop-blur-xl border-t border-white/5">
-        <Link href={isLoggedIn ? "/dashboard" : "/"} className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-          <span className="material-symbols-outlined text-[22px]">home</span>
-          <span className="text-[10px] uppercase tracking-widest">Home</span>
-        </Link>
-        <Link href="/upload" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-          <span className="material-symbols-outlined text-[22px]">upload_file</span>
-          <span className="text-[10px] uppercase tracking-widest">Upload</span>
-        </Link>
-        <Link href="/analytics" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-          <span className="material-symbols-outlined text-[22px]">insights</span>
-          <span className="text-[10px] uppercase tracking-widest">Stats</span>
-        </Link>
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center px-4 bg-slate-950/95 backdrop-blur-xl border-t border-white/5"
+        style={{ paddingTop: "0.75rem", paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}>
+        {isLoggedIn ? (
+          <>
+            <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+              <span className="material-symbols-outlined text-[22px]">home</span>
+              <span className="text-[10px] uppercase tracking-widest">Home</span>
+            </Link>
+            <Link href="/upload" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+              <span className="material-symbols-outlined text-[22px]">upload_file</span>
+              <span className="text-[10px] uppercase tracking-widest">Upload</span>
+            </Link>
+            <Link href="/analytics" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+              <span className="material-symbols-outlined text-[22px]">insights</span>
+              <span className="text-[10px] uppercase tracking-widest">Stats</span>
+            </Link>
+          </>
+        ) : (
+          <>
+            <Link href="/" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+              <span className="material-symbols-outlined text-[22px]">home</span>
+              <span className="text-[10px] uppercase tracking-widest">Home</span>
+            </Link>
+            <Link href={`/shared/${token}/quiz`} className="flex flex-col items-center gap-0.5 text-secondary">
+              <span className="material-symbols-outlined text-[22px]">bolt</span>
+              <span className="text-[10px] uppercase tracking-widest">Quiz</span>
+            </Link>
+            <Link href="/" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+              <span className="material-symbols-outlined text-[22px]">person_add</span>
+              <span className="text-[10px] uppercase tracking-widest">Sign up</span>
+            </Link>
+          </>
+        )}
       </nav>
 
       <main className="pt-24 px-6 md:px-12 max-w-7xl mx-auto">
