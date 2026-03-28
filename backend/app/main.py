@@ -1,10 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.db.database import Base, engine
 from app.api import auth, lectures
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+# Migrate: add sharing columns to results table if they don't exist yet
+with engine.connect() as _conn:
+    for _stmt in [
+        "ALTER TABLE results ADD COLUMN share_token VARCHAR",
+        "ALTER TABLE results ADD COLUMN view_count INTEGER DEFAULT 0",
+    ]:
+        try:
+            _conn.execute(text(_stmt))
+            _conn.commit()
+        except Exception:
+            pass  # column already exists
 
 app = FastAPI(
     title="Students Study Assistant",

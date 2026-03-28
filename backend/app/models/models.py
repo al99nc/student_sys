@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.database import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -36,5 +37,22 @@ class Result(Base):
     key_concepts = Column(Text, nullable=True)  # JSON string
     mcqs = Column(Text, nullable=True)           # JSON string
     created_at = Column(DateTime, default=datetime.utcnow)
+    share_token = Column(String, unique=True, index=True, nullable=True)
+    view_count = Column(Integer, default=0, server_default="0")
 
     lecture = relationship("Lecture", back_populates="result")
+
+
+class QuizSession(Base):
+    __tablename__ = "quiz_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    lecture_id = Column(Integer, ForeignKey("lectures.id"), nullable=False)
+    answers = Column(Text, nullable=True)        # JSON: {"0": "A", "2": "C"}
+    retake_count = Column(Integer, default=0, server_default="0")
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_session"),
+    )

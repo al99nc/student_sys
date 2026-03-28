@@ -71,3 +71,12 @@ export const getSharedResult = (token: string) =>
 
 export const pingSharedSession = (token: string, sessionId: string) =>
   api.post(`/shared/${token}/ping`, null, { params: { session_id: sessionId } });
+
+export const getQuizSession = (lectureId: number) =>
+  api.get(`/sessions/${lectureId}`);
+
+export const saveQuizSession = (lectureId: number, answers: Record<number, string>) =>
+  api.put(`/sessions/${lectureId}`, { answers });
+
+export const retakeQuizSession = (lectureId: number) =>
+  api.post(`/sessions/${lectureId}/retake`);

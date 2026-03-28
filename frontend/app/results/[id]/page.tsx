@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getResults, processLecture, createShareLink, getActiveViewers } from "@/lib/api";
+import { getResults, processLecture, createShareLink, getActiveViewers, getQuizSession, saveQuizSession, retakeQuizSession } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
 
@@ -67,7 +67,10 @@ export default function ResultsPage() {
   const [activeViewers, setActiveViewers] = useState(0);
   const [totalViews, setTotalViews] = useState(0);
   const [sharing, setSharing] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [retakeCount, setRetakeCount] = useState(0);
   const viewerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
@@ -97,6 +100,21 @@ export default function ResultsPage() {
         setShareToken(res.data.share_token);
         setTotalViews(res.data.view_count || 0);
       }
+      // Restore saved session
+      try {
+        const sessionRes = await getQuizSession(lectureId);
+        const saved = sessionRes.data.answers || {};
+        setRetakeCount(sessionRes.data.retake_count || 0);
+        if (Object.keys(saved).length > 0) {
+          const numericAnswers: Record<number, string> = {};
+          Object.entries(saved).forEach(([k, v]) => { numericAnswers[parseInt(k)] = v as string; });
+          setSelectedAnswers(numericAnswers);
+          const correct = res.data.mcqs.filter((mcq: MCQ, i: number) => numericAnswers[i] === mcq.answer).length;
+          setScore(correct);
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus("idle"), 1500);
+        }
+      } catch {}
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       setError(axiosErr.response?.status === 404 ? "not_found" : "Failed to load results");
@@ -137,6 +155,8 @@ export default function ResultsPage() {
       await processLecture(lectureId);
       setSelectedAnswers({});
       setScore(0);
+      // MCQs changed — clear saved answers so stale indices don't restore
+      try { await saveQuizSession(lectureId, {}); } catch {}
       await fetchResults();
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
@@ -151,17 +171,35 @@ export default function ResultsPage() {
 
   const handleSelectAnswer = (globalIndex: number, letter: string) => {
     if (selectedAnswers[globalIndex] !== undefined) return;
-    setSelectedAnswers((prev) => {
-      const updated = { ...prev, [globalIndex]: letter };
-      if (results) {
-        const correct = results.mcqs.filter((mcq, i) => updated[i] === mcq.answer).length;
-        setScore(correct);
+    const updated = { ...selectedAnswers, [globalIndex]: letter };
+    if (results) {
+      const correct = results.mcqs.filter((mcq, i) => updated[i] === mcq.answer).length;
+      setScore(correct);
+    }
+    setSelectedAnswers(updated);
+    // Debounced auto-save
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    setSaveStatus("saving");
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await saveQuizSession(lectureId, updated);
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      } catch {
+        setSaveStatus("idle");
       }
-      return updated;
-    });
+    }, 800);
   };
 
-  const handleReset = () => { setSelectedAnswers({}); setScore(0); };
+  const handleReset = async () => {
+    try {
+      const res = await retakeQuizSession(lectureId);
+      setRetakeCount(res.data.retake_count);
+    } catch {}
+    setSelectedAnswers({});
+    setScore(0);
+    setSaveStatus("idle");
+  };
 
   const handleToggleShuffle = () => {
     if (!shuffleMode && results) {
@@ -294,6 +332,24 @@ export default function ResultsPage() {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</h1>
         </div>
         <div className="flex items-center gap-3">
+          {/* Cloud save status */}
+          <div className="flex items-center gap-1 text-xs">
+            {saveStatus === "saving" && (
+              <>
+                <span className="material-symbols-outlined text-sm text-on-surface-variant animate-spin">sync</span>
+                <span className="hidden md:inline text-on-surface-variant">Saving…</span>
+              </>
+            )}
+            {saveStatus === "saved" && (
+              <>
+                <span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span>
+                <span className="hidden md:inline text-emerald-400">Saved</span>
+              </>
+            )}
+            {saveStatus === "idle" && (
+              <span className="material-symbols-outlined text-sm text-on-surface-variant/40">cloud_done</span>
+            )}
+          </div>
           {/* Active viewers badge */}
           {shareToken && activeViewers > 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 animate-pulse">
@@ -402,10 +458,17 @@ export default function ResultsPage() {
                   />
                 </div>
                 {answeredCount > 0 && (
-                  <p className="text-sm text-on-surface-variant mb-6">
+                  <p className="text-sm text-on-surface-variant mb-2">
                     {scorePercent}% accuracy · {answeredCount}/{totalCount} answered
                   </p>
                 )}
+                {retakeCount > 0 && (
+                  <p className="text-xs text-on-surface-variant/60 mb-6">
+                    <span className="material-symbols-outlined text-xs align-middle mr-1">history</span>
+                    {retakeCount} retake{retakeCount !== 1 ? "s" : ""} completed
+                  </p>
+                )}
+                {answeredCount === 0 && retakeCount === 0 && <div className="mb-6" />}
                 <div className="flex gap-3">
                   <button
                     onClick={handleReset}

@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { getSharedResult, pingSharedSession } from "@/lib/api";
+import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
 
 interface MCQ {
@@ -54,11 +55,15 @@ export default function SharedPage() {
   const [error, setError] = useState("");
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
   const [score, setScore] = useState(0);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("mcqs");
   const sessionIdRef = useRef<string>("");
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    // Check auth token from localStorage (SSR-safe — runs client-side only)
+    setIsLoggedIn(isAuthenticated());
+
     // Retrieve or generate a session ID for this browser tab
     let sid = sessionStorage.getItem(`cortexq_sid_${token}`);
     if (!sid) {
@@ -224,6 +229,27 @@ export default function SharedPage() {
               <span className="material-symbols-outlined text-sm">visibility</span>
               {result.view_count} views
             </span>
+          )}
+          {/* Cloud save indicator — checks for a valid auth token */}
+          {isLoggedIn ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-emerald-500/20 text-emerald-400">
+              <span className="material-symbols-outlined text-sm">cloud_done</span>
+              <span className="hidden md:inline text-xs font-semibold">Cloud saving ON</span>
+            </div>
+          ) : (
+            <div className="relative group">
+              <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-orange-500/20 text-orange-400 hover:border-orange-400/40 transition-colors">
+                <span className="material-symbols-outlined text-sm">cloud_off</span>
+                <span className="hidden md:inline text-xs font-semibold">Cloud saving OFF</span>
+              </button>
+              <div className="absolute top-full right-0 mt-2 w-64 glass-panel rounded-xl p-4 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 border border-outline-variant/20 shadow-xl">
+                <p className="font-bold text-white text-sm mb-1">Your answers are not saved</p>
+                <p className="text-on-surface-variant text-xs mb-3 leading-relaxed">Create a free cortexQ account to auto-save your answers, track retakes, upload your own PDFs, and generate MCQs instantly.</p>
+                <Link href="/" className="block text-center synapse-gradient text-white font-bold py-2 rounded-lg text-xs hover:-translate-y-0.5 transition-transform">
+                  Create Free Account
+                </Link>
+              </div>
+            </div>
           )}
           <Link href="/" className="text-sm font-bold px-3 py-1.5 rounded-lg synapse-gradient text-white hover:-translate-y-0.5 transition-transform">
             Try cortexQ

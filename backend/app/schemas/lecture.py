@@ -25,6 +25,8 @@ class ResultOut(BaseModel):
     key_concepts: Optional[List[str]] = None
     mcqs: Optional[List[MCQ]] = None
     created_at: datetime
+    share_token: Optional[str] = None
+    view_count: int = 0
 
     class Config:
         from_attributes = True
@@ -33,3 +35,26 @@ class ProcessStatus(BaseModel):
     status: str
     message: str
     lecture_id: int
+
+class ShareTokenOut(BaseModel):
+    share_token: str
+
+class ViewersOut(BaseModel):
+    view_count: int
+    active_viewers: int
+    share_token: Optional[str] = None
+
+class SharedResultOut(BaseModel):
+    lecture_id: int
+    lecture_title: str
+    summary: Optional[str] = None
+    key_concepts: Optional[List[str]] = None
+    mcqs: Optional[List[MCQ]] = None
+    view_count: int
+
+class QuizSessionOut(BaseModel):
+    answers: dict = {}
+    retake_count: int = 0
+
+class QuizSessionSave(BaseModel):
+    answers: dict
