@@ -24,6 +24,10 @@ router = APIRouter(tags=["lectures"])
 _active_sessions: dict = defaultdict(dict)
 SESSION_TIMEOUT = 60  # seconds
 
+# Tracks which token+session pairs have already been counted as a view
+# so refreshes and strict-mode double-renders don't double-count
+_counted_sessions: set = set()
+
 def _cleanup_sessions(token: str):
     now = time.time()
     stale = [sid for sid, t in list(_active_sessions[token].items()) if now - t > SESSION_TIMEOUT]
@@ -210,9 +214,6 @@ def get_shared_result(token: str, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=404, detail="Shared content not found or link is invalid")
 
-    result.view_count = (result.view_count or 0) + 1
-    db.commit()
-
     return SharedResultOut(
         lecture_id=result.lecture_id,
         lecture_title=result.lecture.title,
@@ -234,10 +235,22 @@ def ping_shared_session(
         raise HTTPException(status_code=404, detail="Not found")
 
     sid = session_id or secrets.token_hex(8)
+    unique_key = f"{token}:{sid}"
+
+    # Increment view_count only the first time this session is seen
+    if unique_key not in _counted_sessions:
+        _counted_sessions.add(unique_key)
+        result.view_count = (result.view_count or 0) + 1
+        db.commit()
+
     _active_sessions[token][sid] = time.time()
     _cleanup_sessions(token)
 
-    return {"session_id": sid, "active_viewers": len(_active_sessions[token])}
+    return {
+        "session_id": sid,
+        "active_viewers": len(_active_sessions[token]),
+        "view_count": result.view_count or 0,
+    }
 
 
 @router.get("/results/{lecture_id}/active-viewers", response_model=ViewersOut)
@@ -336,3 +349,43 @@ def retake_quiz_session(
         db.add(session)
         db.commit()
         return QuizSessionOut(answers={}, retake_count=1)
+
+
+@router.get("/my-shared-sessions")
+def get_my_shared_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all quiz sessions the user has on lectures they don't own (i.e. shared lectures)."""
+    rows = (
+        db.query(QuizSession, Lecture, Result)
+        .join(Lecture, QuizSession.lecture_id == Lecture.id)
+        .join(Result, Result.lecture_id == Lecture.id)
+        .filter(QuizSession.user_id == current_user.id)
+        .filter(Lecture.user_id != current_user.id)
+        .filter(Result.share_token.isnot(None))
+        .order_by(QuizSession.updated_at.desc())
+        .all()
+    )
+
+    out = []
+    for session, lecture, result in rows:
+        answers = json.loads(session.answers) if session.answers else {}
+        mcqs = json.loads(result.mcqs) if result.mcqs else []
+        total = len(mcqs)
+        answered = len(answers)
+        correct = sum(
+            1 for idx_str, letter in answers.items()
+            if (i := int(idx_str)) < total and mcqs[i].get("answer") == letter
+        )
+        out.append({
+            "lecture_id": lecture.id,
+            "lecture_title": lecture.title,
+            "share_token": result.share_token,
+            "answered": answered,
+            "total": total,
+            "correct": correct,
+            "retake_count": session.retake_count or 0,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        })
+    return out

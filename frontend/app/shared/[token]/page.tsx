@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
-import { getSharedResult, pingSharedSession } from "@/lib/api";
+import { getSharedResult, pingSharedSession, getQuizSession, saveQuizSession, retakeQuizSession } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
 
@@ -56,9 +56,18 @@ export default function SharedPage() {
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
   const [score, setScore] = useState(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [retakeCount, setRetakeCount] = useState(0);
+  const [confirmRetake, setConfirmRetake] = useState(false);
+  const [sessionRestored, setSessionRestored] = useState(false);
+  const [shuffleMode, setShuffleMode] = useState(false);
+  const [shuffledMcqs, setShuffledMcqs] = useState<Array<MCQ & { _index: number }>>([]);
+  const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("mcqs");
+  const [guestRetakeBlocked, setGuestRetakeBlocked] = useState(false);
   const sessionIdRef = useRef<string>("");
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Check auth token from localStorage (SSR-safe — runs client-side only)
@@ -76,6 +85,25 @@ export default function SharedPage() {
       try {
         const res = await getSharedResult(token);
         setResult(res.data);
+        // If user has a valid token, restore their saved session for this lecture
+        if (isAuthenticated()) {
+          try {
+            const sessionRes = await getQuizSession(res.data.lecture_id);
+            const saved = sessionRes.data.answers || {};
+            setRetakeCount(sessionRes.data.retake_count || 0);
+            if (Object.keys(saved).length > 0) {
+              const numericAnswers: Record<number, string> = {};
+              Object.entries(saved).forEach(([k, v]) => { numericAnswers[parseInt(k)] = v as string; });
+              setSelectedAnswers(numericAnswers);
+              const correct = res.data.mcqs.filter((mcq: MCQ, i: number) => numericAnswers[i] === mcq.answer).length;
+              setScore(correct);
+              setSaveStatus("saved");
+              setTimeout(() => setSaveStatus("idle"), 1500);
+              setSessionRestored(true);
+              setTimeout(() => setSessionRestored(false), 4000);
+            }
+          } catch {}
+        }
       } catch (err: unknown) {
         const axiosErr = err as { response?: { status?: number } };
         setError(axiosErr.response?.status === 404 ? "not_found" : "Failed to load content");
@@ -104,17 +132,67 @@ export default function SharedPage() {
 
   const handleSelectAnswer = (globalIndex: number, letter: string) => {
     if (selectedAnswers[globalIndex] !== undefined) return;
-    setSelectedAnswers((prev) => {
-      const updated = { ...prev, [globalIndex]: letter };
-      if (result) {
-        const correct = result.mcqs.filter((mcq, i) => updated[i] === mcq.answer).length;
-        setScore(correct);
-      }
-      return updated;
-    });
+    const updated = { ...selectedAnswers, [globalIndex]: letter };
+    if (result) {
+      const correct = result.mcqs.filter((mcq, i) => updated[i] === mcq.answer).length;
+      setScore(correct);
+    }
+    setSelectedAnswers(updated);
+    // Auto-save to the user's account if logged in
+    if (isLoggedIn && result) {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      setSaveStatus("saving");
+      saveTimeoutRef.current = setTimeout(async () => {
+        try {
+          await saveQuizSession(result.lecture_id, updated);
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus("idle"), 2000);
+        } catch {
+          setSaveStatus("idle");
+        }
+      }, 800);
+    }
   };
 
-  const handleReset = () => { setSelectedAnswers({}); setScore(0); };
+  const handleToggleShuffle = (mcqs: MCQ[]) => {
+    if (!shuffleMode) {
+      const indexed = mcqs.map((mcq, i) => ({ ...mcq, _index: i }));
+      setShuffledMcqs([...indexed].sort(() => Math.random() - 0.5));
+      setShuffleMode(true);
+    } else {
+      setShuffleMode(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    await navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleReset = async () => {
+    setConfirmRetake(false);
+    // Feature 6: gate second retake for guests
+    if (!isLoggedIn) {
+      const key = `cortexq_guest_shared_retakes_${token}`;
+      const count = parseInt(localStorage.getItem(key) || "0");
+      if (count >= 1) {
+        setGuestRetakeBlocked(true);
+        return;
+      }
+      localStorage.setItem(key, String(count + 1));
+    }
+    if (isLoggedIn && result) {
+      try {
+        const res = await retakeQuizSession(result.lecture_id);
+        setRetakeCount(res.data.retake_count);
+      } catch {}
+    }
+    setSelectedAnswers({});
+    setScore(0);
+    setSaveStatus("idle");
+    setGuestRetakeBlocked(false);
+  };
 
   if (loading) {
     return (
@@ -207,6 +285,17 @@ export default function SharedPage() {
                 <span><strong>Answer: {mcq.answer}</strong> — {mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}</span>
               </div>
             )}
+
+            {/* Feature 3: wrong answer nudge for guests */}
+            {isAnswered && !isCorrect && !isLoggedIn && (
+              <div className="mt-2 flex items-center justify-between px-1">
+                <span className="text-xs text-on-surface-variant/60">Track your weak spots</span>
+                <Link href="/auth" className="text-xs font-bold text-secondary hover:text-white transition-colors flex items-center gap-1">
+                  Sign up free
+                  <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                </Link>
+              </div>
+            )}
           </div>
         );
       })}
@@ -214,48 +303,164 @@ export default function SharedPage() {
   );
 
   return (
-    <div className="relative min-h-screen text-on-surface pb-24 md:pb-16" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
+    <div className={`relative min-h-screen text-on-surface md:pb-16 ${isLoggedIn ? "pb-36" : "pb-20"}`} style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
       <div className="grain-overlay" />
 
-      {/* Header */}
-      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
+      {/* Restore toast */}
+      {sessionRestored && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/30 shadow-xl text-sm text-white">
+          <span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span>
+          Your saved progress has been restored from your account
+        </div>
+      )}
+
+      {/* Header — logo + cloud icon only on mobile; full buttons on desktop */}
+      <header className="fixed top-0 w-full flex justify-between items-center px-5 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</h1>
+          <Link href={isLoggedIn ? "/dashboard" : "/"} className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent hover:opacity-80 transition-opacity">
+            cortexQ
+          </Link>
           <span className="hidden md:inline px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant bg-surface-container-high border border-outline-variant/20 rounded">Shared</span>
         </div>
-        <div className="flex items-center gap-3">
-          {result.view_count > 0 && (
-            <span className="flex items-center gap-1.5 text-xs text-on-surface-variant">
-              <span className="material-symbols-outlined text-sm">visibility</span>
-              {result.view_count} views
-            </span>
-          )}
-          {/* Cloud save indicator — checks for a valid auth token */}
+
+        <div className="flex items-center gap-2">
+          {/* Cloud save icon — always visible, text only on desktop */}
           {isLoggedIn ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-emerald-500/20 text-emerald-400">
-              <span className="material-symbols-outlined text-sm">cloud_done</span>
-              <span className="hidden md:inline text-xs font-semibold">Cloud saving ON</span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-emerald-500/20">
+              {saveStatus === "saving"
+                ? <span className="material-symbols-outlined text-sm text-on-surface-variant animate-spin">sync</span>
+                : <span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span>}
+              <span className="hidden md:inline text-xs font-semibold text-emerald-400">
+                {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved" : "Cloud saving ON"}
+              </span>
             </div>
           ) : (
             <div className="relative group">
-              <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-orange-500/20 text-orange-400 hover:border-orange-400/40 transition-colors">
+              <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-orange-500/20 text-orange-400">
                 <span className="material-symbols-outlined text-sm">cloud_off</span>
-                <span className="hidden md:inline text-xs font-semibold">Cloud saving OFF</span>
+                <span className="hidden md:inline text-xs font-semibold">Not saving</span>
               </button>
               <div className="absolute top-full right-0 mt-2 w-64 glass-panel rounded-xl p-4 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 border border-outline-variant/20 shadow-xl">
                 <p className="font-bold text-white text-sm mb-1">Your answers are not saved</p>
-                <p className="text-on-surface-variant text-xs mb-3 leading-relaxed">Create a free cortexQ account to auto-save your answers, track retakes, upload your own PDFs, and generate MCQs instantly.</p>
+                <p className="text-on-surface-variant text-xs mb-3 leading-relaxed">Create a free cortexQ account to auto-save answers, track retakes, and generate MCQs from your own PDFs.</p>
                 <Link href="/" className="block text-center synapse-gradient text-white font-bold py-2 rounded-lg text-xs hover:-translate-y-0.5 transition-transform">
                   Create Free Account
                 </Link>
               </div>
             </div>
           )}
-          <Link href="/" className="text-sm font-bold px-3 py-1.5 rounded-lg synapse-gradient text-white hover:-translate-y-0.5 transition-transform">
-            Try cortexQ
-          </Link>
+
+          {/* Desktop-only action buttons */}
+          <div className="hidden md:flex items-center gap-2">
+            {result.view_count > 0 && (
+              <span className="flex items-center gap-1.5 text-xs text-on-surface-variant mr-1">
+                <span className="material-symbols-outlined text-sm">visibility</span>
+                {result.view_count} views
+              </span>
+            )}
+            <Link
+              href={`/shared/${token}/quiz`}
+              className="flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg glass-panel border border-secondary/30 text-secondary hover:text-white transition-all"
+            >
+              <span className="material-symbols-outlined text-sm">bolt</span>
+              Quiz Mode
+            </Link>
+            <button
+              onClick={handleCopyLink}
+              className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${copied ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "glass-panel text-on-surface-variant hover:text-white"}`}
+            >
+              <span className="material-symbols-outlined text-sm">{copied ? "check" : "share"}</span>
+              {copied ? "Copied!" : "Share"}
+            </button>
+            {isLoggedIn && (
+              <>
+                <button
+                  onClick={() => result && handleToggleShuffle(result.mcqs)}
+                  className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${shuffleMode ? "synapse-gradient text-white" : "glass-panel text-on-surface-variant hover:text-white"}`}
+                >
+                  <span className="material-symbols-outlined text-sm">shuffle</span>
+                  {shuffleMode ? "Sectioned" : "Shuffle"}
+                </button>
+                <Link href="/dashboard" className="flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg glass-panel text-on-surface-variant hover:text-white transition-all">
+                  <span className="material-symbols-outlined text-sm">home</span>
+                  Home
+                </Link>
+              </>
+            )}
+            {!isLoggedIn && (
+              <Link href="/" className="text-sm font-bold px-3 py-1.5 rounded-lg synapse-gradient text-white hover:-translate-y-0.5 transition-transform">
+                Try cortexQ
+              </Link>
+            )}
+          </div>
         </div>
       </header>
+
+      {/* ── Mobile subbar: page-specific tools, logged-in users only ── */}
+      {isLoggedIn && <div className="md:hidden fixed bottom-[56px] w-full z-[51]">
+        {/* Label strip */}
+        <div className="flex items-center gap-2 px-4 pt-1.5">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-[8px] font-black uppercase tracking-[0.2em] text-on-surface-variant/40">Page tools</span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+        <div className="flex justify-around items-center py-1.5 px-4 bg-slate-800/80 backdrop-blur-xl border-t border-white/8">
+          <Link
+            href={`/shared/${token}/quiz`}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/10 border border-secondary/25 text-secondary"
+          >
+            <span className="material-symbols-outlined text-[18px]">bolt</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">Quiz Mode</span>
+          </Link>
+
+          {isLoggedIn ? (
+            <button
+              onClick={() => result && handleToggleShuffle(result.mcqs)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
+                shuffleMode
+                  ? "bg-white/15 border-white/20 text-white"
+                  : "bg-white/5 border-white/10 text-slate-400"
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">shuffle</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">{shuffleMode ? "Sectioned" : "Shuffle"}</span>
+            </button>
+          ) : (
+            <Link href="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400">
+              <span className="material-symbols-outlined text-[18px]">person_add</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">Sign up</span>
+            </Link>
+          )}
+
+          <button
+            onClick={handleCopyLink}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
+              copied
+                ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                : "bg-white/5 border-white/10 text-slate-400"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">{copied ? "check" : "share"}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">{copied ? "Copied!" : "Share"}</span>
+          </button>
+        </div>
+      </div>}
+
+      {/* ── Mobile main nav: permanent app navigation ── */}
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/95 backdrop-blur-xl border-t border-white/5">
+        <Link href={isLoggedIn ? "/dashboard" : "/"} className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">home</span>
+          <span className="text-[10px] uppercase tracking-widest">Home</span>
+        </Link>
+        <Link href="/upload" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">upload_file</span>
+          <span className="text-[10px] uppercase tracking-widest">Upload</span>
+        </Link>
+        <Link href="/analytics" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">insights</span>
+          <span className="text-[10px] uppercase tracking-widest">Stats</span>
+        </Link>
+      </nav>
 
       <main className="pt-24 px-6 md:px-12 max-w-7xl mx-auto">
         <div className="pt-6 mb-8">
@@ -300,17 +505,50 @@ export default function SharedPage() {
                   />
                 </div>
                 {answeredCount > 0 && (
-                  <p className="text-sm text-on-surface-variant mb-6">
+                  <p className="text-sm text-on-surface-variant mb-2">
                     {scorePercent}% accuracy · {answeredCount}/{totalCount} answered
                   </p>
                 )}
-                <button
-                  onClick={handleReset}
-                  className="w-full py-3 synapse-gradient text-white font-bold rounded-xl shadow-lg hover:-translate-y-1 transition-transform flex items-center justify-center gap-2"
-                >
-                  <span className="material-symbols-outlined text-sm">refresh</span>
-                  Retake
-                </button>
+                {isLoggedIn && retakeCount > 0 && (
+                  <p className="text-xs text-on-surface-variant/60 mb-2">
+                    <span className="material-symbols-outlined text-xs align-middle mr-1">history</span>
+                    {retakeCount} retake{retakeCount !== 1 ? "s" : ""} completed
+                  </p>
+                )}
+                {(answeredCount === 0 && retakeCount === 0) && <div className="mb-6" />}
+                {confirmRetake ? (
+                  <div className="bg-error/10 border border-error/30 rounded-xl p-4 mb-3">
+                    <p className="text-sm font-bold text-white mb-1">Clear all answers?</p>
+                    <p className="text-xs text-on-surface-variant mb-3">Your current progress will be lost and a new retake will be recorded.</p>
+                    <div className="flex gap-2">
+                      <button onClick={handleReset} className="flex-1 py-2 bg-error text-white font-bold rounded-lg text-sm hover:bg-error/80 transition-colors">
+                        Yes, retake
+                      </button>
+                      <button onClick={() => setConfirmRetake(false)} className="flex-1 py-2 glass-panel text-on-surface-variant font-bold rounded-lg text-sm hover:text-white transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Feature 6: guest retake gate */}
+                {guestRetakeBlocked ? (
+                  <div className="border border-secondary/30 rounded-xl p-4 bg-secondary/5">
+                    <p className="text-sm font-bold text-white mb-1">Sign up to retake</p>
+                    <p className="text-xs text-on-surface-variant mb-3">Track improvement across unlimited retakes.</p>
+                    <Link href="/auth" className="block text-center synapse-gradient text-white font-bold py-2.5 rounded-lg text-sm hover:-translate-y-0.5 transition-transform">
+                      Sign up free
+                    </Link>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => answeredCount > 0 ? setConfirmRetake(true) : handleReset()}
+                    className="w-full py-3 synapse-gradient text-white font-bold rounded-xl shadow-lg hover:-translate-y-1 transition-transform flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm">refresh</span>
+                    Retake
+                  </button>
+                )}
               </div>
             </div>
 
@@ -331,7 +569,9 @@ export default function SharedPage() {
           {/* Main Content */}
           <div className="lg:col-span-8 space-y-6">
             {activeTab === "mcqs" && (
-              Object.entries(grouped).map(([topic, mcqs]) => (
+              shuffleMode ? (
+                <MCQList mcqs={shuffledMcqs} />
+              ) : Object.entries(grouped).map(([topic, mcqs]) => (
                 <div key={topic}>
                   <div className="flex items-center gap-3 mb-4">
                     <span className="text-xl">{getEmoji(topic)}</span>
@@ -379,7 +619,7 @@ export default function SharedPage() {
                     {scorePercent >= 70 ? "You're well-prepared for this topic." : "Review the explanations for questions you missed."}
                   </p>
                 </div>
-                <button onClick={handleReset} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
+                <button onClick={() => setConfirmRetake(true)} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
                   Retake
                 </button>
               </div>
@@ -388,14 +628,16 @@ export default function SharedPage() {
         </div>
       </main>
 
-      {/* Footer CTA */}
-      <div className="fixed bottom-0 w-full z-40 flex justify-center py-3 bg-slate-950/60 backdrop-blur-md border-t border-white/5">
-        <Link href="/" className="flex items-center gap-2 text-xs text-on-surface-variant hover:text-white transition-colors">
-          <span className="font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</span>
-          <span>— Upload your own lecture and generate MCQs instantly</span>
-          <span className="material-symbols-outlined text-sm">arrow_forward</span>
-        </Link>
-      </div>
+      {/* Desktop footer CTA for guests */}
+      {!isLoggedIn && (
+        <div className="hidden md:flex fixed bottom-0 w-full z-40 justify-center py-3 bg-slate-950/60 backdrop-blur-md border-t border-white/5">
+          <Link href="/" className="flex items-center gap-2 text-xs text-on-surface-variant hover:text-white transition-colors">
+            <span className="font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</span>
+            <span>— Upload your own lecture and generate MCQs instantly</span>
+            <span className="material-symbols-outlined text-sm">arrow_forward</span>
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

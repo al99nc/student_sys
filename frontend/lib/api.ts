@@ -80,3 +80,6 @@ export const saveQuizSession = (lectureId: number, answers: Record<number, strin
 
 export const retakeQuizSession = (lectureId: number) =>
   api.post(`/sessions/${lectureId}/retake`);
+
+export const getMySharedSessions = () =>
+  api.get("/my-shared-sessions");

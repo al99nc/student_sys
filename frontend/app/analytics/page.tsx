@@ -1,5 +1,7 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { removeToken } from "@/lib/auth";
 
 const subjects = [
   { name: "Neuroscience: The Synaptic Gap", score: 92, color: "bg-secondary-container", textColor: "text-secondary", date: "Oct 24, 2023", time: "1h 12m" },
@@ -11,6 +13,9 @@ const subjects = [
 const barHeights = ["40%", "65%", "90%", "55%", "30%", "75%", "20%"];
 
 export default function AnalyticsPage() {
+  const router = useRouter();
+  const handleLogout = () => { removeToken(); router.push("/auth"); };
+
   return (
     <div className="relative min-h-screen text-on-surface" style={{ backgroundColor: "#111220" }}>
       <div className="grain-overlay" />
@@ -70,7 +75,7 @@ export default function AnalyticsPage() {
         </div>
       </aside>
 
-      <main className="lg:ml-72 pt-28 pb-32 px-6 md:px-12 max-w-7xl mx-auto">
+      <main className="lg:ml-72 pt-28 pb-32 md:pb-32 px-6 md:px-12 max-w-7xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)" }}>
         {/* Header */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-12">
           <div className="space-y-2">
@@ -240,19 +245,23 @@ export default function AnalyticsPage() {
       </main>
 
       {/* Mobile Bottom Nav */}
-      <footer className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg border-t border-white/5">
-        <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">home</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
+      <footer className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/95 backdrop-blur-xl border-t border-white/5">
+        <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">home</span>
+          <span className="text-[10px] uppercase tracking-widest">Home</span>
         </Link>
-        <Link href="/upload" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">upload_file</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Upload</span>
+        <Link href="/upload" className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">upload_file</span>
+          <span className="text-[10px] uppercase tracking-widest">Upload</span>
         </Link>
-        <div className="flex flex-col items-center text-[#00D2FD]">
-          <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>insights</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
+        <div className="flex flex-col items-center gap-0.5 text-[#00D2FD]">
+          <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>insights</span>
+          <span className="text-[10px] uppercase tracking-widest">Stats</span>
         </div>
+        <button onClick={handleLogout} className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">logout</span>
+          <span className="text-[10px] uppercase tracking-widest">Logout</span>
+        </button>
       </footer>
     </div>
   );

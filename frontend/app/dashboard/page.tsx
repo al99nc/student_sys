@@ -88,6 +88,10 @@ export default function DashboardPage() {
             <span className="material-symbols-outlined">upload_file</span>
             <span className="hidden lg:inline font-medium">Upload</span>
           </Link>
+          <Link href="/solved-shared" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
+            <span className="material-symbols-outlined">folder_shared</span>
+            <span className="hidden lg:inline font-medium">Solved Shared</span>
+          </Link>
           <Link href="/analytics" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
             <span className="material-symbols-outlined">analytics</span>
             <span className="hidden lg:inline font-medium">Analytics</span>
@@ -107,7 +111,7 @@ export default function DashboardPage() {
           <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-container via-primary-container to-secondary-container p-8 md:p-12 shadow-2xl shadow-primary-container/20">
             <div className="absolute top-0 right-0 w-1/2 h-full opacity-20 pointer-events-none">
               <svg className="w-full h-full scale-150 rotate-12" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
-                <path d="M47.5,-63.2C60.1,-55.4,68,-40.1,73.4,-24.1C78.9,-8,81.9,8.7,77.5,23.6C73,38.5,61,51.6,46.8,61C32.5,70.5,16.3,76.3,-1.2,78C-18.7,79.7,-37.4,77.2,-52.1,67.7C-66.8,58.2,-77.6,41.6,-81,24.1C-84.5,6.6,-80.7,-11.8,-71.7,-26.8C-62.7,-41.8,-48.5,-53.5,-34.2,-60.5C-20,-67.5,-5.7,-69.8,10.9,-68.1C27.5,-66.4,47.5,-63.2Z" fill="white" transform="translate(200 200)" />
+                <path d="M47.5,-63.2C60.1,-55.4,68,-40.1,73.4,-24.1C78.9,-8,81.9,8.7,77.5,23.6C73,38.5,61,51.6,46.8,61C32.5,70.5,16.3,76.3,-1.2,78C-18.7,79.7,-37.4,77.2,-52.1,67.7C-66.8,58.2,-77.6,41.6,-81,24.1C-84.5,6.6,-80.7,-11.8,-71.7,-26.8C-62.7,-41.8,-48.5,-53.5,-34.2,-60.5C-20,-67.5,-5.7,-69.8,10.9,-68.1C27.5,-66.4,47.5,-63.2,47.5,-63.2Z" fill="white" transform="translate(200 200)" />
               </svg>
             </div>
             <div className="relative z-10">

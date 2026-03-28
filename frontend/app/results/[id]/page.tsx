@@ -60,6 +60,7 @@ export default function ResultsPage() {
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
   const [score, setScore] = useState(0);
   const [shuffleMode, setShuffleMode] = useState(false);
+  const [confirmRetake, setConfirmRetake] = useState(false);
   const [shuffledMcqs, setShuffledMcqs] = useState<Array<MCQ & { _index: number }>>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>("mcqs");
   const [shareToken, setShareToken] = useState<string | null>(null);
@@ -192,6 +193,7 @@ export default function ResultsPage() {
   };
 
   const handleReset = async () => {
+    setConfirmRetake(false);
     try {
       const res = await retakeQuizSession(lectureId);
       setRetakeCount(res.data.retake_count);
@@ -320,64 +322,50 @@ export default function ResultsPage() {
   );
 
   return (
-    <div className="relative min-h-screen text-on-surface pb-24 md:pb-0" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
+    <div className="relative min-h-screen text-on-surface pb-36 md:pb-0" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
       <div className="grain-overlay" />
 
       {/* Header */}
       <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard" className="text-on-surface-variant hover:text-white transition-colors">
-            <span className="material-symbols-outlined">arrow_back</span>
-          </Link>
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</h1>
-        </div>
+        <Link href="/dashboard" className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">
+          cortexQ
+        </Link>
         <div className="flex items-center gap-3">
-          {/* Cloud save status */}
-          <div className="flex items-center gap-1 text-xs">
-            {saveStatus === "saving" && (
-              <>
-                <span className="material-symbols-outlined text-sm text-on-surface-variant animate-spin">sync</span>
-                <span className="hidden md:inline text-on-surface-variant">Saving…</span>
-              </>
-            )}
-            {saveStatus === "saved" && (
-              <>
-                <span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span>
-                <span className="hidden md:inline text-emerald-400">Saved</span>
-              </>
-            )}
-            {saveStatus === "idle" && (
-              <span className="material-symbols-outlined text-sm text-on-surface-variant/40">cloud_done</span>
-            )}
-          </div>
-          {/* Active viewers badge */}
-          {shareToken && activeViewers > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 animate-pulse">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-              <span className="text-xs font-bold text-emerald-400">{activeViewers} solving now</span>
+          {/* Views + active solvers */}
+          {shareToken && (totalViews > 0 || activeViewers > 0) && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-high border border-outline-variant/20">
+              {totalViews > 0 && (
+                <span className="flex items-center gap-1 text-xs text-on-surface-variant">
+                  <span className="material-symbols-outlined text-sm">visibility</span>
+                  {totalViews}
+                </span>
+              )}
+              {totalViews > 0 && activeViewers > 0 && (
+                <span className="text-outline-variant text-xs">·</span>
+              )}
+              {activeViewers > 0 && (
+                <span className="flex items-center gap-1 text-xs font-bold text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                  {activeViewers} solving
+                </span>
+              )}
             </div>
           )}
-          {shareToken && totalViews > 0 && activeViewers === 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high border border-outline-variant/20">
-              <span className="material-symbols-outlined text-sm text-on-surface-variant">visibility</span>
-              <span className="text-xs font-medium text-on-surface-variant">{totalViews} views</span>
+          {/* Desktop-only actions */}
+          <div className="hidden md:flex items-center gap-3">
+            <div className="flex items-center gap-1 text-xs">
+              {saveStatus === "saving" && <span className="material-symbols-outlined text-sm text-on-surface-variant animate-spin">sync</span>}
+              {saveStatus === "saved" && <><span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span><span className="text-emerald-400">Saved</span></>}
+              {saveStatus === "idle" && <span className="material-symbols-outlined text-sm text-on-surface-variant/40">cloud_done</span>}
             </div>
-          )}
-          {/* Share button */}
-          <button
-            onClick={shareToken ? handleCopyLink : handleShare}
-            disabled={sharing}
-            className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${copied ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "glass-panel text-on-surface-variant hover:text-white"}`}
-          >
-            <span className="material-symbols-outlined text-sm">{copied ? "check" : "share"}</span>
-            <span className="hidden md:inline">{copied ? "Copied!" : shareToken ? "Copy Link" : sharing ? "…" : "Share"}</span>
-          </button>
-          <div className="hidden md:flex items-center gap-4">
-            {answeredCount > 0 && (
-              <span className="text-sm font-medium text-on-surface-variant">
-                {score}/{answeredCount} correct
-              </span>
-            )}
+            <button
+              onClick={shareToken ? handleCopyLink : handleShare}
+              disabled={sharing}
+              className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${copied ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "glass-panel text-on-surface-variant hover:text-white"}`}
+            >
+              <span className="material-symbols-outlined text-sm">{copied ? "check" : "share"}</span>
+              {copied ? "Copied!" : shareToken ? "Copy Link" : sharing ? "…" : "Share"}
+            </button>
             <button
               onClick={handleToggleShuffle}
               className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${shuffleMode ? "synapse-gradient text-white" : "glass-panel text-on-surface-variant hover:text-white"}`}
@@ -385,11 +373,6 @@ export default function ResultsPage() {
               <span className="material-symbols-outlined text-sm">shuffle</span>
               {shuffleMode ? "Sectioned" : "Shuffle"}
             </button>
-            {answeredCount > 0 && (
-              <button onClick={handleReset} className="text-sm text-on-surface-variant hover:text-white font-medium transition-colors">
-                Reset
-              </button>
-            )}
             <button onClick={handleProcess} disabled={processing} className="text-sm text-secondary hover:text-white font-medium disabled:opacity-50 transition-colors">
               {processing ? "Regenerating…" : "Regenerate"}
             </button>
@@ -469,9 +452,23 @@ export default function ResultsPage() {
                   </p>
                 )}
                 {answeredCount === 0 && retakeCount === 0 && <div className="mb-6" />}
+                {confirmRetake ? (
+                  <div className="bg-error/10 border border-error/30 rounded-xl p-4 mb-3">
+                    <p className="text-sm font-bold text-white mb-1">Clear all answers?</p>
+                    <p className="text-xs text-on-surface-variant mb-3">Your current progress will be lost and a new retake will be recorded.</p>
+                    <div className="flex gap-2">
+                      <button onClick={handleReset} className="flex-1 py-2 bg-error text-white font-bold rounded-lg text-sm hover:bg-error/80 transition-colors">
+                        Yes, retake
+                      </button>
+                      <button onClick={() => setConfirmRetake(false)} className="flex-1 py-2 glass-panel text-on-surface-variant font-bold rounded-lg text-sm hover:text-white transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex gap-3">
                   <button
-                    onClick={handleReset}
+                    onClick={() => answeredCount > 0 ? setConfirmRetake(true) : handleReset()}
                     className="flex-1 py-3 synapse-gradient text-white font-bold rounded-xl shadow-lg hover:-translate-y-1 transition-transform flex items-center justify-center gap-2"
                   >
                     <span className="material-symbols-outlined text-sm">refresh</span>
@@ -557,7 +554,7 @@ export default function ResultsPage() {
                     {scorePercent >= 70 ? "You're well-prepared for this topic." : "Review the explanations for questions you missed."}
                   </p>
                 </div>
-                <button onClick={handleReset} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
+                <button onClick={() => setConfirmRetake(true)} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
                   Retake
                 </button>
               </div>
@@ -566,19 +563,56 @@ export default function ResultsPage() {
         </div>
       </main>
 
-      {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
-        <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">home</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
-        </Link>
-        <div className="flex flex-col items-center text-[#00D2FD]">
-          <span className="material-symbols-outlined">video_library</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Lectures</span>
+      {/* Mobile PAGE TOOLS subbar */}
+      <div className="md:hidden fixed bottom-[56px] w-full z-[51]">
+        <div className="flex items-center gap-2 px-4 pt-1.5">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-[8px] font-black uppercase tracking-[0.2em] text-on-surface-variant/40">Page tools</span>
+          <div className="h-px flex-1 bg-white/10" />
         </div>
-        <Link href="/analytics" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">insights</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
+        <div className="flex justify-around items-center py-1.5 px-4 bg-slate-800/80 backdrop-blur-xl border-t border-white/8">
+          <Link
+            href={`/quiz/${lectureId}`}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/10 border border-secondary/25 text-secondary"
+          >
+            <span className="material-symbols-outlined text-[18px]">bolt</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">Quiz Mode</span>
+          </Link>
+          <button
+            onClick={handleToggleShuffle}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
+              shuffleMode ? "bg-white/15 border-white/20 text-white" : "bg-white/5 border-white/10 text-slate-400"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">shuffle</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">{shuffleMode ? "Sectioned" : "Shuffle"}</span>
+          </button>
+          <button
+            onClick={shareToken ? handleCopyLink : handleShare}
+            disabled={sharing}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
+              copied ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" : "bg-white/5 border-white/10 text-slate-400"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">{copied ? "check" : "share"}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">{copied ? "Copied!" : shareToken ? "Copy Link" : "Share"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Bottom Nav */}
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/95 backdrop-blur-xl border-t border-white/5">
+        <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">home</span>
+          <span className="text-[10px] uppercase tracking-widest">Home</span>
+        </Link>
+        <div className="flex flex-col items-center gap-0.5 text-[#00D2FD]">
+          <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>upload_file</span>
+          <span className="text-[10px] uppercase tracking-widest">Upload</span>
+        </div>
+        <Link href="/analytics" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+          <span className="material-symbols-outlined text-[22px]">insights</span>
+          <span className="text-[10px] uppercase tracking-widest">Stats</span>
         </Link>
       </nav>
     </div>
