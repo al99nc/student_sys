@@ -1,10 +1,9 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { uploadLecture, processLecture, estimateProcessing, Difficulty } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
-import { Suspense } from "react";
 
 type Tab = "study" | "exam";
 type Mode = "highyield" | "exam" | "harder";
@@ -36,7 +35,6 @@ function UploadContent() {
       handleProcess(parseInt(processId));
       return;
     }
-    // Handle file shared via PWA share target
     const isShared = searchParams.get("shared") === "1";
     if (isShared) {
       caches.open("share-target-v1").then(async (cache) => {
@@ -62,16 +60,13 @@ function UploadContent() {
     setProcessing(true);
     setElapsed(0);
     setError("");
-
     try {
       const est = await estimateProcessing(id, mode as Difficulty);
       setTimeEstimate(est.data);
     } catch {
-      // non-fatal — proceed without estimate
+      // non-fatal
     }
-
     elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
-
     try {
       await processLecture(id, mode as Difficulty);
       setStep("done");
@@ -125,44 +120,45 @@ function UploadContent() {
     }
   };
 
-  const modeLabel =
-    mode === "harder" ? "Harder Mode" :
-    mode === "exam"   ? "Exam Mode"   :
-                        "High Yield";
+  const modeLabel = mode === "harder" ? "Harder Mode" : mode === "exam" ? "Exam Mode" : "High Yield";
 
+  // Processing / Done states
   if (step === "process" || step === "done") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
+      <div className="min-h-screen flex items-center justify-center relative" style={{ backgroundColor: "#111220" }}>
+        <div className="grain-overlay" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary-container/20 rounded-full blur-[120px] pointer-events-none" />
+        <div className="relative z-10 text-center glass-panel rounded-3xl p-12 max-w-md mx-4">
           {step === "process" ? (
             <>
-              <div className="animate-spin rounded-full h-14 w-14 border-b-2 border-blue-600 mx-auto mb-4" />
-              <h2 className="text-xl font-semibold text-gray-900">Processing your lecture...</h2>
-              <p className="text-gray-500 text-sm mt-2">
-                AI is generating MCQs in <span className="font-medium text-blue-600">{modeLabel}</span>
+              <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mx-auto mb-6 shadow-lg shadow-primary-container/30">
+                <span className="material-symbols-outlined text-4xl text-white animate-spin" style={{ animationDuration: "2s" }}>autorenew</span>
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Processing your lecture…</h2>
+              <p className="text-on-surface-variant mb-6">
+                AI is generating MCQs in <span className="text-secondary font-bold">{modeLabel}</span>
               </p>
               {timeEstimate && (
-                <div className="mt-4 bg-blue-50 rounded-xl px-5 py-3 inline-block text-left">
-                  <p className="text-sm text-blue-700 font-medium">
-                    Estimated time: <span className="font-semibold">{timeEstimate.estimated_range}</span>
+                <div className="mb-4 px-5 py-3 rounded-xl bg-surface-container-highest text-left">
+                  <p className="text-sm text-secondary font-medium">
+                    Estimated: <span className="font-bold text-white">{timeEstimate.estimated_range}</span>
                   </p>
                   {timeEstimate.chunks > 1 && (
-                    <p className="text-xs text-blue-500 mt-0.5">
-                      Processing in {timeEstimate.chunks} chunks
-                    </p>
+                    <p className="text-xs text-on-surface-variant mt-0.5">Processing in {timeEstimate.chunks} chunks</p>
                   )}
                 </div>
               )}
-              <p className="text-xs text-gray-400 mt-3">{elapsed}s elapsed</p>
+              <div className="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
+                <div className="h-full synapse-gradient rounded-full w-full animate-pulse" />
+              </div>
+              <p className="text-xs text-on-surface-variant mt-3">{elapsed}s elapsed</p>
             </>
           ) : (
             <>
-              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+              <div className="w-20 h-20 rounded-2xl bg-green-500/20 flex items-center justify-center mx-auto mb-6">
+                <span className="material-symbols-outlined text-4xl text-green-400">check_circle</span>
               </div>
-              <h2 className="text-xl font-semibold text-gray-900">Done! Redirecting...</h2>
+              <h2 className="text-2xl font-bold text-white">Done! Redirecting…</h2>
             </>
           )}
         </div>
@@ -170,290 +166,190 @@ function UploadContent() {
     );
   }
 
+  // Upload state
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center gap-3">
-          <Link href="/dashboard" className="text-gray-400 hover:text-gray-600 transition-colors">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+    <div className="relative min-h-screen text-on-surface flex flex-col" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.1) 0px, transparent 50%)" }}>
+      <div className="grain-overlay" />
+
+      {/* Header */}
+      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard" className="text-on-surface-variant hover:text-white transition-colors">
+            <span className="material-symbols-outlined">arrow_back</span>
           </Link>
-          <h1 className="font-semibold text-gray-900">Upload Lecture</h1>
+          <span className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</span>
         </div>
+        <nav className="hidden md:flex items-center gap-8">
+          <a className="text-[#00D2FD] font-bold text-sm tracking-wide">+ Upload</a>
+          <Link href="/dashboard" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Dashboard</Link>
+          <Link href="/analytics" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Analytics</Link>
+        </nav>
       </header>
 
-      <main className="max-w-2xl mx-auto px-6 py-10">
+      <main className="flex-grow flex flex-col items-center justify-center px-6 pt-24 pb-32 max-w-5xl mx-auto w-full">
+        <section className="w-full text-center space-y-10">
 
-        {/* Tab switcher */}
-        <div className="mb-6 bg-white rounded-xl border border-gray-200 p-1 flex">
-          <button
-            onClick={() => handleTabChange("study")}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              tab === "study" ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-            Study
-          </button>
-          <button
-            onClick={() => handleTabChange("exam")}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              tab === "exam" ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-            </svg>
-            Exam
-          </button>
-        </div>
-
-        {/* Mode cards */}
-        <div className="mb-6 space-y-3">
-          {tab === "study" ? (
-            <button
-              onClick={() => setMode("highyield")}
-              className="w-full relative p-5 rounded-xl border-2 text-left transition-all border-blue-500 bg-blue-50"
-            >
-              <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-blue-500" />
-              <p className="font-semibold text-sm text-blue-700">High Yield MCQs</p>
-              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                Systematic, topic-balanced questions. Covers all lecture sections with clinical vignettes, mechanism questions, and exception formats.
-              </p>
-              <ul className="mt-3 space-y-1.5">
-                {[
-                  "Balanced mix across all lecture topics",
-                  "Clinical vignettes, mechanism questions, and exception formats",
-                  "Summary and key concepts",
-                ].map((item) => (
-                  <li key={item} className="text-xs text-blue-700 flex items-start gap-1.5">
-                    <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </button>
-          ) : (
-            <>
-              {/* Hard sub-option */}
-              <button
-                onClick={() => setMode("exam")}
-                className={`w-full relative p-5 rounded-xl border-2 text-left transition-all ${
-                  mode === "exam"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 bg-white hover:border-gray-300"
-                }`}
-              >
-                {mode === "exam" && (
-                  <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-blue-500" />
-                )}
-                <p className={`font-semibold text-sm ${mode === "exam" ? "text-blue-700" : "text-gray-800"}`}>
-                  Hard
-                </p>
-                <p className={`text-xs mt-0.5 ${mode === "exam" ? "text-blue-600" : "text-gray-500"}`}>
-                  Smart studying that also prepares for exams
-                </p>
-                <ul className="mt-3 space-y-1.5">
-                  {[
-                    "40% \"All FALSE EXCEPT\" questions for real exam prep",
-                    "Clinical vignettes with specific labs and patient scenarios",
-                    "Mechanism and classification trap questions",
-                  ].map((item) => (
-                    <li
-                      key={item}
-                      className={`text-xs flex items-start gap-1.5 ${mode === "exam" ? "text-blue-700" : "text-gray-500"}`}
-                    >
-                      <span
-                        className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                          mode === "exam" ? "bg-blue-400" : "bg-gray-300"
-                        }`}
-                      />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </button>
-
-              {/* Harder sub-option */}
-              <button
-                onClick={() => setMode("harder")}
-                className={`w-full relative p-5 rounded-xl border-2 text-left transition-all ${
-                  mode === "harder"
-                    ? "border-gray-800 bg-gray-900"
-                    : "border-gray-200 bg-white hover:border-gray-300"
-                }`}
-              >
-                {mode === "harder" && (
-                  <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-white" />
-                )}
-                <p className={`font-semibold text-sm ${mode === "harder" ? "text-white" : "text-gray-800"}`}>
-                  Harder
-                </p>
-                <p className={`text-xs mt-0.5 ${mode === "harder" ? "text-gray-400" : "text-gray-500"}`}>
-                  Real exam pressure mode — no mercy
-                </p>
-                <ul className="mt-3 space-y-1.5">
-                  {[
-                    "~50% \"All FALSE EXCEPT\" questions like real boards",
-                    "Multi-step clinical vignettes with complex reasoning",
-                    "Classification traps, exact mechanisms, max difficulty",
-                  ].map((item) => (
-                    <li
-                      key={item}
-                      className={`text-xs flex items-start gap-1.5 ${mode === "harder" ? "text-gray-300" : "text-gray-500"}`}
-                    >
-                      <span
-                        className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                          mode === "harder" ? "bg-gray-500" : "bg-gray-300"
-                        }`}
-                      />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </button>
-
-              {/* Difficulty bar */}
-              <div className="pt-1 pb-0.5">
-                <div className="flex justify-between text-xs text-gray-400 mb-1.5">
-                  <span>Easier</span>
-                  <span>Harder</span>
-                </div>
-                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-300 bg-blue-500"
-                    style={{ width: mode === "harder" ? "100%" : "60%",
-                             backgroundColor: mode === "harder" ? "#111827" : undefined }}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* File drop zone */}
-        <div
-          className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer ${
-            dragging
-              ? "border-blue-400 bg-blue-50"
-              : file
-              ? "border-green-400 bg-green-50"
-              : "border-gray-200 hover:border-gray-300 bg-white"
-          }`}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
-
-          {file ? (
-            <>
-              <div className="w-14 h-14 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <p className="font-medium text-gray-900">{file.name}</p>
-              <p className="text-sm text-gray-400 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-              <p className="text-xs text-gray-400 mt-2">Click to change file</p>
-            </>
-          ) : (
-            <>
-              <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-              </div>
-              <p className="font-medium text-gray-900">Drop your PDF here</p>
-              <p className="text-sm text-gray-400 mt-1">or click to browse</p>
-            </>
-          )}
-        </div>
-
-        {error && (
-          <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-            {error}
+          {/* Heading */}
+          <div className="space-y-4">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tighter text-white">Expand Your Intelligence</h1>
+            <p className="text-on-surface-variant max-w-xl mx-auto text-lg font-medium leading-relaxed">
+              Upload your lecture notes or textbooks. Our AI transforms them into structured mastery tools.
+            </p>
           </div>
-        )}
 
-        {file && (
-          <button
-            onClick={handleUpload}
-            disabled={uploading}
-            className={`mt-6 w-full disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors ${
-              mode === "harder"
-                ? "bg-gray-900 hover:bg-black"
-                : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
-            {uploading ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                Uploading...
-              </span>
-            ) : mode === "harder"
-              ? "Generate Harder Questions"
-              : mode === "exam"
-              ? "Generate Exam Questions"
-              : "Generate High Yield MCQs"}
-          </button>
-        )}
+          {/* Mode Selector */}
+          <div className="w-full max-w-3xl mx-auto">
+            {/* Tab switcher */}
+            <div className="mb-4 glass-panel rounded-xl p-1 flex max-w-xs mx-auto">
+              <button
+                onClick={() => handleTabChange("study")}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${tab === "study" ? "synapse-gradient text-white" : "text-on-surface-variant hover:text-white"}`}
+              >
+                <span className="material-symbols-outlined text-sm">menu_book</span>
+                Study
+              </button>
+              <button
+                onClick={() => handleTabChange("exam")}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${tab === "exam" ? "synapse-gradient text-white" : "text-on-surface-variant hover:text-white"}`}
+              >
+                <span className="material-symbols-outlined text-sm">military_tech</span>
+                Exam
+              </button>
+            </div>
 
-        {/* Info box */}
-        <div
-          className={`mt-6 rounded-xl p-4 ${
-            mode === "harder" ? "bg-gray-900" : "bg-blue-50"
-          }`}
-        >
-          <p
-            className={`text-sm font-medium mb-2 ${
-              mode === "harder" ? "text-white" : "text-blue-800"
-            }`}
-          >
-            {mode === "harder"
-              ? "Harder Mode generates:"
-              : mode === "exam"
-              ? "Exam Mode generates:"
-              : "High Yield Mode generates:"}
-          </p>
-          <ul
-            className={`text-sm space-y-1 ${
-              mode === "harder" ? "text-gray-300" : "text-blue-700"
-            }`}
-          >
-            {mode === "harder" ? (
-              <>
-                <li>1. ~50% &ldquo;All FALSE EXCEPT&rdquo; questions — one true, three plausible false</li>
-                <li>2. Multi-step clinical vignettes with exact lab values and competing comorbidities</li>
-                <li>3. Classification traps, drug mechanism traps, and exception questions</li>
-              </>
-            ) : mode === "exam" ? (
-              <>
-                <li>1. &ldquo;All FALSE EXCEPT&rdquo; and exception questions (~40%)</li>
-                <li>2. Clinical vignettes with specific patient scenarios (~35%)</li>
-                <li>3. Exact mechanism and classification traps (~25%)</li>
-              </>
+            {/* Mode cards */}
+            {tab === "study" ? (
+              <div className="glass-panel p-5 rounded-xl border-l-4 border-primary-container text-left">
+                <p className="font-bold text-white mb-1">High Yield MCQs</p>
+                <p className="text-xs text-on-surface-variant">Balanced mix across all lecture topics with clinical vignettes, mechanism questions, and key concept summaries.</p>
+              </div>
             ) : (
-              <>
-                <li>1. Balanced mix across all lecture topics</li>
-                <li>2. Clinical vignettes, mechanism questions, and exception formats</li>
-                <li>3. Summary and key concepts</li>
-              </>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button
+                  onClick={() => setMode("exam")}
+                  className={`p-5 rounded-xl text-left transition-all border-l-4 ${mode === "exam" ? "glass-panel border-primary-container" : "bg-surface-container-low/40 border-transparent hover:border-outline-variant"}`}
+                >
+                  <p className={`font-bold mb-1 ${mode === "exam" ? "text-white" : "text-on-surface-variant"}`}>Hard</p>
+                  <p className="text-xs text-on-surface-variant">40% &ldquo;All FALSE EXCEPT&rdquo; questions, clinical vignettes, mechanism traps.</p>
+                </button>
+                <button
+                  onClick={() => setMode("harder")}
+                  className={`p-5 rounded-xl text-left transition-all border-l-4 ${mode === "harder" ? "glass-panel border-secondary-container" : "bg-surface-container-low/40 border-transparent hover:border-outline-variant"}`}
+                >
+                  <p className={`font-bold mb-1 ${mode === "harder" ? "text-white" : "text-on-surface-variant"}`}>Harder</p>
+                  <p className="text-xs text-on-surface-variant">~50% &ldquo;All FALSE EXCEPT&rdquo; like real boards. Multi-step vignettes, max difficulty.</p>
+                </button>
+              </div>
             )}
-          </ul>
-        </div>
+          </div>
+
+          {/* Upload Zone */}
+          <div className="relative group w-full max-w-3xl mx-auto">
+            <div className="absolute -inset-1 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-10 group-hover:opacity-25 transition duration-500" />
+            <div
+              className={`relative flex flex-col items-center justify-center w-full min-h-[280px] border-2 border-dashed rounded-xl px-8 py-12 cursor-pointer transition-all duration-300 ${
+                dragging ? "border-secondary-container/80 bg-secondary-container/5" : file ? "border-green-500/50 bg-green-500/5" : "border-primary-container/40 bg-surface-container-low/60 hover:border-secondary-container/60 hover:-translate-y-1"
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
+              {file ? (
+                <>
+                  <div className="w-16 h-16 rounded-2xl bg-green-500/20 flex items-center justify-center mb-4">
+                    <span className="material-symbols-outlined text-4xl text-green-400">description</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-1">{file.name}</h3>
+                  <p className="text-on-surface-variant text-sm">{(file.size / 1024 / 1024).toFixed(2)} MB · Click to change</p>
+                </>
+              ) : (
+                <>
+                  <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mb-6 shadow-lg shadow-primary-container/20">
+                    <span className="material-symbols-outlined text-4xl text-white">cloud_upload</span>
+                  </div>
+                  <h3 className="text-2xl font-bold text-white mb-2">Drag &amp; Drop your PDF here</h3>
+                  <p className="text-on-surface-variant mb-6 font-medium">PDF files up to 50MB</p>
+                  <button className="px-8 py-3 bg-surface-variant/40 border border-outline-variant/20 rounded-lg font-bold text-secondary transition-all hover:bg-surface-variant/60 hover:scale-105 active:scale-95">
+                    Browse Files
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="w-full max-w-3xl mx-auto bg-error/10 border border-error/20 text-error rounded-xl px-4 py-3 text-sm">
+              {error}
+            </div>
+          )}
+
+          {file && (
+            <button
+              onClick={handleUpload}
+              disabled={uploading}
+              className="w-full max-w-3xl mx-auto synapse-gradient text-white font-bold py-4 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.3)] hover:shadow-[0px_12px_32px_rgba(0,210,253,0.4)] hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {uploading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  Uploading…
+                </span>
+              ) : mode === "harder" ? "Generate Harder Questions" : mode === "exam" ? "Generate Exam Questions" : "Generate High Yield MCQs"}
+            </button>
+          )}
+
+          {/* Info Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full pt-6">
+            {[
+              { icon: "quiz", color: "primary", label: "MCQ Questions", desc: "Automated multiple choice questions based on key concepts found in your text." },
+              { icon: "summarize", color: "secondary", label: "Smart Summary", desc: "High-level overview of complex topics, distilled into readable bullet points." },
+              { icon: "style", color: "tertiary", label: "Flashcard Deck", desc: "Spaced-repetition ready cards automatically generated for long-term retention." },
+            ].map((c) => (
+              <div key={c.label} className="glass-panel p-6 rounded-xl flex flex-col items-start text-left hover:-translate-y-1 transition-transform duration-300">
+                <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mb-4">
+                  <span className={`material-symbols-outlined text-${c.color}`}>{c.icon}</span>
+                </div>
+                <h4 className="text-lg font-bold text-white mb-2">{c.label}</h4>
+                <p className="text-sm text-on-surface-variant leading-relaxed">{c.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
+
+      {/* Mobile Bottom Nav */}
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
+        <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
+          <span className="material-symbols-outlined text-[24px]">home</span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
+        </Link>
+        <div className="flex flex-col items-center text-[#00D2FD] scale-110 -translate-y-2">
+          <div className="w-12 h-12 rounded-full synapse-gradient flex items-center justify-center shadow-lg shadow-primary-container/30">
+            <span className="material-symbols-outlined text-white text-[28px]">add</span>
+          </div>
+        </div>
+        <Link href="/analytics" className="flex flex-col items-center text-slate-500">
+          <span className="material-symbols-outlined text-[24px]">insights</span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
+        </Link>
+      </nav>
+
+      {/* Decorative blobs */}
+      <div className="fixed top-1/4 -left-20 w-80 h-80 bg-primary-container/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="fixed bottom-1/4 -right-20 w-80 h-80 bg-secondary-container/10 rounded-full blur-[120px] pointer-events-none" />
     </div>
   );
 }
 
 export default function UploadPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" /></div>}>
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#111220" }}>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-container" />
+      </div>
+    }>
       <UploadContent />
     </Suspense>
   );

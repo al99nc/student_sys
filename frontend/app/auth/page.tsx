@@ -7,22 +7,6 @@ import { saveToken } from "@/lib/auth";
 const REMEMBERED_EMAIL_KEY = "studyai_remembered_email";
 const REMEMBER_ME_KEY = "studyai_remember_me";
 
-function EyeIcon({ open }: { open: boolean }) {
-  return open ? (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-    </svg>
-  ) : (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-    </svg>
-  );
-}
-
 function getPasswordStrength(password: string): { score: number; label: string; color: string } {
   if (!password) return { score: 0, label: "", color: "" };
   let score = 0;
@@ -31,7 +15,6 @@ function getPasswordStrength(password: string): { score: number; label: string; 
   if (/[A-Z]/.test(password)) score++;
   if (/[0-9]/.test(password)) score++;
   if (/[^A-Za-z0-9]/.test(password)) score++;
-
   if (score <= 1) return { score, label: "Weak", color: "bg-red-400" };
   if (score <= 2) return { score, label: "Fair", color: "bg-orange-400" };
   if (score <= 3) return { score, label: "Good", color: "bg-yellow-400" };
@@ -51,7 +34,6 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
-  // Load saved email on mount
   useEffect(() => {
     const savedRemember = localStorage.getItem(REMEMBER_ME_KEY) === "true";
     setRememberMe(savedRemember);
@@ -61,7 +43,6 @@ export default function AuthPage() {
     }
   }, []);
 
-  // Auto-focus email field when mode changes
   useEffect(() => {
     emailRef.current?.focus();
   }, [mode]);
@@ -71,7 +52,6 @@ export default function AuthPage() {
     setError("");
     setSuccess("");
     setLoading(true);
-
     try {
       if (mode === "signup") {
         await signup(email, password);
@@ -82,8 +62,6 @@ export default function AuthPage() {
         const res = await login(email, password);
         saveToken(res.data.access_token);
       }
-
-      // Persist email if remember me is checked
       if (rememberMe) {
         localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
         localStorage.setItem(REMEMBER_ME_KEY, "true");
@@ -91,7 +69,6 @@ export default function AuthPage() {
         localStorage.removeItem(REMEMBERED_EMAIL_KEY);
         localStorage.setItem(REMEMBER_ME_KEY, "false");
       }
-
       router.push("/dashboard");
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
@@ -112,154 +89,135 @@ export default function AuthPage() {
   const strength = mode === "signup" ? getPasswordStrength(password) : null;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 relative overflow-hidden">
-      {/* Ambient background blobs */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse [animation-delay:2s]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-violet-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10" />
+    <div className="relative min-h-screen text-on-surface overflow-x-hidden" style={{ backgroundColor: "#0d0f1c" }}>
+      <div className="grain-overlay" />
+
+      {/* Background glows */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full" style={{ filter: "blur(80px)", background: "radial-gradient(circle, rgba(123,47,255,0.4) 0%, rgba(0,210,253,0.2) 60%, transparent 100%)" }} />
+        <div className="absolute top-[20%] right-[10%] w-64 h-64 bg-primary-container/10 blur-[100px] rounded-full" />
+        <div className="absolute bottom-[20%] left-[10%] w-96 h-96 bg-secondary-container/10 blur-[120px] rounded-full" />
       </div>
 
-      <div className="relative w-full max-w-md mx-4">
-        {/* Card */}
-        <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl p-8 text-white">
-
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-2xl mb-4 shadow-lg shadow-blue-500/30">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">StudyAI</h1>
-            <p className="text-white/60 text-sm mt-1">Learn smarter with AI</p>
+      <main className="relative min-h-screen flex flex-col items-center justify-center px-6 py-12 z-10">
+        {/* Logo */}
+        <header className="mb-8 flex flex-col items-center">
+          <div className="text-3xl font-black bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent tracking-tighter">
+            cortexQ
           </div>
+        </header>
+
+        {/* Auth Card */}
+        <div className="w-full max-w-md rounded-3xl p-8 shadow-2xl relative overflow-hidden" style={{ background: "rgba(255,255,255,0.03)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          {/* Top highlight */}
+          <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-secondary/40 to-transparent" />
 
           {/* Tabs */}
-          <div className="flex bg-white/10 rounded-xl p-1 mb-6">
-            {(["login", "signup"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => switchMode(tab)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  mode === tab
-                    ? "bg-white text-blue-700 shadow-md"
-                    : "text-white/60 hover:text-white"
-                }`}
-              >
-                {tab === "login" ? "Login" : "Sign Up"}
-              </button>
-            ))}
-          </div>
+          <nav className="flex border-b border-outline-variant/20 mb-8">
+            <button
+              onClick={() => switchMode("login")}
+              className={`flex-1 py-4 text-sm font-bold tracking-wider relative transition-all ${mode === "login" ? "text-on-surface" : "text-on-surface-variant hover:text-on-surface"}`}
+            >
+              LOG IN
+              {mode === "login" && <span className="absolute bottom-0 left-0 w-full h-1 bg-primary-container rounded-t-full shadow-[0_-4px_12px_rgba(123,47,255,0.6)]" />}
+            </button>
+            <button
+              onClick={() => switchMode("signup")}
+              className={`flex-1 py-4 text-sm font-bold tracking-wider relative transition-all ${mode === "signup" ? "text-on-surface" : "text-on-surface-variant hover:text-on-surface"}`}
+            >
+              SIGN UP
+              {mode === "signup" && <span className="absolute bottom-0 left-0 w-full h-1 bg-primary-container rounded-t-full shadow-[0_-4px_12px_rgba(123,47,255,0.6)]" />}
+            </button>
+          </nav>
 
-          {/* Success banner */}
+          {/* Banners */}
           {success && (
-            <div className="flex items-center gap-2 bg-green-500/20 border border-green-400/30 text-green-300 rounded-xl px-4 py-3 mb-4 text-sm">
-              <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
+            <div className="mb-4 px-4 py-3 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-sm">
               {success}
             </div>
           )}
-
-          {/* Error banner */}
           {error && (
-            <div className="flex items-center gap-2 bg-red-500/20 border border-red-400/30 text-red-300 rounded-xl px-4 py-3 mb-4 text-sm">
-              <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
+            <div className="mb-4 px-4 py-3 rounded-xl bg-error/10 border border-error/20 text-error text-sm">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form onSubmit={handleSubmit} className="space-y-6" noValidate>
             {/* Email */}
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-white/80">Email</label>
+            <div className="relative">
               <input
                 ref={emailRef}
+                id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
-                placeholder="you@example.com"
+                placeholder=" "
+                className="block px-4 pb-2.5 pt-6 w-full text-sm text-on-surface bg-surface-container-lowest rounded-xl border-0 focus:ring-2 focus:ring-secondary/50 appearance-none peer transition-all duration-300 outline-none"
               />
+              <label
+                htmlFor="email"
+                className="absolute text-sm text-on-surface-variant duration-300 transform -translate-y-4 scale-75 top-4 z-10 origin-[0] left-4 peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-4 peer-focus:text-secondary"
+              >
+                Email Address
+              </label>
             </div>
 
             {/* Password */}
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-white/80">Password</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-2.5 pr-11 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition-colors"
-                  tabIndex={-1}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  <EyeIcon open={showPassword} />
-                </button>
-              </div>
-
-              {/* Password strength bar (signup only) */}
-              {mode === "signup" && password && strength && (
-                <div className="space-y-1 pt-0.5">
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <div
-                        key={i}
-                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                          i <= strength.score ? strength.color : "bg-white/15"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className={`text-xs ${
-                    strength.score <= 1 ? "text-red-400" :
-                    strength.score <= 2 ? "text-orange-400" :
-                    strength.score <= 3 ? "text-yellow-400" : "text-green-400"
-                  }`}>
-                    {strength.label}
-                  </p>
-                </div>
-              )}
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                placeholder=" "
+                className="block px-4 pb-2.5 pt-6 w-full text-sm text-on-surface bg-surface-container-lowest rounded-xl border-0 focus:ring-2 focus:ring-secondary/50 appearance-none peer transition-all duration-300 outline-none pr-12"
+              />
+              <label
+                htmlFor="password"
+                className="absolute text-sm text-on-surface-variant duration-300 transform -translate-y-4 scale-75 top-4 z-10 origin-[0] left-4 peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-4 peer-focus:text-secondary"
+              >
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined text-xl">{showPassword ? "visibility_off" : "visibility"}</span>
+              </button>
             </div>
 
-            {/* Remember me + Forgot password row */}
-            <div className="flex items-center justify-between pt-1">
-              <label className="flex items-center gap-2 cursor-pointer group select-none">
+            {/* Password strength */}
+            {mode === "signup" && password && strength && (
+              <div className="space-y-1 -mt-2">
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className={`h-1 flex-1 rounded-full transition-all duration-300 ${i <= strength.score ? strength.color : "bg-surface-container-highest"}`} />
+                  ))}
+                </div>
+                <p className={`text-xs ${strength.score <= 1 ? "text-error" : strength.score <= 2 ? "text-orange-400" : strength.score <= 3 ? "text-tertiary" : "text-green-400"}`}>
+                  {strength.label}
+                </p>
+              </div>
+            )}
+
+            {/* Remember + Forgot */}
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
                 <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-white/15 peer-checked:bg-blue-500 rounded-full transition-colors duration-200 border border-white/20 peer-checked:border-blue-400" />
+                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="sr-only peer" />
+                  <div className="w-9 h-5 bg-surface-container-highest peer-checked:bg-primary-container rounded-full transition-colors border border-outline-variant/20" />
                   <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 peer-checked:translate-x-4" />
                 </div>
-                <span className="text-xs text-white/60 group-hover:text-white/80 transition-colors">Remember me</span>
+                <span className="text-xs text-on-surface-variant">Remember me</span>
               </label>
               {mode === "login" && (
-                <button
-                  type="button"
-                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                  onClick={() => setError("Password reset coming soon!")}
-                >
+                <button type="button" onClick={() => setError("Password reset coming soon!")} className="text-xs text-secondary hover:text-on-secondary-fixed transition-colors">
                   Forgot password?
                 </button>
               )}
@@ -269,30 +227,56 @@ export default function AuthPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all duration-200 text-sm shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 active:scale-[0.98] mt-2"
+              className="w-full py-4 bg-gradient-to-r from-primary-container to-secondary-container text-white font-bold rounded-xl shadow-lg shadow-primary-container/20 hover:shadow-secondary-container/40 hover:-translate-y-1 active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
                   {mode === "login" ? "Signing in…" : "Creating account…"}
                 </span>
-              ) : mode === "login" ? "Sign In" : "Create Account"}
+              ) : mode === "login" ? "Continue" : "Create Account"}
+            </button>
+
+            {/* Divider */}
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-outline-variant/15" />
+              <span className="flex-shrink mx-4 text-xs font-medium text-on-surface-variant uppercase tracking-widest">or continue with</span>
+              <div className="flex-grow border-t border-outline-variant/15" />
+            </div>
+
+            {/* Google */}
+            <button
+              type="button"
+              className="w-full flex items-center justify-center gap-3 py-3.5 bg-surface-container-high hover:bg-surface-bright text-on-surface font-medium rounded-xl border border-outline-variant/20 transition-all duration-300 active:scale-[0.98]"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="currentColor" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="currentColor" />
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="currentColor" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="currentColor" />
+              </svg>
+              <span>Google</span>
             </button>
           </form>
 
-          {/* Footer switch */}
-          <p className="text-center text-xs text-white/40 mt-6">
-            {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
-            <button
-              type="button"
-              onClick={() => switchMode(mode === "login" ? "signup" : "login")}
-              className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
-            >
-              {mode === "login" ? "Sign up" : "Sign in"}
+          <div className="mt-6 text-center">
+            <button type="button" onClick={() => switchMode(mode === "login" ? "signup" : "login")} className="text-xs text-on-surface-variant hover:text-white transition-colors">
+              {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+              <span className="text-secondary font-semibold">{mode === "login" ? "Sign up" : "Sign in"}</span>
             </button>
-          </p>
+          </div>
         </div>
-      </div>
+
+        {/* Testimonial */}
+        <div className="mt-12 max-w-sm text-center">
+          <p className="text-on-surface-variant font-medium text-sm leading-relaxed italic opacity-80">
+            &ldquo;The most fluid learning interface I&apos;ve ever navigated. It feels like the future of personalized education.&rdquo;
+          </p>
+          <div className="mt-2 text-primary-fixed-dim font-bold text-xs uppercase tracking-[0.2em]">
+            — Elena Vance, PhD
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

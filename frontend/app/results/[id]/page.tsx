@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getResults, processLecture } from "@/lib/api";
+import { getResults, processLecture, createShareLink, getActiveViewers } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
 
@@ -20,9 +20,10 @@ interface Results {
   key_concepts: string[];
   mcqs: MCQ[];
   created_at: string;
+  share_token?: string;
+  view_count?: number;
 }
 
-// Group MCQs by their topic field
 function groupByTopic(mcqs: MCQ[]): Record<string, MCQ[]> {
   return mcqs.reduce((acc, mcq, idx) => {
     const topic = mcq.topic || "General";
@@ -33,16 +34,9 @@ function groupByTopic(mcqs: MCQ[]): Record<string, MCQ[]> {
 }
 
 const TOPIC_EMOJIS: Record<string, string> = {
-  "Pathophysiology": "🧬",
-  "Diagnosis": "🔬",
-  "Treatment": "💊",
-  "Complications": "⚠️",
-  "Anatomy": "🫀",
-  "Pharmacology": "💉",
-  "Neurology": "🧠",
-  "Cardiology": "❤️",
-  "Respiratory": "🫁",
-  "General": "📋",
+  Pathophysiology: "🧬", Diagnosis: "🔬", Treatment: "💊", Complications: "⚠️",
+  Anatomy: "🫀", Pharmacology: "💉", Neurology: "🧠", Cardiology: "❤️",
+  Respiratory: "🫁", General: "📋",
 };
 
 function getEmoji(topic: string): string {
@@ -51,6 +45,8 @@ function getEmoji(topic: string): string {
   }
   return "📌";
 }
+
+type ActiveTab = "mcqs" | "summary" | "concepts";
 
 export default function ResultsPage() {
   const params = useParams();
@@ -61,28 +57,77 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(false);
-
-  // Per-question: track selected answer (revealed immediately on click)
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
   const [score, setScore] = useState(0);
   const [shuffleMode, setShuffleMode] = useState(false);
   const [shuffledMcqs, setShuffledMcqs] = useState<Array<MCQ & { _index: number }>>([]);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("mcqs");
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [activeViewers, setActiveViewers] = useState(0);
+  const [totalViews, setTotalViews] = useState(0);
+  const [sharing, setSharing] = useState(false);
+  const viewerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
     fetchResults();
   }, [lectureId, router]);
 
+  // Start polling for active viewers when a share token exists
+  useEffect(() => {
+    if (!shareToken) return;
+    const poll = async () => {
+      try {
+        const res = await getActiveViewers(lectureId);
+        setActiveViewers(res.data.active_viewers);
+        setTotalViews(res.data.view_count);
+      } catch {}
+    };
+    poll();
+    viewerPollRef.current = setInterval(poll, 10000);
+    return () => { if (viewerPollRef.current) clearInterval(viewerPollRef.current); };
+  }, [shareToken, lectureId]);
+
   const fetchResults = async () => {
     try {
       const res = await getResults(lectureId);
       setResults(res.data);
+      if (res.data.share_token) {
+        setShareToken(res.data.share_token);
+        setTotalViews(res.data.view_count || 0);
+      }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       setError(axiosErr.response?.status === 404 ? "not_found" : "Failed to load results");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleShare = async () => {
+    setSharing(true);
+    try {
+      const res = await createShareLink(lectureId);
+      const token = res.data.share_token;
+      setShareToken(token);
+      const url = `${window.location.origin}/shared/${token}`;
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setError("Failed to create share link");
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (!shareToken) return;
+    const url = `${window.location.origin}/shared/${shareToken}`;
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   const handleProcess = async () => {
@@ -94,33 +139,29 @@ export default function ResultsPage() {
       setScore(0);
       await fetchResults();
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } };
-      setError(axiosErr.response?.data?.detail || "Processing failed");
+      const axiosErr = err as { response?: { data?: { detail?: unknown } } };
+      const detail = axiosErr.response?.data?.detail;
+      if (typeof detail === "string") setError(detail);
+      else if (Array.isArray(detail)) setError(detail.map((d: { msg?: string }) => d?.msg ?? String(d)).join("; "));
+      else setError("Processing failed");
     } finally {
       setProcessing(false);
     }
   };
 
-  // Reveal answer immediately on click (active recall style)
   const handleSelectAnswer = (globalIndex: number, letter: string) => {
-    if (selectedAnswers[globalIndex] !== undefined) return; // already answered
+    if (selectedAnswers[globalIndex] !== undefined) return;
     setSelectedAnswers((prev) => {
       const updated = { ...prev, [globalIndex]: letter };
-      // Recalculate score
       if (results) {
-        const correct = results.mcqs.filter(
-          (mcq, i) => updated[i] === mcq.answer
-        ).length;
+        const correct = results.mcqs.filter((mcq, i) => updated[i] === mcq.answer).length;
         setScore(correct);
       }
       return updated;
     });
   };
 
-  const handleReset = () => {
-    setSelectedAnswers({});
-    setScore(0);
-  };
+  const handleReset = () => { setSelectedAnswers({}); setScore(0); };
 
   const handleToggleShuffle = () => {
     if (!shuffleMode && results) {
@@ -134,26 +175,33 @@ export default function ResultsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#111220" }}>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-container" />
       </div>
     );
   }
 
   if (error === "not_found") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center bg-white rounded-2xl p-10 shadow-sm border border-gray-200 max-w-md">
-          <div className="w-14 h-14 bg-yellow-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
+      <div className="min-h-screen flex items-center justify-center relative" style={{ backgroundColor: "#111220" }}>
+        <div className="grain-overlay" />
+        <div className="text-center glass-panel rounded-3xl p-12 max-w-md mx-4 relative z-10">
+          <div className="w-16 h-16 rounded-2xl bg-tertiary/20 flex items-center justify-center mx-auto mb-6">
+            <span className="material-symbols-outlined text-3xl text-tertiary">warning</span>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Not Processed Yet</h2>
-          <p className="text-gray-500 text-sm mb-6">Click below to generate study materials.</p>
-          <button onClick={handleProcess} disabled={processing}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
-            {processing ? <span className="flex items-center gap-2"><span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />Processing...</span> : "Generate Study Materials"}
+          <h2 className="text-2xl font-bold text-white mb-2">Not Processed Yet</h2>
+          <p className="text-on-surface-variant mb-8">Click below to generate study materials for this lecture.</p>
+          <button
+            onClick={handleProcess}
+            disabled={processing}
+            className="synapse-gradient text-white font-bold px-8 py-3 rounded-xl hover:-translate-y-1 transition-transform disabled:opacity-50"
+          >
+            {processing ? (
+              <span className="flex items-center gap-2">
+                <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                Processing…
+              </span>
+            ) : "Generate Study Materials"}
           </button>
         </div>
       </div>
@@ -165,216 +213,311 @@ export default function ResultsPage() {
   const answeredCount = Object.keys(selectedAnswers).length;
   const totalCount = results.mcqs.length;
   const grouped = groupByTopic(results.mcqs);
+  const scorePercent = totalCount > 0 ? Math.round((score / totalCount) * 100) : 0;
+
+  const MCQList = ({ mcqs }: { mcqs: Array<MCQ & { _index: number }> }) => (
+    <div className="space-y-6">
+      {mcqs.map((mcq, displayIdx) => {
+        const globalIdx = mcq._index;
+        const selected = selectedAnswers[globalIdx];
+        const isAnswered = selected !== undefined;
+        const isCorrect = selected === mcq.answer;
+
+        return (
+          <div
+            key={globalIdx}
+            className={`glass-panel p-8 rounded-xl transition-all duration-300 hover:-translate-y-1 border-l-4 ${
+              isAnswered ? (isCorrect ? "border-green-500/50" : "border-error/50") : "border-primary-container/30"
+            }`}
+          >
+            <div className="flex justify-between items-start mb-4">
+              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-on-surface-variant bg-surface-container-highest px-2 py-1 rounded">
+                Question {displayIdx + 1 < 10 ? `0${displayIdx + 1}` : displayIdx + 1}
+              </span>
+              {isAnswered && (
+                <span className={`px-2 py-1 text-[10px] font-bold rounded uppercase flex items-center gap-1 ${isCorrect ? "bg-green-500/10 text-green-400" : "bg-error/10 text-error"}`}>
+                  <span className="material-symbols-outlined text-sm">{isCorrect ? "check_circle" : "cancel"}</span>
+                  {isCorrect ? "Correct" : "Incorrect"}
+                </span>
+              )}
+            </div>
+
+            <h3 className="text-lg font-bold text-white mb-6 leading-snug">{mcq.question}</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {mcq.options.map((option, j) => {
+                const letter = option.charAt(0);
+                const isThisSelected = selected === letter;
+                const isThisCorrect = letter === mcq.answer;
+                let cls = "bg-surface-container-highest border border-outline-variant/10 text-on-surface-variant cursor-pointer hover:border-primary-container/50 hover:bg-primary-container/10 hover:text-white";
+                if (isAnswered) {
+                  if (isThisCorrect) cls = "bg-primary-container/20 border border-primary/30 text-white cursor-default";
+                  else if (isThisSelected) cls = "bg-error/20 border border-error/30 text-error cursor-default";
+                  else cls = "bg-surface-container-highest border border-outline-variant/10 text-on-surface-variant/50 cursor-default";
+                }
+                return (
+                  <button
+                    key={j}
+                    onClick={() => handleSelectAnswer(globalIdx, letter)}
+                    className={`p-4 rounded-xl text-sm text-left transition-all flex justify-between items-center ${cls}`}
+                  >
+                    <span>{option}</span>
+                    {isAnswered && isThisCorrect && <span className="material-symbols-outlined text-primary text-sm">done_all</span>}
+                    {isAnswered && isThisSelected && !isThisCorrect && <span className="material-symbols-outlined text-error text-sm">close</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {isAnswered && mcq.explanation && (
+              <div className={`mt-4 px-4 py-3 rounded-xl text-sm flex items-start gap-2 ${isCorrect ? "bg-green-500/5 border border-green-500/20 text-green-300" : "bg-primary-container/5 border border-primary/20 text-primary-fixed-dim"}`}>
+                <span className="material-symbols-outlined text-sm flex-shrink-0 mt-0.5">arrow_forward</span>
+                <span><strong>Answer: {mcq.answer}</strong> — {mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="relative min-h-screen text-on-surface pb-24 md:pb-0" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
+      <div className="grain-overlay" />
+
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="text-gray-400 hover:text-gray-600 transition-colors">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </Link>
-            <h1 className="font-semibold text-gray-900">Study Materials</h1>
-          </div>
-          <div className="flex items-center gap-3">
+      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard" className="text-on-surface-variant hover:text-white transition-colors">
+            <span className="material-symbols-outlined">arrow_back</span>
+          </Link>
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Active viewers badge */}
+          {shareToken && activeViewers > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+              <span className="text-xs font-bold text-emerald-400">{activeViewers} solving now</span>
+            </div>
+          )}
+          {shareToken && totalViews > 0 && activeViewers === 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high border border-outline-variant/20">
+              <span className="material-symbols-outlined text-sm text-on-surface-variant">visibility</span>
+              <span className="text-xs font-medium text-on-surface-variant">{totalViews} views</span>
+            </div>
+          )}
+          {/* Share button */}
+          <button
+            onClick={shareToken ? handleCopyLink : handleShare}
+            disabled={sharing}
+            className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${copied ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "glass-panel text-on-surface-variant hover:text-white"}`}
+          >
+            <span className="material-symbols-outlined text-sm">{copied ? "check" : "share"}</span>
+            <span className="hidden md:inline">{copied ? "Copied!" : shareToken ? "Copy Link" : sharing ? "…" : "Share"}</span>
+          </button>
+          <div className="hidden md:flex items-center gap-4">
             {answeredCount > 0 && (
-              <span className="text-sm font-medium text-gray-500">
+              <span className="text-sm font-medium text-on-surface-variant">
                 {score}/{answeredCount} correct
               </span>
             )}
+            <button
+              onClick={handleToggleShuffle}
+              className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${shuffleMode ? "synapse-gradient text-white" : "glass-panel text-on-surface-variant hover:text-white"}`}
+            >
+              <span className="material-symbols-outlined text-sm">shuffle</span>
+              {shuffleMode ? "Sectioned" : "Shuffle"}
+            </button>
             {answeredCount > 0 && (
-              <button onClick={handleReset} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
+              <button onClick={handleReset} className="text-sm text-on-surface-variant hover:text-white font-medium transition-colors">
                 Reset
               </button>
             )}
-            <button
-              onClick={handleToggleShuffle}
-              title={shuffleMode ? "Show sections" : "Shuffle all questions"}
-              className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-all ${
-                shuffleMode
-                  ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
-                  : "text-gray-500 border-gray-200 hover:border-blue-300 hover:text-blue-600"
-              }`}
-            >
-              <span>🔀</span>
-              <span>{shuffleMode ? "Sectioned" : "Shuffle"}</span>
-            </button>
-            <button onClick={handleProcess} disabled={processing}
-              className="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50">
-              {processing ? "Regenerating..." : "Regenerate"}
+            <button onClick={handleProcess} disabled={processing} className="text-sm text-secondary hover:text-white font-medium disabled:opacity-50 transition-colors">
+              {processing ? "Regenerating…" : "Regenerate"}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+      <main className="pt-24 px-6 md:px-12 max-w-7xl mx-auto">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-xs font-bold tracking-widest text-secondary mb-4 uppercase pt-6">
+          <Link href="/dashboard" className="hover:text-white transition-colors">Dashboard</Link>
+          <span className="material-symbols-outlined text-sm">chevron_right</span>
+          <span className="text-on-surface-variant">Lecture #{lectureId}</span>
+        </nav>
 
-        {/* Summary */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-lg">📝</span>
-            <h2 className="font-semibold text-gray-900">Summary</h2>
-          </div>
-          <p className="text-gray-600 text-sm leading-relaxed">{results.summary}</p>
-        </div>
-
-        {/* Key Concepts */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-lg">💡</span>
-            <h2 className="font-semibold text-gray-900">High-Yield Key Concepts</h2>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {results.key_concepts.map((concept, i) => (
-              <span key={i} className="bg-amber-50 text-amber-800 text-sm font-medium px-3 py-1.5 rounded-full border border-amber-100">
-                {concept}
+        {/* Title + Actions */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
+          <div>
+            <h2 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight mb-4">Study Materials</h2>
+            <div className="flex flex-wrap gap-3">
+              <span className="px-3 py-1 bg-surface-container-high rounded-full border border-outline-variant/20 text-xs font-medium text-primary flex items-center gap-1">
+                <span className="material-symbols-outlined text-sm">quiz</span>
+                {totalCount} MCQs
               </span>
-            ))}
+              <span className="px-3 py-1 bg-surface-container-high rounded-full border border-outline-variant/20 text-xs font-medium text-secondary flex items-center gap-1">
+                <span className="material-symbols-outlined text-sm">calendar_today</span>
+                {new Date(results.created_at).toLocaleDateString()}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Score banner when all answered */}
-        {answeredCount === totalCount && totalCount > 0 && (
-          <div className={`rounded-2xl p-5 flex items-center justify-between ${score / totalCount >= 0.7 ? "bg-green-50 border border-green-200" : "bg-orange-50 border border-orange-200"}`}>
-            <div>
-              <p className={`font-semibold ${score / totalCount >= 0.7 ? "text-green-800" : "text-orange-800"}`}>
-                {score / totalCount >= 0.7 ? "🎉 Great work!" : "📖 Keep studying!"} — {score}/{totalCount} correct ({Math.round((score / totalCount) * 100)}%)
-              </p>
-              <p className={`text-sm mt-0.5 ${score / totalCount >= 0.7 ? "text-green-600" : "text-orange-600"}`}>
-                {score / totalCount >= 0.7 ? "You are well-prepared for this topic." : "Review the explanations for the questions you missed."}
-              </p>
-            </div>
-            <button onClick={handleReset} className="text-sm font-medium bg-white border px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
-              Retake
+        {/* Tabs */}
+        <div className="flex border-b border-outline-variant/10 mb-8 gap-8 overflow-x-auto scrollbar-hide">
+          {(["mcqs", "summary", "concepts"] as ActiveTab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setActiveTab(t)}
+              className={`pb-4 text-sm font-bold border-b-2 whitespace-nowrap px-2 transition-all ${activeTab === t ? "border-primary-container text-white" : "border-transparent text-on-surface-variant hover:text-white"}`}
+            >
+              {t === "mcqs" ? "MCQs" : t === "summary" ? "Summary" : "Key Concepts"}
             </button>
-          </div>
+          ))}
+        </div>
+
+        {error && error !== "not_found" && (
+          <div className="mb-6 bg-error/10 border border-error/20 text-error rounded-xl px-4 py-3 text-sm">{error}</div>
         )}
 
-        {/* MCQs — grouped by topic or shuffled flat list */}
-        {shuffleMode ? (
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-            <div className="bg-gray-50 border-b border-gray-100 px-6 py-3 flex items-center gap-2">
-              <span className="text-xl">🔀</span>
-              <h3 className="font-semibold text-gray-800">All Questions (Shuffled)</h3>
-              <span className="ml-auto text-xs text-gray-400">{shuffledMcqs.length} questions</span>
+        {/* Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-20">
+          {/* Sidebar */}
+          <div className="lg:col-span-4 flex flex-col gap-6">
+            <div className="glass-panel p-8 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.15)] relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-primary-container/10 blur-3xl rounded-full -mr-16 -mt-16" />
+              <div className="relative z-10">
+                <p className="text-secondary font-bold uppercase tracking-[0.2em] text-xs mb-2">Performance</p>
+                <div className="flex items-baseline gap-2 mb-6">
+                  <span className="text-6xl font-black text-white">{score}</span>
+                  <span className="text-2xl font-bold text-on-surface-variant">/ {totalCount}</span>
+                </div>
+                <div className="h-3 w-full bg-surface-container-highest rounded-full mb-4 overflow-hidden">
+                  <div
+                    className="h-full synapse-gradient rounded-full transition-all duration-500"
+                    style={{ width: `${totalCount > 0 ? (score / totalCount) * 100 : 0}%` }}
+                  />
+                </div>
+                {answeredCount > 0 && (
+                  <p className="text-sm text-on-surface-variant mb-6">
+                    {scorePercent}% accuracy · {answeredCount}/{totalCount} answered
+                  </p>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleReset}
+                    className="flex-1 py-3 synapse-gradient text-white font-bold rounded-xl shadow-lg hover:-translate-y-1 transition-transform flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm">refresh</span>
+                    Retake
+                  </button>
+                  <button
+                    onClick={handleToggleShuffle}
+                    className={`px-4 py-3 rounded-xl font-bold transition-all ${shuffleMode ? "bg-white/20 text-white" : "glass-panel text-on-surface-variant hover:text-white"}`}
+                  >
+                    <span className="material-symbols-outlined text-sm">shuffle</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="p-4 space-y-5">
-              {shuffledMcqs.map((mcq, displayIdx) => {
-                const globalIdx = mcq._index;
-                const selected = selectedAnswers[globalIdx];
-                const isAnswered = selected !== undefined;
-                const isCorrect = selected === mcq.answer;
 
-                return (
-                  <div key={globalIdx} className={`border rounded-xl p-4 transition-all ${isAnswered ? (isCorrect ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/30") : "border-gray-100"}`}>
-                    <p className="font-medium text-gray-900 text-sm mb-3">
-                      <span className="text-blue-500 font-bold mr-2">Q{displayIdx + 1}.</span>
-                      {mcq.question}
-                    </p>
-                    <div className="space-y-2">
-                      {mcq.options.map((option, j) => {
-                        const letter = option.charAt(0);
-                        const isThisSelected = selected === letter;
-                        const isThisCorrect = letter === mcq.answer;
-                        let cls = "border border-gray-200 text-gray-700 cursor-pointer hover:border-blue-300 hover:bg-blue-50";
-                        if (isAnswered) {
-                          if (isThisCorrect) cls = "border-green-500 bg-green-50 text-green-800 cursor-default";
-                          else if (isThisSelected) cls = "border-red-400 bg-red-50 text-red-700 cursor-default";
-                          else cls = "border-gray-100 text-gray-400 cursor-default";
-                        }
-                        return (
-                          <button key={j} onClick={() => handleSelectAnswer(globalIdx, letter)}
-                            className={`w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all border ${cls}`}>
-                            <span className="flex items-center justify-between">
-                              <span>{option}</span>
-                              {isAnswered && isThisCorrect && <span className="text-green-600 font-bold">✓</span>}
-                              {isAnswered && isThisSelected && !isThisCorrect && <span className="text-red-500 font-bold">✗</span>}
-                            </span>
-                          </button>
-                        );
-                      })}
+            {results.key_concepts.length > 0 && (
+              <div className="glass-panel p-6 rounded-xl border border-outline-variant/10">
+                <h4 className="text-sm font-bold text-white mb-4 uppercase tracking-widest">Key Concepts</h4>
+                <div className="flex flex-wrap gap-2">
+                  {results.key_concepts.slice(0, 6).map((concept, i) => (
+                    <span key={i} className="text-xs px-3 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant/10 text-on-surface-variant">
+                      {concept}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Main Content */}
+          <div className="lg:col-span-8 space-y-6">
+            {activeTab === "mcqs" && (
+              shuffleMode ? (
+                <MCQList mcqs={shuffledMcqs} />
+              ) : (
+                Object.entries(grouped).map(([topic, mcqs]) => (
+                  <div key={topic}>
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="text-xl">{getEmoji(topic)}</span>
+                      <h3 className="font-bold text-white">{topic}</h3>
+                      <span className="text-xs text-on-surface-variant">{mcqs.length} questions</span>
                     </div>
-                    {isAnswered && mcq.explanation && (
-                      <div className={`mt-3 px-4 py-2.5 rounded-lg text-sm flex items-start gap-2 ${isCorrect ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
-                        <span className="text-base flex-shrink-0">👉</span>
-                        <span><strong>Answer: {mcq.answer}</strong> — {mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}</span>
-                      </div>
-                    )}
+                    <MCQList mcqs={mcqs as Array<MCQ & { _index: number }>} />
                   </div>
-                );
-              })}
-            </div>
+                ))
+              )
+            )}
+
+            {activeTab === "summary" && (
+              <div className="glass-panel p-8 rounded-xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="material-symbols-outlined text-primary">summarize</span>
+                  <h3 className="font-bold text-white text-xl">Summary</h3>
+                </div>
+                <p className="text-on-surface-variant leading-relaxed">{results.summary}</p>
+              </div>
+            )}
+
+            {activeTab === "concepts" && (
+              <div className="glass-panel p-8 rounded-xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="material-symbols-outlined text-tertiary">lightbulb</span>
+                  <h3 className="font-bold text-white text-xl">High-Yield Key Concepts</h3>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {results.key_concepts.map((concept, i) => (
+                    <span key={i} className="px-4 py-2 rounded-full bg-tertiary/10 border border-tertiary/20 text-tertiary text-sm font-medium">
+                      {concept}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Score Banner */}
+            {answeredCount === totalCount && totalCount > 0 && activeTab === "mcqs" && (
+              <div className={`rounded-xl p-6 flex items-center justify-between glass-panel border-l-4 ${scorePercent >= 70 ? "border-green-500/50" : "border-tertiary/50"}`}>
+                <div>
+                  <p className="font-bold text-white text-lg">
+                    {scorePercent >= 70 ? "🎉 Great work!" : "📖 Keep studying!"} — {score}/{totalCount} ({scorePercent}%)
+                  </p>
+                  <p className="text-on-surface-variant text-sm mt-1">
+                    {scorePercent >= 70 ? "You're well-prepared for this topic." : "Review the explanations for questions you missed."}
+                  </p>
+                </div>
+                <button onClick={handleReset} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
+                  Retake
+                </button>
+              </div>
+            )}
           </div>
-        ) : (
-          Object.entries(grouped).map(([topic, mcqs]) => (
-            <div key={topic} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-              {/* Topic header */}
-              <div className="bg-gray-50 border-b border-gray-100 px-6 py-3 flex items-center gap-2">
-                <span className="text-xl">{getEmoji(topic)}</span>
-                <h3 className="font-semibold text-gray-800">{topic}</h3>
-                <span className="ml-auto text-xs text-gray-400">{mcqs.length} questions</span>
-              </div>
-
-              <div className="p-4 space-y-5">
-                {(mcqs as Array<MCQ & { _index: number }>).map((mcq) => {
-                  const globalIdx = mcq._index;
-                  const selected = selectedAnswers[globalIdx];
-                  const isAnswered = selected !== undefined;
-                  const isCorrect = selected === mcq.answer;
-
-                  return (
-                    <div key={globalIdx} className={`border rounded-xl p-4 transition-all ${isAnswered ? (isCorrect ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/30") : "border-gray-100"}`}>
-                      {/* Question */}
-                      <p className="font-medium text-gray-900 text-sm mb-3">
-                        <span className="text-blue-500 font-bold mr-2">Q{globalIdx + 1}.</span>
-                        {mcq.question}
-                      </p>
-
-                      {/* Options */}
-                      <div className="space-y-2">
-                        {mcq.options.map((option, j) => {
-                          const letter = option.charAt(0);
-                          const isThisSelected = selected === letter;
-                          const isThisCorrect = letter === mcq.answer;
-
-                          let cls = "border border-gray-200 text-gray-700 cursor-pointer hover:border-blue-300 hover:bg-blue-50";
-                          if (isAnswered) {
-                            if (isThisCorrect) cls = "border-green-500 bg-green-50 text-green-800 cursor-default";
-                            else if (isThisSelected) cls = "border-red-400 bg-red-50 text-red-700 cursor-default";
-                            else cls = "border-gray-100 text-gray-400 cursor-default";
-                          }
-
-                          return (
-                            <button key={j} onClick={() => handleSelectAnswer(globalIdx, letter)}
-                              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all border ${cls}`}>
-                              <span className="flex items-center justify-between">
-                                <span>{option}</span>
-                                {isAnswered && isThisCorrect && <span className="text-green-600 font-bold">✓</span>}
-                                {isAnswered && isThisSelected && !isThisCorrect && <span className="text-red-500 font-bold">✗</span>}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Explanation — shown immediately after answering */}
-                      {isAnswered && mcq.explanation && (
-                        <div className={`mt-3 px-4 py-2.5 rounded-lg text-sm flex items-start gap-2 ${isCorrect ? "bg-green-100 text-green-800" : "bg-blue-50 text-blue-800"}`}>
-                          <span className="text-base flex-shrink-0">👉</span>
-                          <span><strong>Answer: {mcq.answer}</strong> — {mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))
-        )}
+        </div>
       </main>
+
+      {/* Mobile Bottom Nav */}
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
+        <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
+          <span className="material-symbols-outlined">home</span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
+        </Link>
+        <div className="flex flex-col items-center text-[#00D2FD]">
+          <span className="material-symbols-outlined">video_library</span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Lectures</span>
+        </div>
+        <Link href="/analytics" className="flex flex-col items-center text-slate-500">
+          <span className="material-symbols-outlined">insights</span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
+        </Link>
+      </nav>
     </div>
   );
 }

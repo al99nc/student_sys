@@ -59,3 +59,15 @@ export const processLecture = (lectureId: number, difficulty: Difficulty = "high
 
 export const getResults = (lectureId: number) =>
   api.get(`/results/${lectureId}`);
+
+export const createShareLink = (lectureId: number) =>
+  api.post(`/results/${lectureId}/share`);
+
+export const getActiveViewers = (lectureId: number) =>
+  api.get(`/results/${lectureId}/active-viewers`);
+
+export const getSharedResult = (token: string) =>
+  api.get(`/shared/${token}`);
+
+export const pingSharedSession = (token: string, sessionId: string) =>
+  api.post(`/shared/${token}/ping`, null, { params: { session_id: sessionId } });
