@@ -124,6 +124,21 @@ export default function ResultsPage() {
     }
   };
 
+  const copyToClipboard = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+  };
+
   const handleShare = async () => {
     setSharing(true);
     try {
@@ -131,7 +146,7 @@ export default function ResultsPage() {
       const token = res.data.share_token;
       setShareToken(token);
       const url = `${window.location.origin}/shared/${token}`;
-      await navigator.clipboard.writeText(url);
+      await copyToClipboard(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
@@ -144,7 +159,7 @@ export default function ResultsPage() {
   const handleCopyLink = async () => {
     if (!shareToken) return;
     const url = `${window.location.origin}/shared/${shareToken}`;
-    await navigator.clipboard.writeText(url);
+    await copyToClipboard(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -358,6 +373,13 @@ export default function ResultsPage() {
               {saveStatus === "saved" && <><span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span><span className="text-emerald-400">Saved</span></>}
               {saveStatus === "idle" && <span className="material-symbols-outlined text-sm text-on-surface-variant/40">cloud_done</span>}
             </div>
+            <Link
+              href={`/quiz/${lectureId}`}
+              className="flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg glass-panel border border-secondary/30 text-secondary hover:text-white transition-all"
+            >
+              <span className="material-symbols-outlined text-sm">bolt</span>
+              Quiz Mode
+            </Link>
             <button
               onClick={shareToken ? handleCopyLink : handleShare}
               disabled={sharing}
