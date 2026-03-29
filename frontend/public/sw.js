@@ -28,5 +28,5 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(fetch(event.request));
+  // All other requests: do nothing — browser handles them natively.
 });
