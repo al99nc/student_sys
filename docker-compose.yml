@@ -18,12 +18,9 @@ services:
   frontend:
     build:
       context: ./frontend
-      # NEXT_PUBLIC_API_URL removed — frontend now uses /api (relative) so no
-      # HTTP URL is ever baked into the bundle, fixing the mixed-content error.
+      args:
+        BACKEND_URL: http://backend:8000
     ports:
       - "3000:3000"
-    environment:
-      # Runtime-only: tells Next.js rewrites where to forward /api/* requests
-      - BACKEND_URL=http://backend:8000
     depends_on:
       - backend

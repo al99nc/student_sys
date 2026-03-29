@@ -265,10 +265,12 @@ async def _call_single_chunk(
             if "DAILY_LIMIT" in err_str:
                 raise
 
-            is_429 = "429" in err_str
+            # TPM per-minute 429 — propagate immediately so caller rotates to next key
+            if "429" in err_str:
+                raise RuntimeError(f"TPM_LIMIT: {e}")
 
-            # TPM (per-minute) or other 429 → wait for the window to reset.
-            wait = 65 if is_429 else 2 ** attempt
+            # Other errors — exponential backoff
+            wait = 2 ** attempt
             logger.warning(
                 f"[{mode}] Chunk {chunk_index + 1} attempt {attempt + 1}/{max_retries} "
                 f"failed: {e}. Retrying in {wait}s..."
@@ -397,25 +399,54 @@ async def _call_chunk_with_rotation(
     chunk_index: int,
     total_chunks: int,
 ) -> tuple[dict, float]:
-    """Call a single chunk, rotating to the next API key on daily-limit errors."""
+    """Call a single chunk, rotating keys on both TPM (per-minute) and daily-limit errors."""
     last_error: Exception | None = None
+    tpm_hit_keys: set[str] = set()
+
     for key in list(available_keys):
         try:
             return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
         except RuntimeError as e:
-            if "DAILY_LIMIT" in str(e):
+            err_str = str(e)
+            if "DAILY_LIMIT" in err_str:
                 available_keys.remove(key)
                 logger.warning(
-                    f"[{mode}] Key ending ...{key[-6:]} hit daily limit — "
-                    f"rotating to next key ({len(available_keys)} remaining)"
+                    f"[{mode}] Key ...{key[-6:]} hit daily limit — "
+                    f"rotating ({len(available_keys)} remaining)"
+                )
+                last_error = e
+                continue
+            if "TPM_LIMIT" in err_str:
+                tpm_hit_keys.add(key)
+                logger.warning(
+                    f"[{mode}] Key ...{key[-6:]} hit TPM limit — rotating to next key"
                 )
                 last_error = e
                 continue
             raise
+
+    # All keys hit TPM — wait 65s for the minute window to reset, then retry once
+    if tpm_hit_keys and available_keys:
+        logger.info(f"[{mode}] All {len(tpm_hit_keys)} key(s) hit TPM limit — waiting 65s")
+        await asyncio.sleep(65)
+        for key in list(available_keys):
+            try:
+                return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
+            except RuntimeError as e:
+                last_error = e
+                if "DAILY_LIMIT" in str(e):
+                    available_keys.remove(key)
+                continue
+
+    if last_error and "DAILY_LIMIT" in str(last_error):
+        raise RuntimeError(
+            "DAILY_LIMIT: All API keys have hit their daily token quota (200 000 tokens/day). "
+            "Add more keys to AI_API_KEYS in .env or wait until tomorrow."
+        )
     raise RuntimeError(
-        "DAILY_LIMIT: All API keys have hit their daily token quota (200 000 tokens/day). "
-        "Add more keys to AI_API_KEYS in .env or wait until tomorrow."
-    ) if last_error else RuntimeError("No API keys available")
+        f"Chunk {chunk_index + 1} failed after trying all available keys. "
+        f"Last error: {last_error}"
+    )
 
 
 async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str, Any]:
