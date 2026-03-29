@@ -2,5 +2,17 @@
 const nextConfig = {
   output: 'standalone',
   experimental: {},
+  async rewrites() {
+    // BACKEND_URL is a server-only env var (no NEXT_PUBLIC_ prefix).
+    // Dev / ngrok:  leave unset → defaults to http://localhost:8000
+    // Docker:       set BACKEND_URL=http://backend:8000 in docker-compose env
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${backendUrl}/:path*`,
+      },
+    ];
+  },
 };
 module.exports = nextConfig;

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.db.database import Base, engine
-from app.api import auth, lectures
+from app.api import auth, lectures, telegram
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -28,7 +28,12 @@ app = FastAPI(
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://84.235.244.210:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://84.235.244.210:3000",
+        "https://cortexq.net",         # production web
+        "https://www.cortexq.net",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,6 +41,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(lectures.router)
+app.include_router(telegram.router)
 
 @app.get("/")
 def root():

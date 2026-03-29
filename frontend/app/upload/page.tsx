@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { uploadLecture, processLecture, estimateProcessing, Difficulty } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
+import { useTelegram } from "@/lib/useTelegram";
 
 type Tab = "study" | "exam";
 type Mode = "highyield" | "exam" | "harder";
@@ -13,6 +14,8 @@ function UploadContent() {
   const searchParams = useSearchParams();
   const processId = searchParams.get("process");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { isInTelegram, mainButton } = useTelegram();
 
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -25,6 +28,34 @@ function UploadContent() {
   const [timeEstimate, setTimeEstimate] = useState<{ estimated_range: string; chunks: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Telegram MainButton control ──────────────────────────────────────────
+  useEffect(() => {
+    if (!isInTelegram || !mainButton) return;
+
+    if (file && step === "upload" && !uploading) {
+      const label =
+        mode === "harder"
+          ? "Generate Harder Questions"
+          : mode === "exam"
+          ? "Generate Exam Questions"
+          : "Generate High Yield MCQs";
+      mainButton.setText(label).show().enable();
+      mainButton.onClick(handleUpload);
+      return () => { mainButton.offClick(handleUpload); };
+    } else {
+      mainButton.hide();
+    }
+  }, [isInTelegram, mainButton, file, step, uploading, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isInTelegram || !mainButton) return;
+    if (uploading || processing) {
+      mainButton.setText("Processing…").showProgress(true).disable();
+    } else if (step === "done") {
+      mainButton.hideProgress().setText("Done!").disable();
+    }
+  }, [isInTelegram, mainButton, uploading, processing, step]);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -171,8 +202,8 @@ function UploadContent() {
     <div className="relative min-h-screen text-on-surface flex flex-col" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.1) 0px, transparent 50%)" }}>
       <div className="grain-overlay" />
 
-      {/* Header */}
-      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
+      {/* Header — hidden inside Telegram (Telegram provides its own chrome) */}
+      {!isInTelegram && <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="text-on-surface-variant hover:text-white transition-colors">
             <span className="material-symbols-outlined">arrow_back</span>
@@ -184,9 +215,9 @@ function UploadContent() {
           <Link href="/dashboard" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Dashboard</Link>
           <Link href="/analytics" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Analytics</Link>
         </nav>
-      </header>
+      </header>}
 
-      <main className="flex-grow flex flex-col items-center justify-center px-6 pt-24 pb-32 max-w-5xl mx-auto w-full">
+      <main className={`flex-grow flex flex-col items-center justify-center px-6 max-w-5xl mx-auto w-full ${isInTelegram ? "pt-6 pb-6" : "pt-24 pb-32"}`}>
         <section className="w-full text-center space-y-10">
 
           {/* Heading */}
@@ -285,7 +316,8 @@ function UploadContent() {
             </div>
           )}
 
-          {file && (
+          {/* In Telegram the MainButton handles this; in browser we show the regular button */}
+          {file && !isInTelegram && (
             <button
               onClick={handleUpload}
               disabled={uploading}
@@ -319,8 +351,8 @@ function UploadContent() {
         </section>
       </main>
 
-      {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
+      {/* Mobile Bottom Nav — hidden inside Telegram (no room, MainButton is there) */}
+      {!isInTelegram && <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
         <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
           <span className="material-symbols-outlined text-[24px]">home</span>
           <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
@@ -334,7 +366,7 @@ function UploadContent() {
           <span className="material-symbols-outlined text-[24px]">insights</span>
           <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
         </Link>
-      </nav>
+      </nav>}
 
       {/* Decorative blobs */}
       <div className="fixed top-1/4 -left-20 w-80 h-80 bg-primary-container/10 rounded-full blur-[120px] pointer-events-none" />

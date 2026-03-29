@@ -13,13 +13,17 @@ services:
       - AI_MODEL=${AI_MODEL:-openai/gpt-oss-120b}
       - DATABASE_URL=sqlite:////app/db/students.db
       - UPLOAD_DIR=uploads
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
 
   frontend:
     build:
       context: ./frontend
-      args:
-        NEXT_PUBLIC_API_URL: http://84.235.244.210:8000
+      # NEXT_PUBLIC_API_URL removed — frontend now uses /api (relative) so no
+      # HTTP URL is ever baked into the bundle, fixing the mixed-content error.
     ports:
       - "3000:3000"
+    environment:
+      # Runtime-only: tells Next.js rewrites where to forward /api/* requests
+      - BACKEND_URL=http://backend:8000
     depends_on:
       - backend

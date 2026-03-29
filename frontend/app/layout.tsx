@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Script from "next/script";
+import { TelegramProvider } from "@/lib/TelegramProvider";
 
 export const metadata: Metadata = {
   title: "cortexQ - Learn Smarter",
@@ -22,9 +23,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
           rel="stylesheet"
         />
+        {/* Telegram Mini App SDK — must be in <head> before React hydrates */}
+        <script src="https://telegram.org/js/telegram-web-app.js" />
       </head>
       <body className="text-on-surface bg-[#111220] min-h-screen">
-        {children}
+        <TelegramProvider>
+          {children}
+        </TelegramProvider>
         <Script id="register-sw" strategy="afterInteractive">{`
           if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/sw.js');
