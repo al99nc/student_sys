@@ -1,5 +1,5 @@
 import axios from "axios";
-import { removeToken } from "./auth";
+import { getToken, logout } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -10,11 +10,9 @@ export const api = axios.create({
 
 // Attach token automatically
 api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
@@ -24,8 +22,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (typeof window !== "undefined" && error?.response?.status === 401) {
-      removeToken();
-      window.location.href = "/auth";
+      logout();
     }
     return Promise.reject(error);
   }

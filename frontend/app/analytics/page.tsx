@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { removeToken } from "@/lib/auth";
+import { logout } from "@/lib/auth";
 
 const subjects = [
   { name: "Neuroscience: The Synaptic Gap", score: 92, color: "bg-secondary-container", textColor: "text-secondary", date: "Oct 24, 2023", time: "1h 12m" },
@@ -14,7 +14,7 @@ const barHeights = ["40%", "65%", "90%", "55%", "30%", "75%", "20%"];
 
 export default function AnalyticsPage() {
   const router = useRouter();
-  const handleLogout = () => { removeToken(); router.push("/auth"); };
+  const handleLogout = () => logout();
 
   return (
     <div className="relative min-h-screen text-on-surface" style={{ backgroundColor: "#111220" }}>

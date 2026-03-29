@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getLectures } from "@/lib/api";
-import { isAuthenticated, removeToken } from "@/lib/auth";
+import { isAuthenticated, logout } from "@/lib/auth";
 import Link from "next/link";
 
 interface Lecture {
@@ -40,10 +40,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleLogout = () => {
-    removeToken();
-    router.push("/auth");
-  };
+  const handleLogout = () => logout();
 
   const displayedLectures = filter === "all" ? lectures : lectures;
 
