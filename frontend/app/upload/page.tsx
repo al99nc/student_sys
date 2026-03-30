@@ -217,7 +217,7 @@ function UploadContent() {
         </nav>
       </header>}
 
-      <main className={`flex-grow flex flex-col items-center justify-center px-6 max-w-5xl mx-auto w-full ${isInTelegram ? "pt-6 pb-6" : "pt-24 pb-32"}`}>
+      <main className={`flex-grow flex flex-col items-center justify-center px-6 max-w-5xl mx-auto w-full ${isInTelegram ? "pt-6 pb-24" : "pt-24 pb-32"}`}>
         <section className="w-full text-center space-y-10">
 
           {/* Heading */}
@@ -351,8 +351,8 @@ function UploadContent() {
         </section>
       </main>
 
-      {/* Mobile Bottom Nav — hidden inside Telegram (no room, MainButton is there) */}
-      {!isInTelegram && <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
+      {/* Mobile Bottom Nav */}
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
         <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
           <span className="material-symbols-outlined text-[24px]">home</span>
           <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
@@ -366,7 +366,7 @@ function UploadContent() {
           <span className="material-symbols-outlined text-[24px]">insights</span>
           <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
         </Link>
-      </nav>}
+      </nav>
 
       {/* Decorative blobs */}
       <div className="fixed top-1/4 -left-20 w-80 h-80 bg-primary-container/10 rounded-full blur-[120px] pointer-events-none" />

@@ -52,7 +52,9 @@ export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "
   api.get(`/estimate/${lectureId}?mode=${difficulty}`);
 
 export const processLecture = (lectureId: number, difficulty: Difficulty = "highyield") =>
-  api.post(`/process/${lectureId}?mode=${difficulty}`);
+  api.post(`/process/${lectureId}?mode=${difficulty}`, null, { timeout: 600_000 });
+
+export const getStats = () => api.get("/stats");
 
 export const getResults = (lectureId: number) =>
   api.get(`/results/${lectureId}`);

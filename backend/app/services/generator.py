@@ -26,8 +26,8 @@ OPENROUTER_URL = "https://api.groq.com/openai/v1/chat/completions"
 # ─────────────────────────────────────────────────────────────────
 # CHUNKING CONFIGURATION
 # ─────────────────────────────────────────────────────────────────
-CHUNK_SIZE = 3_000
-CHUNK_OVERLAP = 200
+CHUNK_SIZE = 2_000
+CHUNK_OVERLAP = 150
 MAX_CHUNKS = 20
 
 
@@ -63,28 +63,29 @@ _INTER_CHUNK_WAIT = 60  # seconds between sequential chunks (full TPM reset)
 # so that each request stays within the TPM budget.
 # ─────────────────────────────────────────────────────────────────
 SPEED_CONFIG = {
+    # TPM budget = 8000 total (input + output per minute).
+    # Chunk ~750 tokens + prompt ~1500 tokens = ~2250 input → 5750 headroom.
+    # Cap output at 4500 to leave a safety margin and never hit the limit.
     "highyield": {
-        "max_tokens": 5_500,   # ceiling; natural output is ~2 500-3 500 tokens
+        "max_tokens": 4_500,
         "temperature": 0.30,
         "presence_penalty": 0.3,
         "frequency_penalty": 0.3,
     },
     "exam": {
-        "max_tokens": 5_000,   # caps exam at ~12 s @ 400 TPS (was 8 000 → ~20 s)
+        "max_tokens": 4_000,
         "temperature": 0.35,
         "presence_penalty": 0.3,
         "frequency_penalty": 0.3,
     },
     "harder": {
-        # Budget: ~1 400 prompt tokens + ~750 chunk tokens = ~2 150 input.
-        # 8 000 TPM limit − 2 150 input = 5 850 headroom → cap at 4 500 for safety.
-        "max_tokens": 4_500,
+        "max_tokens": 3_500,
         "temperature": 0.40,
         "presence_penalty": 0.4,
         "frequency_penalty": 0.4,
     },
     "revision": {
-        "max_tokens": 3_500,   # revision output is short; no change needed
+        "max_tokens": 3_000,
         "temperature": 0.25,
         "presence_penalty": 0.2,
         "frequency_penalty": 0.2,

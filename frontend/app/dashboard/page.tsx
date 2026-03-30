@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getLectures } from "@/lib/api";
+import { getLectures, getStats } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
 import Link from "next/link";
 
@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [stats, setStats] = useState({ total_lectures: 0, processed_lectures: 0, total_mcqs_answered: 0, avg_score: 0 });
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -31,8 +32,9 @@ export default function DashboardPage() {
 
   const fetchLectures = async () => {
     try {
-      const res = await getLectures();
-      setLectures(res.data);
+      const [lecturesRes, statsRes] = await Promise.all([getLectures(), getStats()]);
+      setLectures(lecturesRes.data);
+      setStats(statsRes.data);
     } catch {
       setError("Failed to load lectures");
     } finally {
@@ -128,10 +130,10 @@ export default function DashboardPage() {
         {/* Stats */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           {[
-            { icon: "upload_file", color: "#00D2FD", colorBg: "#00D2FD", label: "Total Uploads", value: loading ? "—" : String(lectures.length), badge: "+12%", badgeColor: "text-secondary" },
-            { icon: "quiz", color: "#7B2FFF", colorBg: "#7B2FFF", label: "MCQs Taken", value: "128", badge: "Active", badgeColor: "text-primary" },
-            { icon: "insights", color: "#ffb955", colorBg: "#ffb955", label: "Avg. Score", value: "92%", badge: "Top 5%", badgeColor: "text-tertiary" },
-            { icon: "local_fire_department", color: "#a2e7ff", colorBg: "#a2e7ff", label: "Study Streak", value: "14 days", badge: "🔥", badgeColor: "text-secondary" },
+            { icon: "upload_file", color: "#00D2FD", colorBg: "#00D2FD", label: "Total Uploads", value: loading ? "—" : String(stats.total_lectures), badge: `${stats.processed_lectures} processed`, badgeColor: "text-secondary" },
+            { icon: "task_alt", color: "#7B2FFF", colorBg: "#7B2FFF", label: "Processed", value: loading ? "—" : String(stats.processed_lectures), badge: "Ready", badgeColor: "text-primary" },
+            { icon: "quiz", color: "#ffb955", colorBg: "#ffb955", label: "MCQs Answered", value: loading ? "—" : String(stats.total_mcqs_answered), badge: "Total", badgeColor: "text-tertiary" },
+            { icon: "insights", color: "#a2e7ff", colorBg: "#a2e7ff", label: "Avg. Score", value: loading ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—", badge: stats.avg_score >= 80 ? "Great" : stats.avg_score >= 60 ? "Good" : stats.total_mcqs_answered > 0 ? "Keep going" : "No data", badgeColor: "text-secondary" },
           ].map((s) => (
             <div key={s.label} className="bg-surface-container-low/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl hover:-translate-y-1 transition-transform duration-300">
               <div className="flex justify-between items-start mb-4">

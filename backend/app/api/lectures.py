@@ -351,6 +351,52 @@ def retake_quiz_session(
         return QuizSessionOut(answers={}, retake_count=1)
 
 
+@router.get("/stats")
+def get_user_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    total_lectures = db.query(Lecture).filter(Lecture.user_id == current_user.id).count()
+
+    processed_lectures = (
+        db.query(Result)
+        .join(Lecture, Result.lecture_id == Lecture.id)
+        .filter(Lecture.user_id == current_user.id)
+        .count()
+    )
+
+    sessions = (
+        db.query(QuizSession, Result)
+        .join(Lecture, QuizSession.lecture_id == Lecture.id)
+        .join(Result, Result.lecture_id == Lecture.id)
+        .filter(QuizSession.user_id == current_user.id)
+        .all()
+    )
+
+    total_answered = 0
+    total_correct = 0
+    for session, result in sessions:
+        answers = json.loads(session.answers) if session.answers else {}
+        mcqs = json.loads(result.mcqs) if result.mcqs else []
+        total = len(mcqs)
+        answered = len(answers)
+        correct = sum(
+            1 for idx_str, letter in answers.items()
+            if (i := int(idx_str)) < total and mcqs[i].get("answer") == letter
+        )
+        total_answered += answered
+        total_correct += correct
+
+    avg_score = round(total_correct / total_answered * 100) if total_answered > 0 else 0
+
+    return {
+        "total_lectures": total_lectures,
+        "processed_lectures": processed_lectures,
+        "total_mcqs_answered": total_answered,
+        "avg_score": avg_score,
+    }
+
+
 @router.get("/my-shared-sessions")
 def get_my_shared_sessions(
     db: Session = Depends(get_db),
