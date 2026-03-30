@@ -21,8 +21,8 @@ services:
     restart: always
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
-      - MINI_APP_URL=${MINI_APP_URL:-https://cortexq.net/upload}
-      - BACKEND_URL=http://backend:8000/api
+      - MINI_APP_URL=${MINI_APP_URL:-https://themcq.xyz/upload}
+      - BACKEND_URL=http://84.235.244.210:8000/
       - BOT_SECRET=${BOT_SECRET:-cortexq-bot-secret-2026}
     depends_on:
       - backend
@@ -31,7 +31,7 @@ services:
     build:
       context: ./frontend
       args:
-        BACKEND_URL: http://backend:8000
+        BACKEND_URL: http://84.235.244.210:8000/
     ports:
       - "3000:3000"
     depends_on:
