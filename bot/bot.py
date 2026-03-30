@@ -29,7 +29,7 @@ load_dotenv()
 
 BOT_TOKEN    = os.environ["BOT_TOKEN"]
 MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://cortexq.net/upload")
-BACKEND_URL  = os.environ.get("BACKEND_URL",  "https://cortexq.net/api")
+BACKEND_URL  = os.environ.get("BACKEND_URL",  "https://cortexq.net/api").rstrip("/")
 BOT_SECRET   = os.environ.get("BOT_SECRET",   "cortexq-bot-secret-2026")
 
 logging.basicConfig(level=logging.INFO)
