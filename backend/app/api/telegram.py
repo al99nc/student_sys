@@ -1,10 +1,15 @@
 import hashlib
 import hmac
 import json
+import os
 import secrets
+import time
+from pathlib import Path
+from typing import Dict, Tuple
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Header
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +19,14 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 
 router = APIRouter(prefix="/auth", tags=["telegram"])
+
+# ── Bot temp-file store ────────────────────────────────────────────────────
+# token -> (file_path, original_filename, expires_at)
+_temp_files: Dict[str, Tuple[str, str, float]] = {}
+_TEMP_TTL = 3600          # 1 hour
+_TEMP_DIR = Path("temp_uploads")
+
+bot_router = APIRouter(prefix="/bot", tags=["bot"])
 
 
 class TelegramInitDataRequest(BaseModel):
@@ -106,3 +119,66 @@ def telegram_auth(body: TelegramInitDataRequest, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "telegram_user": tg_user,
     }
+
+
+# ── Bot endpoints ──────────────────────────────────────────────────────────
+
+def _check_bot_secret(x_bot_secret: str = Header(None)):
+    expected = os.environ.get("BOT_SECRET", "cortexq-bot-secret-2026")
+    if not x_bot_secret or x_bot_secret != expected:
+        raise HTTPException(status_code=403, detail="Invalid bot secret")
+
+
+def _purge_expired():
+    now = time.time()
+    expired = [t for t, (_, _, exp) in _temp_files.items() if now > exp]
+    for t in expired:
+        fp, _, _ = _temp_files.pop(t)
+        try:
+            os.remove(fp)
+        except OSError:
+            pass
+
+
+@bot_router.post("/upload-temp")
+async def bot_upload_temp(
+    file: UploadFile = File(...),
+    _: None = Depends(_check_bot_secret),
+):
+    """Bot uploads a PDF here; returns a one-time token for the Mini App."""
+    _purge_expired()
+
+    if not (file.filename or "").lower().endswith(".pdf") and file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+
+    _TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+    token = secrets.token_urlsafe(20)
+    dest = _TEMP_DIR / f"{token}.pdf"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    _temp_files[token] = (str(dest), file.filename or "lecture.pdf", time.time() + _TEMP_TTL)
+    return {"token": token}
+
+
+@bot_router.get("/temp/{token}")
+def bot_fetch_temp(token: str):
+    """Mini App fetches the pre-uploaded PDF using the token."""
+    _purge_expired()
+
+    entry = _temp_files.get(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="File not found or expired")
+
+    file_path, filename, _ = entry
+
+    if not os.path.exists(file_path):
+        _temp_files.pop(token, None)
+        raise HTTPException(status_code=404, detail="File not found or expired")
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        headers={"X-File-Name": filename},
+    )

@@ -1,18 +1,20 @@
 """
 CortexQ Telegram Bot
 --------------------
-When a user sends a PDF to the bot, it replies with a button that opens
-the CortexQ Mini App.  A /start command also opens the Mini App directly.
+/start       → opens the CortexQ Mini App
+PDF forward  → bot uploads the PDF to the backend, then sends a button
+               that opens the Mini App with the file pre-loaded.
 
 Run:  python bot.py
-Deps: pip install aiogram==3.*  python-dotenv
-Env:  BOT_TOKEN, MINI_APP_URL (e.g. https://cortexq.net/upload)
+Deps: pip install aiogram==3.*  python-dotenv  aiohttp
+Env:  BOT_TOKEN, MINI_APP_URL, BACKEND_URL, BOT_SECRET
 """
 
 import asyncio
 import logging
 import os
 
+import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -25,52 +27,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]          # @BotFather token
-MINI_APP_URL = os.environ.get(               # your Mini App URL
-    "MINI_APP_URL", "https://cortexq.net/upload"
-)
+BOT_TOKEN    = os.environ["BOT_TOKEN"]
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://cortexq.net/upload")
+BACKEND_URL  = os.environ.get("BACKEND_URL",  "https://cortexq.net/api")
+BOT_SECRET   = os.environ.get("BOT_SECRET",   "cortexq-bot-secret-2026")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp  = Dispatcher()
 
 
-def open_app_keyboard(label: str = "Open CortexQ", url: str = MINI_APP_URL) -> InlineKeyboardMarkup:
+def _open_app_button(label: str, url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))]
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))]]
     )
 
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    """Reply to /start with a button that opens the Mini App."""
     await message.answer(
         "👋 Welcome to *CortexQ*!\n\n"
         "Upload a PDF lecture and I'll generate MCQs for your exam revision.\n\n"
         "Tap the button below to open the app:",
         parse_mode="Markdown",
-        reply_markup=open_app_keyboard("📚 Open CortexQ"),
+        reply_markup=_open_app_button("📚 Open CortexQ", MINI_APP_URL),
     )
 
 
 @dp.message(F.document)
 async def handle_document(message: Message) -> None:
-    """
-    When a user forwards or sends a PDF, reply with a button that opens
-    the Mini App.
-
-    Deep-link note: Telegram doesn't let bots pass files to Mini Apps
-    directly. The standard pattern is:
-      1. Bot uploads the file to your backend → gets back a file_id / temp token
-      2. Bot sends a Mini App button with ?startapp=<token>
-      3. Mini App reads window.Telegram.WebApp.initDataUnsafe.start_param
-         and fetches the pre-uploaded file from your backend.
-
-    For MVP we just open the app and let the user pick the file themselves.
-    Uncomment the upload block below when you're ready to wire up the backend.
-    """
     doc = message.document
     if not doc or not doc.file_name:
         return
@@ -80,25 +65,46 @@ async def handle_document(message: Message) -> None:
         await message.reply("Please send a PDF file.")
         return
 
-    # ── Optional: upload to backend + deep-link ────────────────────────────
-    # import aiohttp, io
-    # file = await bot.get_file(doc.file_id)
-    # file_bytes = await bot.download_file(file.file_path)
-    # async with aiohttp.ClientSession() as session:
-    #     form = aiohttp.FormData()
-    #     form.add_field("file", file_bytes.read(), filename=doc.file_name, content_type="application/pdf")
-    #     async with session.post("https://cortexq.net/api/upload-temp", data=form) as r:
-    #         resp = await r.json()
-    #         temp_token = resp["token"]
-    # deep_link_url = f"{MINI_APP_URL}?startapp={temp_token}"
-    # ──────────────────────────────────────────────────────────────────────
+    # Download from Telegram
+    tg_file    = await bot.get_file(doc.file_id)
+    file_bytes = await bot.download_file(tg_file.file_path)
 
-    deep_link_url = MINI_APP_URL  # replace with deep_link_url when ready
+    # Upload to backend → get a short-lived token
+    temp_token = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            form = aiohttp.FormData()
+            form.add_field(
+                "file",
+                file_bytes.read(),
+                filename=doc.file_name,
+                content_type="application/pdf",
+            )
+            async with session.post(
+                f"{BACKEND_URL}/bot/upload-temp",
+                data=form,
+                headers={"X-Bot-Secret": BOT_SECRET},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    temp_token = data.get("token")
+    except Exception as exc:
+        logging.warning("Bot upload-temp failed: %s", exc)
+
+    if temp_token:
+        deep_link = f"{MINI_APP_URL}?tg_file={temp_token}"
+        caption   = f"📄 *{doc.file_name}*\n\nYour PDF is ready — tap to open CortexQ and generate MCQs:"
+        btn_label = "⚡ Generate MCQs"
+    else:
+        # Fallback: open app without pre-loading the file
+        deep_link = MINI_APP_URL
+        caption   = f"📄 *{doc.file_name}*\n\nOpen CortexQ and upload this PDF to generate MCQs:"
+        btn_label = "⚡ Open CortexQ"
 
     await message.reply(
-        f"📄 *{doc.file_name}*\n\nOpen CortexQ to generate MCQs from this PDF:",
+        caption,
         parse_mode="Markdown",
-        reply_markup=open_app_keyboard("⚡ Generate MCQs", deep_link_url),
+        reply_markup=_open_app_button(btn_label, deep_link),
     )
 
 

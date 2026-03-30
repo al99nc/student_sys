@@ -79,6 +79,18 @@ function UploadContent() {
         }
       }).catch(() => {});
     }
+
+    const tgFileToken = searchParams.get("tg_file");
+    if (tgFileToken) {
+      fetch(`/api/bot/temp/${tgFileToken}`)
+        .then(async (res) => {
+          if (!res.ok) return;
+          const fileName = res.headers.get("X-File-Name") || "lecture.pdf";
+          const blob = await res.blob();
+          setFile(new File([blob], fileName, { type: "application/pdf" }));
+        })
+        .catch(() => {});
+    }
   }, [processId, router, searchParams]);
 
   const handleTabChange = (newTab: Tab) => {
