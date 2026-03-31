@@ -75,11 +75,6 @@ export default function SharedPage() {
     const loggedIn = isAuthenticated();
     setIsLoggedIn(loggedIn);
 
-    if (!loggedIn) {
-      router.replace(`/auth?redirect=/shared/${token}`);
-      return;
-    }
-
     // Retrieve or generate a session ID for this browser tab
     let sid = sessionStorage.getItem(`cortexq_sid_${token}`);
     if (!sid) {
@@ -312,7 +307,7 @@ export default function SharedPage() {
             {isAnswered && !isCorrect && !isLoggedIn && (
               <div className="mt-2 flex items-center justify-between px-1">
                 <span className="text-xs text-on-surface-variant/60">Track your weak spots</span>
-                <Link href="/auth" className="text-xs font-bold text-secondary hover:text-white transition-colors flex items-center gap-1">
+                <Link href={`/auth?redirect=/shared/${token}`} className="text-xs font-bold text-secondary hover:text-white transition-colors flex items-center gap-1">
                   Sign up free
                   <span className="material-symbols-outlined text-xs">arrow_forward</span>
                 </Link>
@@ -448,7 +443,7 @@ export default function SharedPage() {
               <span className="text-[10px] font-bold uppercase tracking-widest">{shuffleMode ? "Sectioned" : "Shuffle"}</span>
             </button>
           ) : (
-            <Link href="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400">
+            <Link href={`/auth?redirect=/shared/${token}`} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400">
               <span className="material-symbols-outlined text-[18px]">person_add</span>
               <span className="text-[10px] font-bold uppercase tracking-widest">Sign up</span>
             </Link>
@@ -496,7 +491,7 @@ export default function SharedPage() {
               <span className="material-symbols-outlined text-[22px]">bolt</span>
               <span className="text-[10px] uppercase tracking-widest">Quiz</span>
             </Link>
-            <Link href="/" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
+            <Link href={`/auth?redirect=/shared/${token}`} className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
               <span className="material-symbols-outlined text-[22px]">person_add</span>
               <span className="text-[10px] uppercase tracking-widest">Sign up</span>
             </Link>
@@ -507,7 +502,7 @@ export default function SharedPage() {
       <main className="pt-24 px-6 md:px-12 max-w-7xl mx-auto">
         <div className="pt-6 mb-8">
           <p className="text-xs font-bold tracking-widest text-secondary uppercase mb-2">Shared Study Materials</p>
-          <h2 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight mb-4">{result.lecture_title}</h2>
+          <h2 className="text-2xl md:text-4xl font-extrabold text-white tracking-tight mb-4 break-words line-clamp-3 max-w-full">{result.lecture_title}</h2>
           <div className="flex flex-wrap gap-3">
             <span className="px-3 py-1 bg-surface-container-high rounded-full border border-outline-variant/20 text-xs font-medium text-primary flex items-center gap-1">
               <span className="material-symbols-outlined text-sm">quiz</span>
@@ -578,7 +573,7 @@ export default function SharedPage() {
                   <div className="border border-secondary/30 rounded-xl p-4 bg-secondary/5">
                     <p className="text-sm font-bold text-white mb-1">Sign up to retake</p>
                     <p className="text-xs text-on-surface-variant mb-3">Track improvement across unlimited retakes.</p>
-                    <Link href="/auth" className="block text-center synapse-gradient text-white font-bold py-2.5 rounded-lg text-sm hover:-translate-y-0.5 transition-transform">
+                    <Link href={`/auth?redirect=/shared/${token}`} className="block text-center synapse-gradient text-white font-bold py-2.5 rounded-lg text-sm hover:-translate-y-0.5 transition-transform">
                       Sign up free
                     </Link>
                   </div>
