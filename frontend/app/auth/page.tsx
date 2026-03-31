@@ -69,7 +69,8 @@ export default function AuthPage() {
         localStorage.removeItem(REMEMBERED_EMAIL_KEY);
         localStorage.setItem(REMEMBER_ME_KEY, "false");
       }
-      router.push("/dashboard");
+      const redirectTo = new URLSearchParams(window.location.search).get("redirect") || "/dashboard";
+      router.push(redirectTo);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
       setError(axiosErr.response?.data?.detail || "Something went wrong. Please try again.");

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getSharedResult, pingSharedSession, getQuizSession, saveQuizSession, retakeQuizSession } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
@@ -49,6 +49,7 @@ type ActiveTab = "mcqs" | "summary" | "concepts";
 export default function SharedPage() {
   const params = useParams();
   const token = params.token as string;
+  const router = useRouter();
 
   const [result, setResult] = useState<SharedResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,7 +72,13 @@ export default function SharedPage() {
 
   useEffect(() => {
     // Check auth token from localStorage (SSR-safe — runs client-side only)
-    setIsLoggedIn(isAuthenticated());
+    const loggedIn = isAuthenticated();
+    setIsLoggedIn(loggedIn);
+
+    if (!loggedIn) {
+      router.replace(`/auth?redirect=/shared/${token}`);
+      return;
+    }
 
     // Retrieve or generate a session ID for this browser tab
     let sid = sessionStorage.getItem(`cortexq_sid_${token}`);

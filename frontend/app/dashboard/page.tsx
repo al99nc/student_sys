@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getLectures, getStats } from "@/lib/api";
+import { getLectures, getStats, getMySharedSessions } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
 import Link from "next/link";
 
@@ -10,6 +10,17 @@ interface Lecture {
   title: string;
   file_path: string;
   created_at: string;
+}
+
+interface SharedSession {
+  lecture_id: number;
+  lecture_title: string;
+  share_token: string;
+  answered: number;
+  total: number;
+  correct: number;
+  retake_count: number;
+  updated_at: string | null;
 }
 
 type Filter = "all" | "processed" | "processing" | "unprocessed";
@@ -21,6 +32,7 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [stats, setStats] = useState({ total_lectures: 0, processed_lectures: 0, total_mcqs_answered: 0, avg_score: 0 });
+  const [sharedSessions, setSharedSessions] = useState<SharedSession[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -32,9 +44,12 @@ export default function DashboardPage() {
 
   const fetchLectures = async () => {
     try {
-      const [lecturesRes, statsRes] = await Promise.all([getLectures(), getStats()]);
+      const [lecturesRes, statsRes, sharedRes] = await Promise.all([
+        getLectures(), getStats(), getMySharedSessions()
+      ]);
       setLectures(lecturesRes.data);
       setStats(statsRes.data);
+      setSharedSessions(sharedRes.data);
     } catch {
       setError("Failed to load lectures");
     } finally {
@@ -86,10 +101,6 @@ export default function DashboardPage() {
           <Link href="/upload" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
             <span className="material-symbols-outlined">upload_file</span>
             <span className="hidden lg:inline font-medium">Upload</span>
-          </Link>
-          <Link href="/solved-shared" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
-            <span className="material-symbols-outlined">folder_shared</span>
-            <span className="hidden lg:inline font-medium">Solved Shared</span>
           </Link>
           <Link href="/analytics" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
             <span className="material-symbols-outlined">analytics</span>
@@ -146,6 +157,68 @@ export default function DashboardPage() {
           ))}
         </section>
 
+        {/* Shared Files Section */}
+        {sharedSessions.length > 0 && (
+          <section id="shared-section" className="mb-12">
+            <div className="flex items-center gap-3 mb-6">
+              <h3 className="text-2xl font-bold text-white tracking-tight">Shared With You</h3>
+              <span className="px-2.5 py-1 rounded-full text-xs font-black tracking-widest text-[#00D2FD] bg-[#00D2FD]/10 border border-[#00D2FD]/20">
+                {sharedSessions.length}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {sharedSessions.map((s) => {
+                const pct = s.total > 0 ? Math.round((s.answered / s.total) * 100) : 0;
+                const score = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
+                return (
+                  <Link
+                    key={s.share_token}
+                    href={`/shared/${s.share_token}`}
+                    className="group relative bg-surface-container-low/30 backdrop-blur-md border border-[#00D2FD]/15 rounded-3xl overflow-hidden hover:-translate-y-2 transition-all duration-300 hover:shadow-2xl hover:shadow-[#00D2FD]/10 hover:border-[#00D2FD]/30"
+                  >
+                    {/* Top accent — teal to distinguish from own lectures */}
+                    <div className="h-1.5 w-full bg-gradient-to-r from-[#00D2FD] to-[#7B2FFF]" />
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[#00D2FD] bg-[#00D2FD]/10 px-3 py-1 rounded-full">
+                          <span className="material-symbols-outlined text-xs">folder_shared</span>
+                          SHARED
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-outlined text-base text-[#00D2FD]/50">cloud_sync</span>
+                          {s.updated_at && (
+                            <span className="text-xs text-slate-500">{new Date(s.updated_at).toLocaleDateString()}</span>
+                          )}
+                        </div>
+                      </div>
+                      <h4 className="text-base font-bold text-white mb-4 group-hover:text-[#00D2FD] transition-colors leading-tight line-clamp-2 break-words min-w-0">
+                        {s.lecture_title}
+                      </h4>
+                      {/* Progress bar */}
+                      <div className="mb-3">
+                        <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+                          <span>{s.answered}/{s.total} answered</span>
+                          {s.answered > 0 && <span className={score >= 70 ? "text-green-400" : score >= 50 ? "text-yellow-400" : "text-red-400"}>{score}% correct</span>}
+                        </div>
+                        <div className="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-[#00D2FD] to-[#7B2FFF] transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {pct === 0 ? "Not started" : pct === 100 ? "Completed" : `${pct}% complete`}
+                        {s.retake_count > 0 && ` · ${s.retake_count} retake${s.retake_count > 1 ? "s" : ""}`}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Filter + Grid */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
           <h3 className="text-2xl font-bold text-white tracking-tight">Recent Lectures</h3>
@@ -193,9 +266,12 @@ export default function DashboardPage() {
                 <div className="p-8">
                   <div className="flex justify-between items-center mb-6">
                     <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#00D2FD] bg-[#00D2FD]/10 px-3 py-1 rounded-full">PROCESSED</span>
-                    <span className="text-xs text-slate-500 font-medium">{new Date(lecture.created_at).toLocaleDateString()}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-base text-slate-500">cloud_done</span>
+                      <span className="text-xs text-slate-500 font-medium">{new Date(lecture.created_at).toLocaleDateString()}</span>
+                    </div>
                   </div>
-                  <h4 className="text-xl font-bold text-white mb-6 group-hover:text-secondary transition-colors leading-tight">{lecture.title}</h4>
+                  <h4 className="text-xl font-bold text-white mb-6 group-hover:text-secondary transition-colors leading-tight line-clamp-2 break-words">{lecture.title}</h4>
                   <div className="flex gap-3">
                     <Link href={`/results/${lecture.id}`} className="flex-1 text-center py-3 rounded-xl synapse-gradient text-white font-bold text-sm hover:opacity-90 transition-opacity">
                       View Results
@@ -221,6 +297,22 @@ export default function DashboardPage() {
           <span className="material-symbols-outlined">upload_file</span>
           <span className="text-[10px] uppercase tracking-widest mt-1">Upload</span>
         </Link>
+        {/* Shared tab — shows badge when there are active shared sessions */}
+        <a
+          href="#shared-section"
+          onClick={(e) => { e.preventDefault(); document.getElementById("shared-section")?.scrollIntoView({ behavior: "smooth" }); }}
+          className="flex flex-col items-center text-slate-500 relative"
+        >
+          <span className="relative">
+            <span className="material-symbols-outlined">cloud_sync</span>
+            {sharedSessions.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#00D2FD] text-[9px] font-black text-slate-950 flex items-center justify-center leading-none">
+                {sharedSessions.length > 9 ? "9+" : sharedSessions.length}
+              </span>
+            )}
+          </span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Shared</span>
+        </a>
         <Link href="/analytics" className="flex flex-col items-center text-slate-500">
           <span className="material-symbols-outlined">insights</span>
           <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
