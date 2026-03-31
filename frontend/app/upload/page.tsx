@@ -28,6 +28,8 @@ function UploadContent() {
   const [timeEstimate, setTimeEstimate] = useState<{ estimated_range: string; chunks: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [tgFileLoading, setTgFileLoading] = useState(false);
+  const [tgFileReady, setTgFileReady] = useState(false);
 
   // ── Telegram MainButton control ──────────────────────────────────────────
   useEffect(() => {
@@ -82,14 +84,17 @@ function UploadContent() {
 
     const tgFileToken = searchParams.get("tg_file");
     if (tgFileToken) {
+      setTgFileLoading(true);
       fetch(`/api/bot/temp/${tgFileToken}`)
         .then(async (res) => {
           if (!res.ok) return;
           const fileName = res.headers.get("X-File-Name") || "lecture.pdf";
           const blob = await res.blob();
           setFile(new File([blob], fileName, { type: "application/pdf" }));
+          setTgFileReady(true);
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setTgFileLoading(false));
     }
   }, [processId, router, searchParams]);
 
@@ -290,24 +295,98 @@ function UploadContent() {
           <div className="relative group w-full max-w-3xl mx-auto">
             <div className="absolute -inset-1 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-10 group-hover:opacity-25 transition duration-500" />
             <div
-              className={`relative flex flex-col items-center justify-center w-full min-h-[280px] border-2 border-dashed rounded-xl px-8 py-12 cursor-pointer transition-all duration-300 ${
-                dragging ? "border-secondary-container/80 bg-secondary-container/5" : file ? "border-green-500/50 bg-green-500/5" : "border-primary-container/40 bg-surface-container-low/60 hover:border-secondary-container/60 hover:-translate-y-1"
+              className={`relative flex flex-col items-center justify-center w-full min-h-[280px] border-2 border-dashed rounded-xl px-8 py-12 transition-all duration-300 ${
+                tgFileLoading
+                  ? "border-primary-container/60 bg-primary-container/5 cursor-default"
+                  : dragging
+                  ? "border-secondary-container/80 bg-secondary-container/5 cursor-pointer"
+                  : file
+                  ? "border-green-500/50 bg-green-500/5 cursor-pointer"
+                  : "border-primary-container/40 bg-surface-container-low/60 hover:border-secondary-container/60 hover:-translate-y-1 cursor-pointer"
               }`}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragOver={(e) => { if (!tgFileLoading) { e.preventDefault(); setDragging(true); } }}
               onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onDrop={(e) => { if (!tgFileLoading) handleDrop(e); }}
+              onClick={() => { if (!tgFileLoading) fileInputRef.current?.click(); }}
             >
               <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
-              {file ? (
-                <>
+
+              {tgFileLoading ? (
+                /* ── Skeleton: PDF pages being attached ── */
+                <div className="flex flex-col items-center justify-center w-full pointer-events-none select-none">
+                  {/* Stacked pages */}
+                  <div className="relative w-28 h-36 mb-8" style={{ animation: "floatPage 3s ease-in-out infinite" }}>
+                    {/* Page 3 — back */}
+                    <div className="absolute inset-0 rounded-xl border border-outline-variant/20 bg-surface-container-highest/40"
+                      style={{ transform: "rotate(7deg) translate(10px, 8px)" }} />
+                    {/* Page 2 — middle */}
+                    <div className="absolute inset-0 rounded-xl border border-outline-variant/20 bg-surface-container-highest/60"
+                      style={{ transform: "rotate(3deg) translate(5px, 4px)" }} />
+                    {/* Page 1 — front */}
+                    <div className="absolute inset-0 rounded-xl border border-outline-variant/30 bg-surface-container-highest overflow-hidden">
+                      {/* shimmer sweep */}
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent"
+                        style={{ animation: "sweepShimmer 1.8s ease-in-out infinite" }} />
+                      <div className="p-3 flex flex-col gap-2">
+                        {/* PDF icon + title row */}
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="w-5 h-5 rounded bg-primary-container/40 animate-pulse" />
+                          <div className="flex-1 h-2 rounded-full bg-on-surface-variant/25 animate-pulse" style={{ animationDelay: "0.1s" }} />
+                        </div>
+                        {/* Content lines */}
+                        {[100, 88, 95, 72, 83, 60, 78].map((w, i) => (
+                          <div key={i} className="h-1.5 rounded-full bg-on-surface-variant/15 animate-pulse"
+                            style={{ width: `${w}%`, animationDelay: `${i * 0.07}s` }} />
+                        ))}
+                        {/* Highlight block */}
+                        <div className="mt-1 flex gap-1.5">
+                          {[42, 58, 33].map((w, i) => (
+                            <div key={i} className="h-1.5 rounded-full bg-primary-container/25 animate-pulse"
+                              style={{ width: `${w}%`, animationDelay: `${0.5 + i * 0.1}s` }} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Label */}
+                  <h3 className="text-lg font-bold text-white mb-1">Attaching your PDF…</h3>
+                  <p className="text-sm text-on-surface-variant mb-5">Fetching file from Telegram</p>
+
+                  {/* Progress bar */}
+                  <div className="w-56 h-1 rounded-full bg-surface-container-highest overflow-hidden">
+                    <div className="h-full w-2/5 rounded-full synapse-gradient"
+                      style={{ animation: "progressBar 1.4s ease-in-out infinite" }} />
+                  </div>
+
+                  {/* Bouncing dots */}
+                  <div className="flex gap-1.5 mt-4">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="w-1.5 h-1.5 rounded-full bg-primary-container/70 animate-bounce"
+                        style={{ animationDelay: `${i * 0.15}s` }} />
+                    ))}
+                  </div>
+                </div>
+
+              ) : file ? (
+                /* ── File ready ── */
+                <div style={{ animation: tgFileReady ? "popIn 0.45s cubic-bezier(0.34,1.56,0.64,1) forwards" : undefined }}
+                  className="flex flex-col items-center">
                   <div className="w-16 h-16 rounded-2xl bg-green-500/20 flex items-center justify-center mb-4">
                     <span className="material-symbols-outlined text-4xl text-green-400">description</span>
                   </div>
                   <h3 className="text-xl font-bold text-white mb-1">{file.name}</h3>
                   <p className="text-on-surface-variant text-sm">{(file.size / 1024 / 1024).toFixed(2)} MB · Click to change</p>
-                </>
+                  {tgFileReady && (
+                    <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                      <span className="material-symbols-outlined text-sm">check_circle</span>
+                      Attached from Telegram
+                    </div>
+                  )}
+                </div>
+
               ) : (
+                /* ── Empty state ── */
                 <>
                   <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mb-6 shadow-lg shadow-primary-container/20">
                     <span className="material-symbols-outlined text-4xl text-white">cloud_upload</span>

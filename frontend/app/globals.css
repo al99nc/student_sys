@@ -45,5 +45,26 @@ body {
   100% { transform: translateX(100%); }
 }
 
+@keyframes sweepShimmer {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(250%); }
+}
+
+@keyframes popIn {
+  0%   { transform: scale(0.75); opacity: 0; }
+  65%  { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes progressBar {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+@keyframes floatPage {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
