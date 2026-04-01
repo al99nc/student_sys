@@ -4,15 +4,22 @@ CortexQ Telegram Bot
 /start       → opens the CortexQ Mini App
 PDF forward  → bot uploads the PDF to the backend, then sends a button
                that opens the Mini App with the file pre-loaded.
+t.me link    → (owner only) joins the group, adds bot as admin, leaves.
 
 Run:  python bot.py
-Deps: pip install aiogram==3.*  python-dotenv  aiohttp
+Deps: pip install aiogram==3.*  python-dotenv  aiohttp  telethon
 Env:  BOT_TOKEN, MINI_APP_URL, BACKEND_URL, BOT_SECRET
+      OWNER_ID           — your Telegram numeric user ID (get from @userinfobot)
+      TELEGRAM_API_ID    — from my.telegram.org
+      TELEGRAM_API_HASH  — from my.telegram.org
+      BOT_USERNAME       — your bot's username without @
+      TELEGRAM_PHONE     — your phone number e.g. +1234567890
 """
 
 import asyncio
 import logging
 import os
+import re
 
 import aiohttp
 from aiogram import Bot, Dispatcher, F
@@ -24,6 +31,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 from dotenv import load_dotenv
+from joiner import join_and_add_bot
 
 load_dotenv()
 
@@ -31,6 +39,9 @@ BOT_TOKEN    = os.environ["BOT_TOKEN"]
 MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://cortexq.net/upload")
 BACKEND_URL  = os.environ.get("BACKEND_URL",  "https://cortexq.net/api").rstrip("/")
 BOT_SECRET   = os.environ.get("BOT_SECRET",   "cortexq-bot-secret-2026")
+OWNER_ID     = int(os.environ.get("OWNER_ID", "0"))  # your Telegram numeric user ID
+
+_TG_LINK_RE = re.compile(r"https?://t\.me/\S+")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -52,6 +63,18 @@ async def cmd_start(message: Message) -> None:
         parse_mode="Markdown",
         reply_markup=_open_app_button("📚 Open CortexQ", MINI_APP_URL),
     )
+
+
+@dp.message(F.text)
+async def handle_text(message: Message) -> None:
+    if not message.text or message.from_user.id != OWNER_ID:
+        return
+    match = _TG_LINK_RE.search(message.text)
+    if not match:
+        return
+    status_msg = await message.reply("⏳ Working on it...")
+    result = await join_and_add_bot(match.group(0))
+    await status_msg.edit_text(result, parse_mode="Markdown")
 
 
 @dp.message(F.document)

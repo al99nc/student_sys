@@ -63,11 +63,16 @@ async def upload_lecture(
         os.remove(file_path)
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Save to DB
+    # Save to DB — snapshot user profile onto the lecture at upload time
     lecture = Lecture(
         user_id=current_user.id,
         title=file.filename.replace(".pdf", ""),
         file_path=file_path,
+        university=current_user.university,
+        college=current_user.college,
+        year_of_study=current_user.year_of_study,
+        subject=current_user.subject,
+        topic_area=file.filename.replace(".pdf", ""),  # seed from filename; overwritten after AI processing
     )
     db.add(lecture)
     db.commit()

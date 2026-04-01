@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { signup, login } from "@/lib/api";
+import { signup, login, saveOnboarding } from "@/lib/api";
 import { saveToken } from "@/lib/auth";
 
 const REMEMBERED_EMAIL_KEY = "studyai_remembered_email";
@@ -22,6 +22,21 @@ function getPasswordStrength(password: string): { score: number; label: string; 
   return { score, label: "Very strong", color: "bg-green-500" };
 }
 
+const COLLEGES = [
+  { id: "medicine",       label: "Medicine",        icon: "stethoscope" },
+  { id: "pharmacy",       label: "Pharmacy",         icon: "medication" },
+  { id: "dentistry",      label: "Dentistry",        icon: "dentistry" },
+  { id: "nursing",        label: "Nursing",          icon: "medical_services" },
+  { id: "engineering",    label: "Engineering",      icon: "engineering" },
+  { id: "computer",       label: "Computer Science", icon: "code" },
+  { id: "business",       label: "Business",         icon: "business_center" },
+  { id: "law",            label: "Law",              icon: "gavel" },
+  { id: "science",        label: "Science",          icon: "science" },
+  { id: "arts",           label: "Arts & Humanities",icon: "palette" },
+  { id: "education",      label: "Education",        icon: "school" },
+  { id: "other",          label: "Other",            icon: "more_horiz" },
+];
+
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -34,6 +49,15 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [animKey, setAnimKey] = useState(0);
+  const [userName, setUserName] = useState("");
+  const [university, setUniversity] = useState("");
+  const [college, setCollege] = useState("");
+  const [yearOfStudy, setYearOfStudy] = useState<number | null>(null);
+
   useEffect(() => {
     const savedRemember = localStorage.getItem(REMEMBER_ME_KEY) === "true";
     setRememberMe(savedRemember);
@@ -44,8 +68,8 @@ export default function AuthPage() {
   }, []);
 
   useEffect(() => {
-    emailRef.current?.focus();
-  }, [mode]);
+    if (!showOnboarding) emailRef.current?.focus();
+  }, [mode, showOnboarding]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,19 +82,27 @@ export default function AuthPage() {
         setSuccess("Account created! Signing you in…");
         const res = await login(email, password);
         saveToken(res.data.access_token);
+        if (rememberMe) {
+          localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+          localStorage.setItem(REMEMBER_ME_KEY, "true");
+        } else {
+          localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+          localStorage.setItem(REMEMBER_ME_KEY, "false");
+        }
+        setShowOnboarding(true);
       } else {
         const res = await login(email, password);
         saveToken(res.data.access_token);
+        if (rememberMe) {
+          localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+          localStorage.setItem(REMEMBER_ME_KEY, "true");
+        } else {
+          localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+          localStorage.setItem(REMEMBER_ME_KEY, "false");
+        }
+        const redirectTo = new URLSearchParams(window.location.search).get("redirect") || "/dashboard";
+        router.push(redirectTo);
       }
-      if (rememberMe) {
-        localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
-        localStorage.setItem(REMEMBER_ME_KEY, "true");
-      } else {
-        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
-        localStorage.setItem(REMEMBER_ME_KEY, "false");
-      }
-      const redirectTo = new URLSearchParams(window.location.search).get("redirect") || "/dashboard";
-      router.push(redirectTo);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
       setError(axiosErr.response?.data?.detail || "Something went wrong. Please try again.");
@@ -87,8 +119,498 @@ export default function AuthPage() {
     setShowPassword(false);
   };
 
+  const advanceOnboarding = async () => {
+    if (onboardingStep === 0) {
+      setOnboardingStep(1); setAnimKey((k) => k + 1);
+    } else if (onboardingStep === 1 && userName.trim()) {
+      setOnboardingStep(2); setAnimKey((k) => k + 1);
+    } else if (onboardingStep === 2 && university.trim()) {
+      setOnboardingStep(3); setAnimKey((k) => k + 1);
+    } else if (onboardingStep === 3 && college) {
+      setOnboardingStep(4); setAnimKey((k) => k + 1);
+    } else if (onboardingStep === 4 && yearOfStudy !== null) {
+      setLoading(true);
+      try {
+        await saveOnboarding(userName.trim(), university.trim(), college, yearOfStudy);
+      } catch {
+        // non-blocking — profile saved locally even if request fails
+      } finally {
+        setLoading(false);
+      }
+      localStorage.setItem("cortexq_profile", JSON.stringify({ name: userName, university, college, yearOfStudy }));
+      router.push("/dashboard");
+    }
+  };
+
+  const goBackOnboarding = () => {
+    if (onboardingStep > 0) {
+      setOnboardingStep((s) => s - 1);
+      setAnimKey((k) => k + 1);
+    }
+  };
+
   const strength = mode === "signup" ? getPasswordStrength(password) : null;
 
+  // ── Shared background ────────────────────────────────────────────────────────
+  const Bg = () => (
+    <>
+      <div className="grain-overlay" />
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full"
+          style={{
+            filter: "blur(80px)",
+            background:
+              "radial-gradient(circle, rgba(123,47,255,0.4) 0%, rgba(0,210,253,0.2) 60%, transparent 100%)",
+          }}
+        />
+        <div className="absolute top-[20%] right-[10%] w-64 h-64 bg-primary-container/10 blur-[100px] rounded-full" />
+        <div className="absolute bottom-[20%] left-[10%] w-96 h-96 bg-secondary-container/10 blur-[120px] rounded-full" />
+      </div>
+    </>
+  );
+
+  // ── Onboarding ────────────────────────────────────────────────────────────────
+  if (showOnboarding) {
+    return (
+      <div
+        className="relative min-h-screen text-on-surface overflow-x-hidden"
+        style={{ backgroundColor: "#0d0f1c" }}
+      >
+        <Bg />
+
+        <style>{`
+          @keyframes cq-slide-in {
+            from { opacity: 0; transform: translateX(52px) scale(0.97); }
+            to   { opacity: 1; transform: translateX(0)   scale(1);    }
+          }
+          @keyframes cq-fade-up {
+            from { opacity: 0; transform: translateY(22px); }
+            to   { opacity: 1; transform: translateY(0);    }
+          }
+          @keyframes cq-pulse-icon {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(123,47,255,0); }
+            50%       { box-shadow: 0 0 32px 8px rgba(123,47,255,0.35); }
+          }
+          @keyframes cq-spin-slow {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+          }
+          .cq-step-enter { animation: cq-slide-in 0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+          .cq-fade-up-1  { opacity:0; animation: cq-fade-up 0.5s ease 0.15s forwards; }
+          .cq-fade-up-2  { opacity:0; animation: cq-fade-up 0.5s ease 0.28s forwards; }
+          .cq-fade-up-3  { opacity:0; animation: cq-fade-up 0.5s ease 0.41s forwards; }
+          .cq-level-card { transition: background 0.2s, border-color 0.2s, transform 0.15s; }
+          .cq-level-card:hover { transform: scale(1.03); }
+        `}</style>
+
+        <main className="relative min-h-screen flex flex-col items-center justify-center px-6 py-12 z-10">
+          {/* Logo */}
+          <div className="text-2xl font-black bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent tracking-tighter mb-8">
+            cortexQ
+          </div>
+
+          {/* Progress dots + back button – steps 1-3 only */}
+          {onboardingStep > 0 && (
+            <div className="flex items-center gap-4 mb-8">
+              <button
+                onClick={goBackOnboarding}
+                className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 flex-shrink-0"
+                style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
+                aria-label="Go back"
+              >
+                <span className="material-symbols-outlined text-base text-on-surface-variant">arrow_back</span>
+              </button>
+              <div className="flex items-center gap-2">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="rounded-full transition-all duration-500"
+                    style={{
+                      height: 8,
+                      width: i === onboardingStep ? 28 : 8,
+                      background:
+                        i <= onboardingStep
+                          ? "linear-gradient(90deg,#7B2FFF,#00D2FD)"
+                          : "rgba(255,255,255,0.12)",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Step content — re-keyed so CSS entry animation re-fires */}
+          <div key={animKey} className="cq-step-enter w-full max-w-md">
+
+            {/* ── Step 0: Welcome ───────────────────────────────────────── */}
+            {onboardingStep === 0 && (
+              <div className="text-center">
+                {/* Animated icon */}
+                <div
+                  className="inline-flex items-center justify-center w-20 h-20 rounded-3xl mb-6 mx-auto"
+                  style={{
+                    background:
+                      "linear-gradient(135deg,rgba(123,47,255,0.25),rgba(0,210,253,0.15))",
+                    border: "1px solid rgba(123,47,255,0.4)",
+                    animation: "cq-pulse-icon 2.8s ease-in-out infinite",
+                  }}
+                >
+                  <span
+                    className="material-symbols-outlined text-[2.4rem]"
+                    style={{
+                      background: "linear-gradient(135deg,#7B2FFF,#00D2FD)",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      fontVariationSettings: "'FILL' 1",
+                    }}
+                  >
+                    neurology
+                  </span>
+                </div>
+
+                <h1 className="text-3xl font-black text-white mb-3 tracking-tight">
+                  Nice to meet you!
+                </h1>
+                <p className="text-on-surface-variant leading-relaxed mb-10 max-w-sm mx-auto">
+                  cortexQ turns your lecture PDFs into smart MCQ quizzes — so you
+                  study smarter, retain more, and actually enjoy exam prep.
+                </p>
+
+                {/* Feature cards */}
+                <div className="grid grid-cols-3 gap-3 mb-10">
+                  {[
+                    { icon: "upload_file", title: "Upload", desc: "Drop your lectures" },
+                    { icon: "quiz",        title: "Generate", desc: "AI builds MCQs" },
+                    { icon: "trending_up", title: "Improve",  desc: "Track your growth" },
+                  ].map((feat, i) => (
+                    <div
+                      key={feat.icon}
+                      className={`rounded-2xl p-4 text-center cq-fade-up-${i + 1}`}
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <span
+                        className="material-symbols-outlined text-[1.7rem] mb-2 block"
+                        style={{
+                          background: "linear-gradient(135deg,#7B2FFF,#00D2FD)",
+                          WebkitBackgroundClip: "text",
+                          WebkitTextFillColor: "transparent",
+                          fontVariationSettings: "'FILL' 1",
+                        }}
+                      >
+                        {feat.icon}
+                      </span>
+                      <div className="text-sm font-bold text-white">{feat.title}</div>
+                      <div className="text-xs text-on-surface-variant mt-0.5 leading-snug">
+                        {feat.desc}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={advanceOnboarding}
+                  className="w-full py-4 text-white font-bold rounded-xl shadow-lg hover:-translate-y-1 active:scale-[0.98] transition-all duration-300 flex items-center justify-center gap-2"
+                  style={{
+                    background: "linear-gradient(90deg,#7B2FFF,#00D2FD)",
+                    boxShadow: "0 8px 32px rgba(123,47,255,0.35)",
+                  }}
+                >
+                  <span>Let&apos;s get started</span>
+                  <span className="material-symbols-outlined text-xl">arrow_forward</span>
+                </button>
+              </div>
+            )}
+
+            {/* ── Step 1: Name ──────────────────────────────────────────── */}
+            {onboardingStep === 1 && (
+              <div
+                className="rounded-3xl p-8 shadow-2xl relative overflow-hidden"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  backdropFilter: "blur(24px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-[#7B2FFF]/40 to-transparent" />
+
+                <div className="mb-8">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: "rgba(123,47,255,0.15)", color: "#a78bfa", border: "1px solid rgba(123,47,255,0.25)" }}>
+                    <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>person</span>
+                    Step 1 of 4
+                  </div>
+                  <h2 className="text-2xl font-black text-white">What should we call you?</h2>
+                  <p className="text-on-surface-variant text-sm mt-1">
+                    We&apos;ll personalize your experience
+                  </p>
+                </div>
+
+                <div className="relative mb-8">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && userName.trim() && advanceOnboarding()}
+                    placeholder=" "
+                    className="block px-4 pb-2.5 pt-6 w-full text-on-surface bg-surface-container-lowest rounded-xl border-0 focus:ring-2 focus:ring-secondary/50 appearance-none peer transition-all duration-300 outline-none text-base"
+                  />
+                  <label className="absolute text-sm text-on-surface-variant duration-300 transform -translate-y-4 scale-75 top-4 z-10 origin-[0] left-4 peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-4 peer-focus:text-secondary">
+                    Your first name
+                  </label>
+                </div>
+
+                <button
+                  onClick={advanceOnboarding}
+                  disabled={!userName.trim()}
+                  className="w-full py-4 text-white font-bold rounded-xl transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:-translate-y-1 active:scale-[0.98] disabled:hover:translate-y-0"
+                  style={{
+                    background: "linear-gradient(90deg,#7B2FFF,#00D2FD)",
+                    boxShadow: "0 8px 32px rgba(123,47,255,0.3)",
+                  }}
+                >
+                  <span>Continue</span>
+                  <span className="material-symbols-outlined text-xl">arrow_forward</span>
+                </button>
+              </div>
+            )}
+
+            {/* ── Step 2: University ────────────────────────────────────── */}
+            {onboardingStep === 2 && (
+              <div
+                className="rounded-3xl p-8 shadow-2xl relative overflow-hidden"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  backdropFilter: "blur(24px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-[#00D2FD]/40 to-transparent" />
+
+                <div className="mb-8">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: "rgba(0,210,253,0.12)", color: "#67e8f9", border: "1px solid rgba(0,210,253,0.2)" }}>
+                    <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>school</span>
+                    Step 2 of 4
+                  </div>
+                  <h2 className="text-2xl font-black text-white">
+                    {userName ? `Hey ${userName}! ` : ""}Where do you study?
+                  </h2>
+                  <p className="text-on-surface-variant text-sm mt-1">
+                    Your university or college
+                  </p>
+                </div>
+
+                <div className="relative mb-8">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={university}
+                    onChange={(e) => setUniversity(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && university.trim() && advanceOnboarding()}
+                    placeholder=" "
+                    className="block px-4 pb-2.5 pt-6 w-full text-on-surface bg-surface-container-lowest rounded-xl border-0 focus:ring-2 focus:ring-secondary/50 appearance-none peer transition-all duration-300 outline-none text-base"
+                  />
+                  <label className="absolute text-sm text-on-surface-variant duration-300 transform -translate-y-4 scale-75 top-4 z-10 origin-[0] left-4 peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-4 peer-focus:text-secondary">
+                    University or College name
+                  </label>
+                </div>
+
+                <button
+                  onClick={advanceOnboarding}
+                  disabled={!university.trim()}
+                  className="w-full py-4 text-white font-bold rounded-xl transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:-translate-y-1 active:scale-[0.98] disabled:hover:translate-y-0"
+                  style={{
+                    background: "linear-gradient(90deg,#7B2FFF,#00D2FD)",
+                    boxShadow: "0 8px 32px rgba(123,47,255,0.3)",
+                  }}
+                >
+                  <span>Continue</span>
+                  <span className="material-symbols-outlined text-xl">arrow_forward</span>
+                </button>
+              </div>
+            )}
+
+            {/* ── Step 3: College ───────────────────────────────────────── */}
+            {onboardingStep === 3 && (
+              <div
+                className="rounded-3xl p-8 shadow-2xl relative overflow-hidden"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  backdropFilter: "blur(24px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-[#7B2FFF]/40 via-50% to-[#00D2FD]/40 to-transparent" />
+
+                <div className="mb-6">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: "rgba(123,47,255,0.15)", color: "#a78bfa", border: "1px solid rgba(123,47,255,0.25)" }}>
+                    <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>domain</span>
+                    Step 3 of 4
+                  </div>
+                  <h2 className="text-2xl font-black text-white">Which faculty are you in?</h2>
+                  <p className="text-on-surface-variant text-sm mt-1">
+                    Your college or faculty of study
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mb-6">
+                  {COLLEGES.map((col) => {
+                    const selected = college === col.id;
+                    return (
+                      <button
+                        key={col.id}
+                        onClick={() => setCollege(col.id)}
+                        className="cq-level-card flex items-center gap-3 p-3 rounded-xl text-left"
+                        style={{
+                          background: selected
+                            ? "linear-gradient(135deg,rgba(123,47,255,0.28),rgba(0,210,253,0.14))"
+                            : "rgba(255,255,255,0.03)",
+                          border: selected
+                            ? "1px solid rgba(123,47,255,0.5)"
+                            : "1px solid rgba(255,255,255,0.08)",
+                          transform: selected ? "scale(1.02)" : "scale(1)",
+                        }}
+                      >
+                        <span
+                          className="material-symbols-outlined text-xl flex-shrink-0"
+                          style={{
+                            color: selected ? "#00D2FD" : "rgba(255,255,255,0.35)",
+                            fontVariationSettings: "'FILL' 1",
+                          }}
+                        >
+                          {col.icon}
+                        </span>
+                        <span
+                          className="text-sm font-semibold leading-tight"
+                          style={{ color: selected ? "#fff" : "rgba(255,255,255,0.55)" }}
+                        >
+                          {col.label}
+                        </span>
+                        {selected && (
+                          <span
+                            className="material-symbols-outlined text-base ml-auto flex-shrink-0"
+                            style={{ color: "#00D2FD", fontVariationSettings: "'FILL' 1" }}
+                          >
+                            check_circle
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={advanceOnboarding}
+                  disabled={!college}
+                  className="w-full py-4 text-white font-bold rounded-xl transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:-translate-y-1 active:scale-[0.98] disabled:hover:translate-y-0"
+                  style={{
+                    background: "linear-gradient(90deg,#7B2FFF,#00D2FD)",
+                    boxShadow: college ? "0 8px 32px rgba(123,47,255,0.35)" : "none",
+                  }}
+                >
+                  <span>Continue</span>
+                  <span className="material-symbols-outlined text-xl">arrow_forward</span>
+                </button>
+              </div>
+            )}
+
+            {/* ── Step 4: Year of study ─────────────────────────────────── */}
+            {onboardingStep === 4 && (
+              <div
+                className="rounded-3xl p-8 shadow-2xl relative overflow-hidden"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  backdropFilter: "blur(24px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-[#00D2FD]/50 to-transparent" />
+
+                <div className="mb-6">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: "rgba(0,210,253,0.12)", color: "#67e8f9", border: "1px solid rgba(0,210,253,0.2)" }}>
+                    <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>military_tech</span>
+                    Step 4 of 4
+                  </div>
+                  <h2 className="text-2xl font-black text-white">What year are you in?</h2>
+                  <p className="text-on-surface-variant text-sm mt-1">
+                    Your current year of study
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 mb-6">
+                  {[1, 2, 3, 4, 5, 6].map((yr) => {
+                    const selected = yearOfStudy === yr;
+                    return (
+                      <button
+                        key={yr}
+                        onClick={() => setYearOfStudy(yr)}
+                        className="cq-level-card flex flex-col items-center justify-center gap-1 py-5 rounded-2xl"
+                        style={{
+                          background: selected
+                            ? "linear-gradient(135deg,rgba(123,47,255,0.3),rgba(0,210,253,0.15))"
+                            : "rgba(255,255,255,0.03)",
+                          border: selected
+                            ? "1px solid rgba(0,210,253,0.5)"
+                            : "1px solid rgba(255,255,255,0.08)",
+                          transform: selected ? "scale(1.05)" : "scale(1)",
+                          boxShadow: selected ? "0 0 20px rgba(0,210,253,0.15)" : "none",
+                        }}
+                      >
+                        <span
+                          className="text-3xl font-black"
+                          style={{
+                            background: selected
+                              ? "linear-gradient(135deg,#7B2FFF,#00D2FD)"
+                              : "rgba(255,255,255,0.3)",
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                          }}
+                        >
+                          {yr}
+                        </span>
+                        <span
+                          className="text-xs font-medium"
+                          style={{ color: selected ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.25)" }}
+                        >
+                          {yr === 1 ? "1st" : yr === 2 ? "2nd" : yr === 3 ? "3rd" : `${yr}th`} year
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={advanceOnboarding}
+                  disabled={yearOfStudy === null}
+                  className="w-full py-4 text-white font-bold rounded-xl transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:-translate-y-1 active:scale-[0.98] disabled:hover:translate-y-0"
+                  style={{
+                    background: "linear-gradient(90deg,#7B2FFF,#00D2FD)",
+                    boxShadow: yearOfStudy !== null ? "0 8px 32px rgba(123,47,255,0.4)" : "none",
+                  }}
+                >
+                  {loading ? (
+                    <span className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
+                  ) : (
+                    <span className="material-symbols-outlined text-xl">rocket_launch</span>
+                  )}
+                  <span>{loading ? "Saving…" : "Start studying"}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ── Auth page (unchanged) ─────────────────────────────────────────────────────
   return (
     <div className="relative min-h-screen text-on-surface overflow-x-hidden" style={{ backgroundColor: "#0d0f1c" }}>
       <div className="grain-overlay" />

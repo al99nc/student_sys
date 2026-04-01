@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.models import User
-from app.schemas.auth import UserCreate, UserLogin, Token, UserOut
+from app.schemas.auth import UserCreate, UserLogin, Token, UserOut, OnboardingUpdate
 from app.core.security import hash_password, verify_password, create_access_token
 from app.api.deps import get_current_user
 
@@ -32,4 +32,18 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+@router.post("/onboarding", response_model=UserOut)
+def save_onboarding(
+    data: OnboardingUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.name = data.name.strip()
+    current_user.university = data.university.strip()
+    current_user.college = data.college.strip()
+    current_user.year_of_study = data.year_of_study
+    db.commit()
+    db.refresh(current_user)
     return current_user

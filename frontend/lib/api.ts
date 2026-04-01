@@ -37,6 +37,9 @@ export const signup = (email: string, password: string) =>
 export const login = (email: string, password: string) =>
   api.post("/auth/login", { email, password });
 
+export const saveOnboarding = (name: string, university: string, college: string, year_of_study: number) =>
+  api.post("/auth/onboarding", { name, university, college, year_of_study });
+
 // Lectures
 export const uploadLecture = (file: File) => {
   const form = new FormData();

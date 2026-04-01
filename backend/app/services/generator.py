@@ -128,10 +128,9 @@ def _estimate_processing_time(text: str, mode: str) -> dict:
     n_chunks = len(chunks)
     max_tokens = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])["max_tokens"]
 
-    # TPS is output-generation speed; prefill (input) is near-instant on Groq LPUs.
-    # For multi-chunk, add _INTER_CHUNK_WAIT seconds between sequential chunks.
+    # All chunks run concurrently — total time ≈ single chunk time.
     per_chunk_seconds = max_tokens / ESTIMATED_TPS + 2   # +2 for network + prefill
-    total_seconds = per_chunk_seconds + _INTER_CHUNK_WAIT * max(0, n_chunks - 1)
+    total_seconds = per_chunk_seconds
 
     return {
         "chunks": n_chunks,
@@ -219,6 +218,8 @@ async def _call_single_chunk(
                 resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
                 if not resp.is_success:
                     logger.error(f"[{mode}] HTTP {resp.status_code}: {resp.text[:300]}")
+                if resp.status_code == 401:
+                    raise RuntimeError("INVALID_KEY: API key rejected (401 Unauthorized)")
                 if resp.status_code == 429:
                     body = resp.text
                     if "per day" in body or "TPD" in body:
@@ -228,6 +229,9 @@ async def _call_single_chunk(
                             f"DAILY_LIMIT: Daily token quota exhausted "
                             f"(200 000 tokens/day). Try again in ~{minutes} minutes."
                         )
+                    # Per-minute TPM limit — embed exact retry seconds so caller waits precisely
+                    retry_in = _parse_groq_retry_after(resp.text)
+                    raise RuntimeError(f"TPM_LIMIT:{retry_in:.1f}: {resp.text[:120]}")
                 resp.raise_for_status()
 
             elapsed = time.monotonic() - t_start
@@ -264,6 +268,10 @@ async def _call_single_chunk(
 
             # Daily limit — propagate immediately so caller can rotate key
             if "DAILY_LIMIT" in err_str:
+                raise
+
+            # Invalid key — propagate immediately, no point retrying
+            if "INVALID_KEY" in err_str:
                 raise
 
             # TPM per-minute 429 — propagate immediately so caller rotates to next key
@@ -400,25 +408,55 @@ async def _call_chunk_with_rotation(
     chunk_index: int,
     total_chunks: int,
 ) -> tuple[dict, float]:
-    """Call a single chunk, rotating keys on both TPM (per-minute) and daily-limit errors."""
+    """Call a single chunk, rotating keys on TPM, daily-limit, and invalid-key errors.
+
+    Round-robin start: chunk N starts at key[N % len(keys)] so concurrent chunks
+    each prefer a different key and don't all hammer key[0] simultaneously.
+    """
     last_error: Exception | None = None
     tpm_hit_keys: set[str] = set()
+    tpm_retry_after: float = 65.0   # updated from Groq's actual retry-after header
 
-    for key in list(available_keys):
+    def _rotated_keys() -> list[str]:
+        """Return available_keys starting from this chunk's preferred slot."""
+        keys = list(available_keys)
+        if not keys:
+            return keys
+        start = chunk_index % len(keys)
+        return keys[start:] + keys[:start]
+
+    for key in _rotated_keys():
+        if key not in available_keys:
+            continue  # another concurrent chunk already removed this key
         try:
             return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
         except RuntimeError as e:
             err_str = str(e)
             if "DAILY_LIMIT" in err_str:
-                available_keys.remove(key)
+                if key in available_keys:
+                    available_keys.remove(key)
                 logger.warning(
                     f"[{mode}] Key ...{key[-6:]} hit daily limit — "
                     f"rotating ({len(available_keys)} remaining)"
                 )
                 last_error = e
                 continue
+            if "INVALID_KEY" in err_str:
+                if key in available_keys:
+                    available_keys.remove(key)
+                logger.warning(
+                    f"[{mode}] Key ...{key[-6:]} is invalid — "
+                    f"removing permanently ({len(available_keys)} remaining)"
+                )
+                last_error = e
+                continue
             if "TPM_LIMIT" in err_str:
                 tpm_hit_keys.add(key)
+                # Parse the exact retry-after Groq embedded: "TPM_LIMIT:40.5:..."
+                try:
+                    tpm_retry_after = max(tpm_retry_after, float(err_str.split(":")[1]))
+                except (IndexError, ValueError):
+                    pass
                 logger.warning(
                     f"[{mode}] Key ...{key[-6:]} hit TPM limit — rotating to next key"
                 )
@@ -426,17 +464,20 @@ async def _call_chunk_with_rotation(
                 continue
             raise
 
-    # All keys hit TPM — wait 65s for the minute window to reset, then retry once
+    # All live keys hit TPM — wait exactly as long as Groq says, not a hardcoded 65s
     if tpm_hit_keys and available_keys:
-        logger.info(f"[{mode}] All {len(tpm_hit_keys)} key(s) hit TPM limit — waiting 65s")
-        await asyncio.sleep(65)
+        wait = tpm_retry_after + 1.0   # +1s safety margin
+        logger.info(f"[{mode}] All {len(tpm_hit_keys)} key(s) hit TPM limit — waiting {wait:.0f}s")
+        await asyncio.sleep(wait)
         for key in list(available_keys):
             try:
                 return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
             except RuntimeError as e:
                 last_error = e
-                if "DAILY_LIMIT" in str(e):
-                    available_keys.remove(key)
+                err_str = str(e)
+                if "DAILY_LIMIT" in err_str or "INVALID_KEY" in err_str:
+                    if key in available_keys:
+                        available_keys.remove(key)
                 continue
 
     if last_error and "DAILY_LIMIT" in str(last_error):
@@ -473,26 +514,11 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
     try:
         t_total_start = time.monotonic()
 
-        if total_chunks == 1:
-            # Single chunk — fastest path, no rate-limit concerns.
-            chunk_output = [await _call_chunk_with_rotation(available_keys, chunks[0], mode, 0, 1)]
-        else:
-            # Multi-chunk: process sequentially to stay within GROQ_TPM (8 000 tokens/min).
-            # Each chunk uses ~_SAFE_TPM tokens; firing concurrently would exceed the budget
-            # and cause cascading 429s.  After each chunk we wait _INTER_CHUNK_WAIT seconds
-            # so the TPM window fully resets before the next request fires.
-            chunk_output = []
-            for i, chunk in enumerate(chunks):
-                result = await _call_chunk_with_rotation(available_keys, chunk, mode, i, total_chunks)
-                chunk_output.append(result)
-                if i < total_chunks - 1:
-                    elapsed = result[1]
-                    refill_wait = max(2.0, _INTER_CHUNK_WAIT - elapsed)
-                    logger.info(
-                        f"[{mode}] TPM refill: waiting {refill_wait:.0f}s "
-                        f"before chunk {i + 2}/{total_chunks}..."
-                    )
-                    await asyncio.sleep(refill_wait)
+        # All chunks fire concurrently — paid API key has no per-minute TPM cap.
+        chunk_output = await asyncio.gather(*[
+            _call_chunk_with_rotation(available_keys, chunk, mode, i, total_chunks)
+            for i, chunk in enumerate(chunks)
+        ])
 
         chunk_results = [data for data, _ in chunk_output]
         chunk_timings = [round(elapsed, 2) for _, elapsed in chunk_output]

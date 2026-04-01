@@ -7,6 +7,11 @@ class LectureOut(BaseModel):
     title: str
     file_path: str
     created_at: datetime
+    university: Optional[str] = None
+    college: Optional[str] = None
+    year_of_study: Optional[int] = None
+    subject: Optional[str] = None
+    topic_area: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -1,15 +1,27 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
+from uuid import uuid4
 from app.db.database import Base
+
+
+def _uuid() -> str:
+    return str(uuid4())
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(36), primary_key=True, index=True, nullable=False, default=_uuid)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+    name = Column(String(120), nullable=True)
+    university = Column(String(255), nullable=True)
+    college = Column(String(120), nullable=True)       # faculty: medicine, pharmacy, etc.
+    year_of_study = Column(Integer, nullable=True)     # 1–6
+    subject = Column(String(255), nullable=True)       # set when uploading a lecture
+    topic_area = Column(String(255), nullable=True)    # auto-extracted from PDF
+    level = Column(String(50), nullable=True)          # legacy — kept for existing rows
     created_at = Column(DateTime, default=datetime.utcnow)
 
     lectures = relationship("Lecture", back_populates="owner")
@@ -23,6 +35,12 @@ class Lecture(Base):
     title = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    university = Column(String(255), nullable=True)
+    college = Column(String(120), nullable=True)       # faculty: medicine, pharmacy, etc.
+    year_of_study = Column(Integer, nullable=True)     # 1–6
+    subject = Column(String(255), nullable=True)       # set when uploading a lecture
+    topic_area = Column(String(255), nullable=True)    # auto-extracted from PDF
+    level = Column(String(50), nullable=True)          # legacy — kept for existing rows
 
     owner = relationship("User", back_populates="lectures")
     result = relationship("Result", back_populates="lecture", uselist=False)
