@@ -85,3 +85,9 @@ export const retakeQuizSession = (lectureId: number) =>
 
 export const getMySharedSessions = () =>
   api.get("/my-shared-sessions");
+
+export const getNextBestAction = () =>
+  api.get("/api/v1/performance/students/me/next-action");
+
+export const postChatCoach = (message: string) =>
+  api.post("/api/v1/performance/students/me/chat", { message });

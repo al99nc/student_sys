@@ -39,6 +39,8 @@ from app.schemas.performance import (
     SaveQuestionsResponse,
     McqQuestionOut,
     WeeklyQuizResponse,
+    AiInsightResponse,
+    NextBestActionResponse,
 )
 
 router = APIRouter(prefix="/api/v1/performance", tags=["performance"])
@@ -95,7 +97,7 @@ def submit_answer(
         QuestionAttempt.student_id == current_user.id,
         QuestionAttempt.question_id == body.question_id,
     ).count()
-    
+
     # confidence_proxy: fast+correct = high confidence, wrong = 0
     confidence_proxy = (1.0 / body.time_spent_seconds) if is_correct and body.time_spent_seconds > 0 else 0.0
 
@@ -512,6 +514,144 @@ def get_readiness(
     )
 
 
+def _estimate_readiness_24h(student_id: int, db: Session) -> float:
+    sessions = (
+        db.query(PerformanceSession)
+        .filter(
+            PerformanceSession.student_id == student_id,
+            PerformanceSession.completed_at.isnot(None),
+        )
+        .order_by(PerformanceSession.completed_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    if not sessions:
+        return None
+
+    weights = [1.1, 1.0, 0.9, 0.8, 0.7]
+    scores = [s.readiness_score or 0.0 for s in sessions]
+    total_w = sum(weights[: len(scores)])
+    if total_w == 0:
+        return None
+
+    weighted = sum((scores[i] * weights[i]) for i in range(len(scores)))
+    return round(weighted / total_w, 1)
+
+
+def _build_next_best_action(student_id: int, db: Session) -> dict:
+    now = datetime.utcnow()
+
+    weak_points = db.query(WeakPoint).filter(WeakPoint.student_id == student_id).all()
+    pattern = db.query(LearningPattern).filter(LearningPattern.student_id == student_id).first()
+
+    overconfident = (pattern.overconfidence_rate or 0.0) > 0.3 if pattern else False
+
+    dangerous = [wp for wp in weak_points if wp.dangerous_misconception]
+    decay_overdue = [
+        wp
+        for wp in weak_points
+        if wp.decay_rate is not None
+        and wp.last_attempted_at is not None
+        and (now - wp.last_attempted_at).days > wp.decay_rate
+    ]
+    weak_flagged = [wp for wp in weak_points if wp.flagged_as_weak]
+
+    # Primary topic selection
+    candidate: WeakPoint = None
+    action_type = "practice_topic"
+
+    if dangerous:
+        candidate = sorted(dangerous, key=lambda x: x.accuracy_rate or 0.0)[0]
+        action_type = "misconception_correction"
+    elif decay_overdue:
+        candidate = sorted(decay_overdue, key=lambda x: (now - x.last_attempted_at).days, reverse=True)[0]
+        action_type = "spaced_review"
+    elif weak_flagged:
+        candidate = sorted(weak_flagged, key=lambda x: x.accuracy_rate or 1.0)[0]
+        if candidate.accuracy_rate is not None:
+            if candidate.accuracy_rate < 0.5:
+                action_type = "review_topic"
+            elif candidate.accuracy_rate < 0.7:
+                action_type = "practice_topic"
+            else:
+                action_type = "mixed_review"
+    elif weak_points:
+        candidate = sorted(weak_points, key=lambda x: x.accuracy_rate or 1.0)[0]
+        action_type = "practice_topic" if candidate.accuracy_rate < 0.85 else "advance_topic"
+    else:
+        action_type = "exploration"
+
+    if candidate is None:
+        next_step = "Start with a new high-yield topic and do 5 focused questions."
+        topic = None
+        reason = ["No existing weak point data available yet."]
+    else:
+        topic = candidate.topic
+        if action_type == "misconception_correction":
+            next_step = f"Correct your misconception on {topic}: do 4 targeted concept-explanation questions first."
+        elif action_type == "spaced_review":
+            next_step = f"Review {topic} now; the topic is overdue based on your decay curve." 
+        elif action_type == "review_topic":
+            next_step = f"Review basics of {topic} with 5 rapid flashcards and one explanation note."
+        elif action_type == "practice_topic":
+            next_step = f"Practice {topic} with 5 application questions, then check reasoning immediately."
+        elif action_type == "mixed_review":
+            next_step = f"Mix review and applied problems in {topic} with 3 quick remembrance checks."
+        elif action_type == "advance_topic":
+            next_step = f"Move forward from {topic} to the next connected topic after 3 quiz questions."
+        else:
+            next_step = f"Explore a new topic with 5 quick questions to gather data."
+
+        reason = []
+        if dangerous:
+            reason.append("Dangerous misconception detected")
+        if decay_overdue:
+            reason.append("Decay overdue: revisit this topic")
+        if candidate.flagged_as_weak:
+            reason.append(f"Weak topic ({candidate.accuracy_rate:.0%} accuracy)")
+        else:
+            reason.append(f"Accuracy at {candidate.accuracy_rate:.0%} indicates next step {action_type}")
+        if candidate.consecutive_failures >= 3:
+            reason.append(f"{candidate.consecutive_failures} consecutive failures")
+
+    confidence_gap_alert = overconfident
+    if not confidence_gap_alert:
+        recent_attempts = db.query(QuestionAttempt).filter(
+            QuestionAttempt.student_id == student_id,
+            QuestionAttempt.created_at >= now - timedelta(days=14),
+            QuestionAttempt.calibration_gap.isnot(None),
+        ).all()
+        if recent_attempts:
+            wrong_confident = sum(1 for a in recent_attempts if a.calibration_gap == -2)
+            total_conf = len(recent_attempts)
+            if total_conf > 0 and (wrong_confident / total_conf) > 0.2:
+                confidence_gap_alert = True
+                reason.append("High overconfidence pattern from recent answers")
+
+    return {
+        "action_type": action_type,
+        "topic": topic,
+        "next_step": next_step,
+        "reason": reason,
+        "confidence_gap_alert": confidence_gap_alert,
+        "short_message": (
+            f"CortexQ: Focus on {topic if topic else 'a focused topic'}. "
+            "Clear the key gap, then we re-evaluate."
+        ),
+        "predicted_readiness_24h": _estimate_readiness_24h(student_id, db),
+    }
+
+
+@router.get("/students/me/next-action", response_model=NextBestActionResponse)
+def get_next_best_action(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    action = _build_next_best_action(current_user.id, db)
+    return action
+
+
 # ── GET /students/me/history ─────────────────────────────────────────────────
 
 @router.get("/students/me/history", response_model=List[SessionHistoryItem])
@@ -887,6 +1027,74 @@ async def get_ai_insight(
         return insight_data
 
     return current_insight.insight_json
+
+
+# ── AI chat helper ─────────────────────────────────────────────────────────────
+
+async def _call_ai_for_chat(context: dict, user_message: str) -> dict:
+    prompt = (
+        "You are CortexQ AI Coach. "
+        "Review the student context and answer the question with a single JSON object.\n"
+        "Student context:\n"
+        f"{json.dumps(context, indent=2)}\n\n"
+        f"User question: {user_message}\n"
+        "Return JSON with keys: response, action, next_step, confidence_tip."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.35,
+                    "max_tokens": 750,
+                },
+            )
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"]
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+            # If it's parsable JSON, return that; else fallback to text in response.
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            return {
+                "response": raw,
+                "action": "review_topic",
+                "next_step": "Use your weak topics and continue.",
+                "confidence_tip": "If unsure, slow down and explain each step aloud.",
+            }
+    except Exception:
+        return {
+            "response": "I couldn't reach the AI engine; use the next-action advice.",
+            "action": "fallback",
+            "next_step": "Use the next-action card at the top to continue.",
+            "confidence_tip": "Focus on individual concepts in small blocks.",
+        }
+
+
+@router.post("/students/me/chat")
+async def chat_with_coach(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    message = body.get("message")
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    context = await _build_student_context(current_user.id, db)
+    answer = await _call_ai_for_chat(context, message)
+    return answer
 
 
 # ── POST /students/me/exam-date ───────────────────────────────────────────────

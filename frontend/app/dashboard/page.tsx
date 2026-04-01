@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getLectures, getStats, getMySharedSessions } from "@/lib/api";
+import { getLectures, getStats, getMySharedSessions, getNextBestAction, postChatCoach } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
 import Link from "next/link";
 
@@ -33,6 +33,13 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [stats, setStats] = useState({ total_lectures: 0, processed_lectures: 0, total_mcqs_answered: 0, avg_score: 0 });
   const [sharedSessions, setSharedSessions] = useState<SharedSession[]>([]);
+  const [nextAction, setNextAction] = useState<any>(null);
+  const [nextActionError, setNextActionError] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<{role: "user" | "coach"; text: string;}[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -44,13 +51,20 @@ export default function DashboardPage() {
 
   const fetchLectures = async () => {
     try {
-      const [lecturesRes, statsRes, sharedRes] = await Promise.all([
-        getLectures(), getStats(), getMySharedSessions()
+      const [lecturesRes, statsRes, sharedRes, nextActionRes] = await Promise.all([
+        getLectures(), getStats(), getMySharedSessions(), getNextBestAction()
       ]);
       setLectures(lecturesRes.data);
       setStats(statsRes.data);
       setSharedSessions(sharedRes.data);
-    } catch {
+      setNextAction(nextActionRes.data);
+      setNextActionError("");
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        setNextActionError("No coach action available yet. Start answering questions.");
+      } else {
+        setNextActionError("Failed to load your coach recommendation.");
+      }
       setError("Failed to load lectures");
     } finally {
       setLoading(false);
@@ -58,6 +72,24 @@ export default function DashboardPage() {
   };
 
   const handleLogout = () => logout();
+
+  const handleSendChat = async () => {
+    if (!chatInput.trim()) return;
+    setChatError("");
+    setChatLoading(true);
+    setChatHistory((prev) => [...prev, { role: "user", text: chatInput.trim() }]);
+    try {
+      const res = await postChatCoach(chatInput.trim());
+      const coachText = (res?.data?.response || "Sorry, I couldn't produce a response.").toString();
+      setChatHistory((prev) => [...prev, { role: "coach", text: coachText }]);
+      setChatInput("");
+    } catch (err: any) {
+      setChatError("Chatbot is unavailable right now. Try again in a moment.");
+      setChatHistory((prev) => [...prev, { role: "coach", text: "I am temporarily offline." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   const displayedLectures = filter === "all" ? lectures : lectures;
 
@@ -155,6 +187,77 @@ export default function DashboardPage() {
               <h3 className="text-3xl font-bold text-white">{s.value}</h3>
             </div>
           ))}
+        </section>
+
+        {/* Coach Companion */}
+        <section className="mb-8 p-6 rounded-2xl border border-white/10 bg-surface-container-low/40 backdrop-blur-xl">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <h3 className="text-2xl font-bold text-white">CortexQ Coach</h3>
+            <button
+              onClick={() => setChatOpen((prev) => !prev)}
+              className="text-sm py-1 px-3 rounded-full bg-[#00D2FD]/15 text-[#00D2FD] border border-[#00D2FD]/30 hover:bg-[#00D2FD]/30"
+            >
+              {chatOpen ? "Close Chat" : "Chat"}
+            </button>
+          </div>
+
+          {loading ? (
+            <p className="text-slate-300">Loading coach recommendation...</p>
+          ) : nextAction ? (
+            <div className="space-y-3">
+              <p className="text-slate-200 font-semibold">{nextAction.next_step}</p>
+              <p className="text-sm text-slate-400">Action type: {nextAction.action_type}</p>
+              {nextAction.topic && <p className="text-sm text-slate-400">Topic: {nextAction.topic}</p>}
+              <p className="text-sm text-slate-400">Readiness projection: {nextAction.predicted_readiness_24h ?? "—"}%</p>
+              {nextAction.reason && nextAction.reason.length > 0 && (
+                <ul className="list-disc list-inside text-xs text-slate-300">
+                  {nextAction.reason.map((r: string, idx: number) => (
+                    <li key={idx}>{r}</li>
+                  ))}
+                </ul>
+              )}
+              <p className={`text-sm font-medium ${nextAction.confidence_gap_alert ? "text-amber-300" : "text-slate-400"}`}>
+                {nextAction.confidence_gap_alert
+                  ? "Overconfidence warning: apply a confidence check before answering."
+                  : "Good tracking on confidence. Keep it tight."}
+              </p>
+            </div>
+          ) : (
+            <p className="text-slate-300">{nextActionError || "No recommendation available right now."}</p>
+          )}
+
+          {chatOpen && (
+            <div className="mt-5 border border-white/10 rounded-2xl p-4 bg-surface-container-high/70">
+              <div className="max-h-60 overflow-y-auto space-y-2 mb-3">
+                {chatHistory.length === 0 && <p className="text-xs text-slate-400">Ask the coach anything, e.g. “What should I prioritize for tomorrow’s exam?”</p>}
+                {chatHistory.map((entry, index) => (
+                  <div
+                    key={index}
+                    className={`p-2 rounded-xl ${entry.role === "coach" ? "bg-[#1C2A45] text-slate-100" : "bg-[#101A34] text-slate-300"}`}
+                  >
+                    <small className="text-[11px] uppercase tracking-wider text-slate-500">{entry.role}</small>
+                    <p className="text-sm">{entry.text}</p>
+                  </div>
+                ))}
+              </div>
+              {chatError && <p className="text-xs text-rose-400 mb-2">{chatError}</p>}
+              <div className="flex gap-2">
+                <input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask the AI coach..."
+                  className="flex-1 rounded-lg border border-white/10 bg-surface-container-high px-3 py-2 text-sm text-white placeholder:text-slate-400"
+                />
+                <button
+                  onClick={handleSendChat}
+                  disabled={chatLoading}
+                  className="rounded-lg bg-[#00D2FD] px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-[#00bcff] disabled:opacity-50"
+                >
+                  {chatLoading ? "Sending..." : "Send"}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Shared Files Section */}

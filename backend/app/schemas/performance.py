@@ -162,6 +162,16 @@ class AiInsightResponse(BaseModel):
     strongest_topic: Optional[str] = None
 
 
+class NextBestActionResponse(BaseModel):
+    action_type: str
+    topic: Optional[str]
+    next_step: str
+    reason: List[str]
+    confidence_gap_alert: bool
+    short_message: str
+    predicted_readiness_24h: Optional[float] = None
+
+
 # ── Next question ─────────────────────────────────────────────────────────────
 
 class NextQuestionResponse(BaseModel):

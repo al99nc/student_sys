@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint, inspect
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from uuid import uuid4
@@ -74,3 +74,16 @@ class QuizSession(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_session"),
     )
+
+    @staticmethod
+    def create_answer_timeline_table():
+        conn = op.get_bind()
+        insp = inspect(conn)
+        if not insp.has_table("answer_timelines"):
+            op.create_table("answer_timelines", 
+                Column("user_id", Integer, ForeignKey("users.id"), nullable=False),
+                Column("lecture_id", Integer, ForeignKey("lectures.id"), nullable=False),
+                Column("answer", Text, nullable=True),
+                Column("created_at", DateTime, default=datetime.utcnow),
+                UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_answer")
+            )
