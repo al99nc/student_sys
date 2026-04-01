@@ -89,5 +89,67 @@ export const getMySharedSessions = () =>
 export const getNextBestAction = () =>
   api.get("/api/v1/performance/students/me/next-action");
 
-export const postChatCoach = (message: string) =>
-  api.post("/api/v1/performance/students/me/chat", { message });
+export const postChatCoach = (message: string, conversationHistory?: {role: string; content: string}[]) =>
+  api.post("/api/v1/performance/students/me/chat", {
+    message,
+    ...(conversationHistory?.length ? { conversation_history: conversationHistory } : {}),
+  });
+
+// ── Coach conversations ───────────────────────────────────────────────────────
+
+export const coachListConversations = () =>
+  api.get("/api/v1/coach/conversations");
+
+export const coachCreateConversation = () =>
+  api.post("/api/v1/coach/conversations");
+
+export const coachGetConversation = (id: string) =>
+  api.get(`/api/v1/coach/conversations/${id}`);
+
+export const coachDeleteConversation = (id: string) =>
+  api.delete(`/api/v1/coach/conversations/${id}`);
+
+export const coachSendMessage = (
+  convId: string,
+  message: string,
+  imageData?: string,
+  imageMime?: string,
+) =>
+  api.post(`/api/v1/coach/conversations/${convId}/messages`, {
+    message,
+    ...(imageData ? { image_data: imageData, image_mime: imageMime } : {}),
+  });
+
+export const coachSearch = (q: string) =>
+  api.get("/api/v1/coach/search", { params: { q } });
+
+// Performance tracking
+export const getPerformanceQuestions = (documentId: number) =>
+  api.get(`/api/v1/performance/questions/${documentId}`);
+
+export const startPerformanceSession = (documentId: number, mode: string, totalQuestions: number) =>
+  api.post("/api/v1/performance/sessions/start", {
+    document_id: documentId,
+    mode,
+    total_questions: totalQuestions,
+  });
+
+export const submitPerformanceAnswer = (
+  sessionId: string,
+  questionId: string,
+  selectedAnswer: string,
+  correctAnswer: string,
+  timeSpentSeconds: number
+) =>
+  api.post(`/api/v1/performance/sessions/${sessionId}/answer`, {
+    question_id: questionId,
+    selected_answer: selectedAnswer,
+    correct_answer: correctAnswer,
+    time_spent_seconds: timeSpentSeconds,
+  });
+
+export const completePerformanceSession = (sessionId: string) =>
+  api.post(`/api/v1/performance/sessions/${sessionId}/complete`);
+
+export const savePerformanceQuestions = (documentId: number, mode: string, mcqs: unknown[]) =>
+  api.post("/api/v1/performance/questions/save", { document_id: documentId, mode, mcqs });

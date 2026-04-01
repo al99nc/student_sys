@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getLectures, getStats, getMySharedSessions, getNextBestAction, postChatCoach } from "@/lib/api";
-import { isAuthenticated, logout } from "@/lib/auth";
+import { isAuthenticated, logout, getToken } from "@/lib/auth";
 import Link from "next/link";
 
 interface Lecture {
@@ -25,6 +25,23 @@ interface SharedSession {
 
 type Filter = "all" | "processed" | "processing" | "unprocessed";
 
+function getUsernameFromToken(): string {
+  const token = getToken();
+  if (!token) return "Student";
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.sub || payload.username || payload.name || "Student";
+  } catch {
+    return "Student";
+  }
+}
+
+function formatDate(d: Date): string {
+  const day = String(d.getDate()).padStart(2, "0");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${day} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [lectures, setLectures] = useState<Lecture[]>([]);
@@ -36,20 +53,24 @@ export default function DashboardPage() {
   const [nextAction, setNextAction] = useState<any>(null);
   const [nextActionError, setNextActionError] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatHistory, setChatHistory] = useState<{role: "user" | "coach"; text: string;}[]>([]);
+  const [chatHistory, setChatHistory] = useState<{role: "user" | "coach"; text: string; nextStep?: string; practiceDocId?: number; encouragingNote?: string;}[]>([]);
+  const [apiHistory, setApiHistory] = useState<{role: string; content: string}[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [userName, setUserName] = useState("Student");
+  const today = formatDate(new Date());
 
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/auth");
       return;
     }
-    fetchLectures();
+    setUserName(getUsernameFromToken());
+    fetchData();
   }, [router]);
 
-  const fetchLectures = async () => {
+  const fetchData = async () => {
     try {
       const [lecturesRes, statsRes, sharedRes, nextActionRes] = await Promise.all([
         getLectures(), getStats(), getMySharedSessions(), getNextBestAction()
@@ -77,359 +98,403 @@ export default function DashboardPage() {
     if (!chatInput.trim()) return;
     setChatError("");
     setChatLoading(true);
-    setChatHistory((prev) => [...prev, { role: "user", text: chatInput.trim() }]);
+    const msg = chatInput.trim();
+    setChatHistory((prev) => [...prev, { role: "user", text: msg }]);
+    setChatInput("");
+    const historySnapshot = apiHistory;
     try {
-      const res = await postChatCoach(chatInput.trim());
-      const coachText = (res?.data?.response || "Sorry, I couldn't produce a response.").toString();
-      setChatHistory((prev) => [...prev, { role: "coach", text: coachText }]);
-      setChatInput("");
-    } catch (err: any) {
-      setChatError("Chatbot is unavailable right now. Try again in a moment.");
+      const res = await postChatCoach(msg, historySnapshot);
+      const data = res?.data ?? {};
+      const coachText = (data.response || "Sorry, I couldn't produce a response.").toString();
+      const nextStep = data.next_step || null;
+      const practiceDocId = data.practice_document_id || null;
+      const encouragingNote = data.encouraging_note || null;
+      setChatHistory((prev) => [...prev, { role: "coach", text: coachText, nextStep, practiceDocId, encouragingNote }]);
+      setApiHistory((prev) => [
+        ...prev,
+        { role: "user", content: msg },
+        { role: "assistant", content: coachText },
+      ]);
+    } catch {
+      setChatError("Chatbot is unavailable right now.");
       setChatHistory((prev) => [...prev, { role: "coach", text: "I am temporarily offline." }]);
     } finally {
       setChatLoading(false);
     }
   };
 
-  const displayedLectures = filter === "all" ? lectures : lectures;
+  const displayedLectures = lectures;
+  const userInitial = userName.charAt(0).toUpperCase();
 
   return (
-    <div className="relative min-h-screen text-on-surface" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.05) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
-      <div className="grain-overlay" />
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#0d0f1c", color: "#e2e8f0" }}>
 
-      {/* Top Nav */}
-      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)] border-b border-white/5">
-        <div className="flex items-center gap-8">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent tracking-tight">cortexQ</h1>
-          <nav className="hidden md:flex gap-6 items-center">
-            <a className="text-[#00D2FD] font-bold text-sm">Dashboard</a>
-            <Link href="/analytics" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Analytics</Link>
-          </nav>
-        </div>
-        <div className="flex items-center gap-4">
-          <Link href="/upload" className="hidden md:flex items-center gap-2 synapse-gradient text-white font-bold py-2 px-4 rounded-lg text-sm shadow-lg hover:-translate-y-0.5 transition-transform">
-            <span className="material-symbols-outlined text-sm">add</span>
-            Upload
-          </Link>
-          <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-white transition-colors">
-            <span className="material-symbols-outlined">logout</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-20 lg:w-72 z-[60] flex-col bg-slate-950/95 backdrop-blur-2xl border-r border-white/10 hidden md:flex pt-24">
-        <div className="px-6 mb-10 hidden lg:block">
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
-            <p className="text-xs font-bold text-secondary uppercase tracking-widest mb-1">Welcome back</p>
-            <p className="text-sm text-slate-400">Your lecture library</p>
+      {/* ── SIDEBAR ── */}
+      <aside className="w-[230px] flex-shrink-0 flex flex-col border-r" style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "#0b0d1a" }}>
+        {/* Logo */}
+        <div className="flex items-center gap-3 px-5 py-6">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-white text-sm" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+            cQ
+          </div>
+          <div>
+            <p className="text-white font-bold text-sm leading-tight">CortexQ</p>
+            <p className="text-[10px] font-medium" style={{ color: "#4a5280" }}>BETA · v0.9</p>
           </div>
         </div>
-        <nav className="flex-1 flex flex-col gap-2 px-4">
-          <a className="flex items-center gap-4 bg-gradient-to-r from-[#7B2FFF]/20 to-[#00D2FD]/20 text-white border-l-4 border-[#00D2FD] px-4 py-3 rounded-r-xl">
-            <span className="material-symbols-outlined">dashboard</span>
-            <span className="hidden lg:inline font-medium">Dashboard</span>
+
+        <div className="mx-5 mb-5" style={{ height: 1, backgroundColor: "rgba(255,255,255,0.06)" }} />
+
+        {/* Nav */}
+        <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
+          <p className="text-[10px] font-bold uppercase tracking-widest px-3 mb-2" style={{ color: "#3a3f60" }}>Main</p>
+
+          <a className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-white font-medium text-sm cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", borderLeft: "2px solid #00D2FD" }}>
+            <span className="material-symbols-outlined text-[18px]" style={{ color: "#00D2FD" }}>grid_view</span>
+            Dashboard
           </a>
-          <Link href="/upload" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
-            <span className="material-symbols-outlined">upload_file</span>
-            <span className="hidden lg:inline font-medium">Upload</span>
+
+          <Link href="/lectures" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors" style={{ color: "#6b7280" }} onMouseEnter={e => (e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e => (e.currentTarget.style.color="#6b7280")}>
+            <span className="material-symbols-outlined text-[18px]">menu_book</span>
+            Lectures
           </Link>
-          <Link href="/analytics" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
-            <span className="material-symbols-outlined">analytics</span>
-            <span className="hidden lg:inline font-medium">Analytics</span>
+
+          <Link href="/practice" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors" style={{ color: "#6b7280" }} onMouseEnter={e => (e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e => (e.currentTarget.style.color="#6b7280")}>
+            <span className="material-symbols-outlined text-[18px]">timer</span>
+            Practice
           </Link>
-          <button onClick={handleLogout} className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300 mt-auto mb-6 text-left w-full">
-            <span className="material-symbols-outlined">logout</span>
-            <span className="hidden lg:inline font-medium">Logout</span>
-          </button>
+
+          <p className="text-[10px] font-bold uppercase tracking-widest px-3 pt-4 mb-2" style={{ color: "#3a3f60" }}>Insights</p>
+
+          <Link href="/analytics" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors" style={{ color: "#6b7280" }} onMouseEnter={e => (e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e => (e.currentTarget.style.color="#6b7280")}>
+            <span className="material-symbols-outlined text-[18px]">trending_up</span>
+            Analytics
+          </Link>
+
+          <Link href="/weak-points" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors" style={{ color: "#6b7280" }} onMouseEnter={e => (e.currentTarget.style.color="#e2e8f0")} onMouseLeave={e => (e.currentTarget.style.color="#6b7280")}>
+            <span className="material-symbols-outlined text-[18px]">radio_button_checked</span>
+            Weak Points
+          </Link>
         </nav>
+
+        {/* User profile */}
+        <div className="px-4 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+              {userInitial}
+            </div>
+            <div className="min-w-0">
+              <p className="text-white text-sm font-semibold truncate">{userName}</p>
+              <p className="text-xs truncate" style={{ color: "#4a5280" }}>med student</p>
+            </div>
+          </div>
+        </div>
       </aside>
 
-      {/* Main */}
-      <main className="md:ml-20 lg:ml-72 pt-24 pb-32 px-6 md:px-10 max-w-7xl mx-auto">
+      {/* ── MAIN AREA ── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Welcome Banner */}
-        <section className="mb-10">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-container via-primary-container to-secondary-container p-8 md:p-12 shadow-2xl shadow-primary-container/20">
-            <div className="absolute top-0 right-0 w-1/2 h-full opacity-20 pointer-events-none">
-              <svg className="w-full h-full scale-150 rotate-12" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
-                <path d="M47.5,-63.2C60.1,-55.4,68,-40.1,73.4,-24.1C78.9,-8,81.9,8.7,77.5,23.6C73,38.5,61,51.6,46.8,61C32.5,70.5,16.3,76.3,-1.2,78C-18.7,79.7,-37.4,77.2,-52.1,67.7C-66.8,58.2,-77.6,41.6,-81,24.1C-84.5,6.6,-80.7,-11.8,-71.7,-26.8C-62.7,-41.8,-48.5,-53.5,-34.2,-60.5C-20,-67.5,-5.7,-69.8,10.9,-68.1C27.5,-66.4,47.5,-63.2,47.5,-63.2Z" fill="white" transform="translate(200 200)" />
-              </svg>
-            </div>
-            <div className="relative z-10">
-              <h2 className="text-3xl md:text-5xl font-bold text-white mb-4 tracking-tight">Your Lectures</h2>
-              <p className="text-white/80 text-lg font-medium max-w-xl">
-                {loading ? "Loading..." : lectures.length === 0
-                  ? "No lectures yet. Upload your first PDF to get started."
-                  : `You have ${lectures.length} lecture${lectures.length !== 1 ? "s" : ""} ready to study.`}
-              </p>
-              <Link href="/upload" className="mt-8 inline-block px-8 py-4 rounded-xl bg-white text-primary-container font-bold hover:-translate-y-1 transition-transform shadow-xl">
-                + Upload New Lecture
-              </Link>
-            </div>
+        {/* Top header */}
+        <header className="flex items-center justify-between px-8 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div>
+            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+            <p className="text-sm mt-0.5" style={{ color: "#4a5280" }}>// {today} — {loading ? "…" : "00"} active sessions</p>
           </div>
-        </section>
-
-        {/* Stats */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {[
-            { icon: "upload_file", color: "#00D2FD", colorBg: "#00D2FD", label: "Total Uploads", value: loading ? "—" : String(stats.total_lectures), badge: `${stats.processed_lectures} processed`, badgeColor: "text-secondary" },
-            { icon: "task_alt", color: "#7B2FFF", colorBg: "#7B2FFF", label: "Processed", value: loading ? "—" : String(stats.processed_lectures), badge: "Ready", badgeColor: "text-primary" },
-            { icon: "quiz", color: "#ffb955", colorBg: "#ffb955", label: "MCQs Answered", value: loading ? "—" : String(stats.total_mcqs_answered), badge: "Total", badgeColor: "text-tertiary" },
-            { icon: "insights", color: "#a2e7ff", colorBg: "#a2e7ff", label: "Avg. Score", value: loading ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—", badge: stats.avg_score >= 80 ? "Great" : stats.avg_score >= 60 ? "Good" : stats.total_mcqs_answered > 0 ? "Keep going" : "No data", badgeColor: "text-secondary" },
-          ].map((s) => (
-            <div key={s.label} className="bg-surface-container-low/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl hover:-translate-y-1 transition-transform duration-300">
-              <div className="flex justify-between items-start mb-4">
-                <span className="material-symbols-outlined p-2 rounded-lg text-sm" style={{ color: s.color, backgroundColor: `${s.colorBg}1a` }}>{s.icon}</span>
-                <span className={`text-xs font-bold uppercase tracking-widest ${s.badgeColor}`}>{s.badge}</span>
-              </div>
-              <p className="text-slate-400 text-sm font-medium mb-1">{s.label}</p>
-              <h3 className="text-3xl font-bold text-white">{s.value}</h3>
-            </div>
-          ))}
-        </section>
-
-        {/* Coach Companion */}
-        <section className="mb-8 p-6 rounded-2xl border border-white/10 bg-surface-container-low/40 backdrop-blur-xl">
-          <div className="flex items-start justify-between gap-4 mb-3">
-            <h3 className="text-2xl font-bold text-white">CortexQ Coach</h3>
-            <button
-              onClick={() => setChatOpen((prev) => !prev)}
-              className="text-sm py-1 px-3 rounded-full bg-[#00D2FD]/15 text-[#00D2FD] border border-[#00D2FD]/30 hover:bg-[#00D2FD]/30"
-            >
-              {chatOpen ? "Close Chat" : "Chat"}
+          <div className="flex items-center gap-3">
+            <button className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors" style={{ border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#6b7280" }}>
+              <span className="material-symbols-outlined text-[18px]">notifications</span>
             </button>
-          </div>
-
-          {loading ? (
-            <p className="text-slate-300">Loading coach recommendation...</p>
-          ) : nextAction ? (
-            <div className="space-y-3">
-              <p className="text-slate-200 font-semibold">{nextAction.next_step}</p>
-              <p className="text-sm text-slate-400">Action type: {nextAction.action_type}</p>
-              {nextAction.topic && <p className="text-sm text-slate-400">Topic: {nextAction.topic}</p>}
-              <p className="text-sm text-slate-400">Readiness projection: {nextAction.predicted_readiness_24h ?? "—"}%</p>
-              {nextAction.reason && nextAction.reason.length > 0 && (
-                <ul className="list-disc list-inside text-xs text-slate-300">
-                  {nextAction.reason.map((r: string, idx: number) => (
-                    <li key={idx}>{r}</li>
-                  ))}
-                </ul>
-              )}
-              <p className={`text-sm font-medium ${nextAction.confidence_gap_alert ? "text-amber-300" : "text-slate-400"}`}>
-                {nextAction.confidence_gap_alert
-                  ? "Overconfidence warning: apply a confidence check before answering."
-                  : "Good tracking on confidence. Keep it tight."}
-              </p>
-            </div>
-          ) : (
-            <p className="text-slate-300">{nextActionError || "No recommendation available right now."}</p>
-          )}
-
-          {chatOpen && (
-            <div className="mt-5 border border-white/10 rounded-2xl p-4 bg-surface-container-high/70">
-              <div className="max-h-60 overflow-y-auto space-y-2 mb-3">
-                {chatHistory.length === 0 && <p className="text-xs text-slate-400">Ask the coach anything, e.g. “What should I prioritize for tomorrow’s exam?”</p>}
-                {chatHistory.map((entry, index) => (
-                  <div
-                    key={index}
-                    className={`p-2 rounded-xl ${entry.role === "coach" ? "bg-[#1C2A45] text-slate-100" : "bg-[#101A34] text-slate-300"}`}
-                  >
-                    <small className="text-[11px] uppercase tracking-wider text-slate-500">{entry.role}</small>
-                    <p className="text-sm">{entry.text}</p>
-                  </div>
-                ))}
-              </div>
-              {chatError && <p className="text-xs text-rose-400 mb-2">{chatError}</p>}
-              <div className="flex gap-2">
-                <input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask the AI coach..."
-                  className="flex-1 rounded-lg border border-white/10 bg-surface-container-high px-3 py-2 text-sm text-white placeholder:text-slate-400"
-                />
-                <button
-                  onClick={handleSendChat}
-                  disabled={chatLoading}
-                  className="rounded-lg bg-[#00D2FD] px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-[#00bcff] disabled:opacity-50"
-                >
-                  {chatLoading ? "Sending..." : "Send"}
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Shared Files Section */}
-        {sharedSessions.length > 0 && (
-          <section id="shared-section" className="mb-12">
-            <div className="flex items-center gap-3 mb-6">
-              <h3 className="text-2xl font-bold text-white tracking-tight">Shared With You</h3>
-              <span className="px-2.5 py-1 rounded-full text-xs font-black tracking-widest text-[#00D2FD] bg-[#00D2FD]/10 border border-[#00D2FD]/20">
-                {sharedSessions.length}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {sharedSessions.map((s) => {
-                const pct = s.total > 0 ? Math.round((s.answered / s.total) * 100) : 0;
-                const score = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
-                return (
-                  <Link
-                    key={s.share_token}
-                    href={`/shared/${s.share_token}`}
-                    className="group relative bg-surface-container-low/30 backdrop-blur-md border border-[#00D2FD]/15 rounded-3xl overflow-hidden hover:-translate-y-2 transition-all duration-300 hover:shadow-2xl hover:shadow-[#00D2FD]/10 hover:border-[#00D2FD]/30"
-                  >
-                    {/* Top accent — teal to distinguish from own lectures */}
-                    <div className="h-1.5 w-full bg-gradient-to-r from-[#00D2FD] to-[#7B2FFF]" />
-                    <div className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[#00D2FD] bg-[#00D2FD]/10 px-3 py-1 rounded-full">
-                          <span className="material-symbols-outlined text-xs">folder_shared</span>
-                          SHARED
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-base text-[#00D2FD]/50">cloud_sync</span>
-                          {s.updated_at && (
-                            <span className="text-xs text-slate-500">{new Date(s.updated_at).toLocaleDateString()}</span>
-                          )}
-                        </div>
-                      </div>
-                      <h4 className="text-base font-bold text-white mb-4 group-hover:text-[#00D2FD] transition-colors leading-tight line-clamp-2 break-words min-w-0">
-                        {s.lecture_title}
-                      </h4>
-                      {/* Progress bar */}
-                      <div className="mb-3">
-                        <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-                          <span>{s.answered}/{s.total} answered</span>
-                          {s.answered > 0 && <span className={score >= 70 ? "text-green-400" : score >= 50 ? "text-yellow-400" : "text-red-400"}>{score}% correct</span>}
-                        </div>
-                        <div className="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-[#00D2FD] to-[#7B2FFF] transition-all duration-500"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        {pct === 0 ? "Not started" : pct === 100 ? "Completed" : `${pct}% complete`}
-                        {s.retake_count > 0 && ` · ${s.retake_count} retake${s.retake_count > 1 ? "s" : ""}`}
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* Filter + Grid */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-          <h3 className="text-2xl font-bold text-white tracking-tight">Recent Lectures</h3>
-          <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
-            {(["all", "processed", "processing", "unprocessed"] as Filter[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${filter === f ? "synapse-gradient text-white shadow-lg" : "bg-white/5 border border-white/5 text-slate-400 hover:text-white"}`}
-              >
-                {f === "all" ? "All" : f === "processed" ? "Processed ✓" : f === "processing" ? "In Progress ⏳" : "Unprocessed"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {loading && (
-          <div className="flex items-center justify-center py-20">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-container" />
-          </div>
-        )}
-
-        {error && (
-          <div className="bg-error/10 border border-error/20 text-error rounded-xl px-4 py-3 text-sm">{error}</div>
-        )}
-
-        {!loading && displayedLectures.length === 0 && (
-          <div className="text-center py-20">
-            <div className="w-20 h-20 rounded-2xl bg-surface-container-highest flex items-center justify-center mx-auto mb-6">
-              <span className="material-symbols-outlined text-4xl text-on-surface-variant">description</span>
-            </div>
-            <h3 className="text-white font-bold text-xl mb-2">No lectures yet</h3>
-            <p className="text-on-surface-variant mb-6">Upload your first lecture PDF to get started</p>
-            <Link href="/upload" className="inline-block synapse-gradient text-white font-bold px-8 py-3 rounded-xl shadow-lg hover:-translate-y-1 transition-transform">
-              Upload Lecture
+            <Link href="/upload" className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all" style={{ border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.04)" }}>
+              Upload PDF
             </Link>
           </div>
-        )}
+        </header>
 
-        {!loading && displayedLectures.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-            {displayedLectures.map((lecture) => (
-              <div key={lecture.id} className="group relative bg-surface-container-low/30 backdrop-blur-md border border-white/10 rounded-3xl overflow-hidden hover:-translate-y-2 transition-all duration-300 hover:shadow-2xl hover:shadow-primary-container/10">
-                <div className="h-1.5 w-full bg-gradient-to-r from-primary-container to-secondary-container" />
-                <div className="p-8">
-                  <div className="flex justify-between items-center mb-6">
-                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#00D2FD] bg-[#00D2FD]/10 px-3 py-1 rounded-full">PROCESSED</span>
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base text-slate-500">cloud_done</span>
-                      <span className="text-xs text-slate-500 font-medium">{new Date(lecture.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  <h4 className="text-xl font-bold text-white mb-6 group-hover:text-secondary transition-colors leading-tight line-clamp-2 break-words">{lecture.title}</h4>
-                  <div className="flex gap-3">
-                    <Link href={`/results/${lecture.id}`} className="flex-1 text-center py-3 rounded-xl synapse-gradient text-white font-bold text-sm hover:opacity-90 transition-opacity">
-                      View Results
-                    </Link>
-                    <Link href={`/upload?process=${lecture.id}`} className="flex-1 text-center py-3 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white font-bold text-sm transition-colors">
-                      Process
-                    </Link>
-                  </div>
+        {/* Scrollable content */}
+        <main className="flex-1 overflow-y-auto px-8 py-6">
+
+          {/* ── HERO ── */}
+          <div className="relative rounded-2xl overflow-hidden mb-6" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center justify-between p-8">
+              {/* Left text */}
+              <div className="max-w-md">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] mb-4" style={{ color: "#00D2FD" }}>— Lecture Library</p>
+                <h2 className="text-4xl font-black text-white leading-tight mb-4">
+                  Start your first{" "}
+                  <span style={{ background: "linear-gradient(90deg, #00D2FD, #7B2FFF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                    study<br />session
+                  </span>
+                </h2>
+                <p className="text-sm mb-7" style={{ color: "#6b7280" }}>
+                  Upload a medical PDF — CortexQ will generate adaptive MCQs, track your weak points, and guide your prep.
+                </p>
+                <div className="flex items-center gap-5">
+                  <Link href="/upload" className="px-5 py-2.5 rounded-xl text-white text-sm font-semibold transition-all" style={{ background: "#1e2235", border: "1px solid rgba(255,255,255,0.12)" }}>
+                    + Upload First Lecture
+                  </Link>
+                  <a href="#" className="text-sm transition-colors" style={{ color: "#6b7280" }}>→ see how it works</a>
                 </div>
+              </div>
+
+              {/* Right orb graphic */}
+              <div className="relative flex-shrink-0 w-48 h-48 flex items-center justify-center">
+                {/* Concentric rings */}
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200">
+                  <circle cx="100" cy="100" r="90" fill="none" stroke="rgba(0,210,253,0.1)" strokeWidth="1" />
+                  <circle cx="100" cy="100" r="72" fill="none" stroke="rgba(0,210,253,0.15)" strokeWidth="1" strokeDasharray="4 4" />
+                  <circle cx="100" cy="100" r="54" fill="none" stroke="rgba(123,47,255,0.2)" strokeWidth="1" strokeDasharray="6 3" />
+                  <circle cx="100" cy="100" r="36" fill="none" stroke="rgba(0,210,253,0.25)" strokeWidth="1.5" />
+                </svg>
+                {/* Core orb */}
+                <div className="relative z-10 w-20 h-20 rounded-full flex items-center justify-center" style={{ background: "radial-gradient(circle at 35% 35%, #e879f9, #a855f7, #7B2FFF)", boxShadow: "0 0 40px rgba(168,85,247,0.5)" }}>
+                  <span className="material-symbols-outlined text-3xl text-white/90">neurology</span>
+                </div>
+                {/* AI-POWERED badge */}
+                <div className="absolute bottom-6 right-0 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest" style={{ background: "rgba(0,210,253,0.15)", border: "1px solid rgba(0,210,253,0.3)", color: "#00D2FD" }}>
+                  AI-POWERED
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── STATS ── */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            {[
+              { label: "TOTAL UPLOADS", emoji: "📄", value: loading ? "—" : String(stats.total_lectures), sub: stats.total_lectures === 0 ? "— awaiting upload" : `${stats.processed_lectures} processed` },
+              { label: "PROCESSED", emoji: "✅", value: loading ? "—" : String(stats.processed_lectures), sub: stats.processed_lectures === 0 ? "— ready for MCQs" : "lectures ready" },
+              { label: "MCQs ANSWERED", emoji: "🎯", value: loading ? "—" : String(stats.total_mcqs_answered), sub: stats.total_mcqs_answered === 0 ? "— start practicing" : "total answered" },
+              { label: "AVG. SCORE", emoji: "📊", value: loading ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—.—%", sub: stats.total_mcqs_answered > 0 ? (stats.avg_score >= 80 ? "great work" : "keep going") : "— no data yet" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-2xl p-5" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex items-start justify-between mb-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "#4a5280" }}>{s.label}</p>
+                  <span className="text-lg leading-none">{s.emoji}</span>
+                </div>
+                <p className="text-3xl font-black text-white mb-3">{s.value}</p>
+                <span className="text-[11px] font-medium px-2.5 py-1 rounded-lg" style={{ background: "rgba(255,255,255,0.05)", color: "#4a5280" }}>{s.sub}</span>
               </div>
             ))}
           </div>
-        )}
-      </main>
 
-      {/* Mobile Bottom Nav */}
-      <footer className="fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg border-t border-white/5 md:hidden">
-        <a className="flex flex-col items-center text-[#00D2FD]">
-          <span className="material-symbols-outlined">home</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
-        </a>
-        <Link href="/upload" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">upload_file</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Upload</span>
-        </Link>
-        {/* Shared tab — shows badge when there are active shared sessions */}
-        <a
-          href="#shared-section"
-          onClick={(e) => { e.preventDefault(); document.getElementById("shared-section")?.scrollIntoView({ behavior: "smooth" }); }}
-          className="flex flex-col items-center text-slate-500 relative"
-        >
-          <span className="relative">
-            <span className="material-symbols-outlined">cloud_sync</span>
-            {sharedSessions.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#00D2FD] text-[9px] font-black text-slate-950 flex items-center justify-center leading-none">
-                {sharedSessions.length > 9 ? "9+" : sharedSessions.length}
-              </span>
-            )}
-          </span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Shared</span>
-        </a>
-        <Link href="/analytics" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">insights</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
-        </Link>
-        <button onClick={handleLogout} className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined">logout</span>
-          <span className="text-[10px] uppercase tracking-widest mt-1">Logout</span>
-        </button>
-      </footer>
+          {/* ── SHARED SESSIONS (if any) ── */}
+          {sharedSessions.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center gap-3 mb-4">
+                <h3 className="text-lg font-bold text-white">Shared With You</h3>
+                <span className="text-xs font-black px-2 py-0.5 rounded-full" style={{ background: "rgba(0,210,253,0.1)", color: "#00D2FD", border: "1px solid rgba(0,210,253,0.2)" }}>{sharedSessions.length}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                {sharedSessions.map((s) => {
+                  const pct = s.total > 0 ? Math.round((s.answered / s.total) * 100) : 0;
+                  const score = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
+                  return (
+                    <Link key={s.share_token} href={`/shared/${s.share_token}`} className="rounded-2xl overflow-hidden block transition-transform hover:-translate-y-1" style={{ background: "#131525", border: "1px solid rgba(0,210,253,0.1)" }}>
+                      <div className="h-1" style={{ background: "linear-gradient(90deg, #00D2FD, #7B2FFF)" }} />
+                      <div className="p-5">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mb-3 inline-block" style={{ background: "rgba(0,210,253,0.1)", color: "#00D2FD" }}>SHARED</span>
+                        <h4 className="text-sm font-bold text-white mb-3 line-clamp-2">{s.lecture_title}</h4>
+                        <div className="flex justify-between text-xs mb-1.5" style={{ color: "#4a5280" }}>
+                          <span>{s.answered}/{s.total} answered</span>
+                          {s.answered > 0 && <span style={{ color: score >= 70 ? "#4ade80" : score >= 50 ? "#fbbf24" : "#f87171" }}>{score}%</span>}
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg, #00D2FD, #7B2FFF)" }} />
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-      {/* FAB */}
-      <Link href="/upload" className="fixed right-6 bottom-24 md:bottom-10 z-[70] w-14 h-14 rounded-full synapse-gradient text-white shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all">
-        <span className="material-symbols-outlined text-3xl">add</span>
-      </Link>
+          {/* ── BOTTOM GRID: Lectures + Coach ── */}
+          <div className="grid grid-cols-2 gap-6">
+
+            {/* Your Lectures */}
+            <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <h3 className="font-bold text-white">Your Lectures</h3>
+                <Link href="/upload" className="text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#6b7280" }}>
+                  + New
+                </Link>
+              </div>
+
+              <div className="flex-1 p-6">
+                {loading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: "#7B2FFF" }} />
+                  </div>
+                ) : displayedLectures.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    {/* Stacked cards icon */}
+                    <div className="relative w-16 h-16 mb-5">
+                      {[2, 1, 0].map((i) => (
+                        <div key={i} className="absolute rounded-xl" style={{ width: 40, height: 48, left: 8 + i * 5, top: i * 5, background: i === 0 ? "#1e2235" : i === 1 ? "#181b2e" : "#131525", border: "1px solid rgba(255,255,255,0.08)", zIndex: 3 - i }} />
+                      ))}
+                    </div>
+                    <p className="font-bold text-white mb-2">No lectures yet</p>
+                    <p className="text-xs mb-5" style={{ color: "#4a5280" }}>Upload your first PDF and CortexQ will generate questions within seconds</p>
+                    <Link href="/upload" className="text-sm font-semibold px-4 py-2 rounded-xl transition-all" style={{ background: "#1e2235", border: "1px solid rgba(255,255,255,0.1)", color: "#e2e8f0" }}>
+                      + Upload New Lecture
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Filter pills */}
+                    <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+                      {(["all", "processed", "processing", "unprocessed"] as Filter[]).map((f) => (
+                        <button key={f} onClick={() => setFilter(f)} className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0" style={filter === f ? { background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", color: "#fff" } : { background: "rgba(255,255,255,0.05)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          {f === "all" ? "All" : f === "processed" ? "Processed ✓" : f === "processing" ? "In Progress" : "Unprocessed"}
+                        </button>
+                      ))}
+                    </div>
+                    {displayedLectures.slice(0, 5).map((lecture) => (
+                      <div key={lecture.id} className="flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div className="min-w-0 flex-1 mr-3">
+                          <p className="text-sm font-semibold text-white truncate">{lecture.title}</p>
+                          <p className="text-xs mt-0.5" style={{ color: "#4a5280" }}>{new Date(lecture.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <Link href={`/results/${lecture.id}`} className="text-xs font-bold px-3 py-1.5 rounded-lg flex-shrink-0 transition-all" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", color: "#fff" }}>
+                          View
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* CortexQ Coach */}
+            <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
+              {/* Card header */}
+              <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+                    <span className="material-symbols-outlined text-[18px] text-white">smart_toy</span>
+                  </div>
+                  <div>
+                    <p className="font-bold text-white text-sm">CortexQ Coach</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "#4a5280" }}>AI Advisor</p>
+                  </div>
+                </div>
+                <Link href="/coach" className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 transition-all" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#e2e8f0" }}>
+                  CHAT <span className="text-xs">→</span>
+                </Link>
+              </div>
+
+              <div className="flex-1 p-6 flex flex-col gap-4">
+                {/* Action card */}
+                <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.03)", borderLeft: "3px solid #00D2FD" }}>
+                  {nextAction ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2 h-2 rounded-full inline-block" style={{ background: "#00D2FD" }} />
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: "#00D2FD" }}>
+                          {nextAction.action_type?.replace(/_/g, " ") || "Exploration Mode"}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-white mb-1">{nextAction.next_step}</p>
+                      {nextAction.topic && (
+                        <p className="text-xs" style={{ color: "#4a5280" }}>· Topic: {nextAction.topic}</p>
+                      )}
+                      {(!nextAction.topic && (!nextAction.reason || nextAction.reason.length === 0)) && (
+                        <p className="text-xs" style={{ color: "#4a5280" }}>· No weak points yet</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2 h-2 rounded-full inline-block" style={{ background: "#00D2FD" }} />
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: "#00D2FD" }}>Exploration Mode</span>
+                      </div>
+                      <p className="text-sm font-semibold text-white mb-1">Start with a new high-yield topic and do 5 focused questions.</p>
+                      <p className="text-xs" style={{ color: "#4a5280" }}>· No weak points yet</p>
+                    </>
+                  )}
+                </div>
+
+                {/* Readiness score */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "#4a5280" }}>Readiness Score</span>
+                    <span className="text-sm font-bold" style={{ color: "#4a5280" }}>
+                      {nextAction?.predicted_readiness_24h != null ? `${nextAction.predicted_readiness_24h}%` : "—%"}
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                    <div className="h-full rounded-full transition-all" style={{ width: `${nextAction?.predicted_readiness_24h ?? 0}%`, background: "linear-gradient(90deg, #7B2FFF, #00D2FD)" }} />
+                  </div>
+                </div>
+
+                {/* Info block */}
+                <div className="rounded-xl p-3 flex items-start gap-2.5" style={{ background: "rgba(0,210,100,0.06)", border: "1px solid rgba(0,210,100,0.15)" }}>
+                  <span className="text-xs mt-0.5" style={{ color: "#4ade80" }}>↗</span>
+                  <p className="text-xs" style={{ color: "#6b7280" }}>
+                    {lectures.length === 0
+                      ? "Upload your first lecture to unlock AI-powered weak point tracking and daily study plans."
+                      : nextAction?.short_message || "Keep practicing to improve your readiness score."}
+                  </p>
+                </div>
+
+                {/* Chat panel */}
+                {chatOpen && (
+                  <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                    <div className="max-h-72 overflow-y-auto p-3 space-y-2">
+                      {chatHistory.length === 0 && (
+                        <p className="text-xs" style={{ color: "#4a5280" }}>Ask the coach anything about your study plan…</p>
+                      )}
+                      {chatHistory.map((entry, i) => (
+                        <div key={i} className="p-2 rounded-lg" style={{ background: entry.role === "coach" ? "rgba(0,210,253,0.06)" : "rgba(255,255,255,0.04)" }}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "#4a5280" }}>{entry.role === "coach" ? "CortexQ Coach" : "You"}</p>
+                          <p className="text-xs text-white">{entry.text}</p>
+                          {entry.role === "coach" && entry.nextStep && (
+                            <div className="mt-2 px-2 py-1.5 rounded-lg text-xs" style={{ background: "rgba(123,47,255,0.15)", border: "1px solid rgba(123,47,255,0.3)" }}>
+                              <span style={{ color: "#a78bfa", fontWeight: 700 }}>Next step: </span>
+                              <span style={{ color: "#ddd6fe" }}>{entry.nextStep}</span>
+                            </div>
+                          )}
+                          {entry.role === "coach" && entry.encouragingNote && (
+                            <p className="mt-1 text-[10px] italic" style={{ color: "#4a5280" }}>{entry.encouragingNote}</p>
+                          )}
+                          {entry.role === "coach" && entry.practiceDocId && (
+                            <Link
+                              href={`/quiz/${entry.practiceDocId}`}
+                              className="mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                              style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}
+                            >
+                              <span className="material-symbols-outlined text-[14px]">play_circle</span>
+                              Practice these questions →
+                            </Link>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {chatError && <p className="text-xs px-3 pb-2" style={{ color: "#f87171" }}>{chatError}</p>}
+                    <div className="flex gap-2 p-3" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                      <input
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && !chatLoading && handleSendChat()}
+                        placeholder="Ask the AI coach…"
+                        className="flex-1 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-600 outline-none"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                      />
+                      <button onClick={handleSendChat} disabled={chatLoading} className="px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+                        {chatLoading ? "…" : "Send"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-4 rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171" }}>{error}</div>
+          )}
+
+        </main>
+      </div>
     </div>
   );
 }

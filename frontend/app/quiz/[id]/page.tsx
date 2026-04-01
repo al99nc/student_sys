@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { getResults } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 
@@ -16,7 +16,10 @@ interface QuizMCQ {
 export default function QuizPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const lectureId = parseInt(params.id as string);
+  const fromConvId = searchParams.get("from");
+  const backHref = fromConvId ? `/coach/${fromConvId}` : `/results/${lectureId}`;
 
   const [questions, setQuestions] = useState<QuizMCQ[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,10 +140,10 @@ export default function QuizPage() {
       {/* Header */}
       <header className="fixed top-0 left-0 w-full z-40 pt-1">
         <div className="px-4 py-3 flex items-center justify-between">
-          <Link href={`/results/${lectureId}`}
+          <Link href={backHref}
             className="flex items-center gap-1.5 text-on-surface-variant hover:text-white transition-colors text-sm font-bold">
             <span className="material-symbols-outlined text-base">arrow_back</span>
-            <span className="hidden sm:inline">Exit</span>
+            <span className="hidden sm:inline">{fromConvId ? "Back to Coach" : "Exit"}</span>
           </Link>
 
           {/* Timer pill — center */}

@@ -6,9 +6,11 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 20160  # 2 weeks
     AI_API_KEY: str = ""  # Set in .env file
     AI_API_KEYS: str = ""  # comma-separated extra keys, set in .env file
-    AI_MODEL: str = "openai/gpt-oss-120b"
-    CHAT_AI_MODEL: str = "llama-3.1-8b-instant"  # Grok model for chat
     CHAT_AI_API_KEY: str = ""  # Set in .env file
+    AI_MODEL: str = "llama-3.3-70b-versatile"
+    ANALYZER_MODEL: str = "gpt-oss-120b"  # Stage 1 - cold logic
+    HUMANIZER_MODEL: str = "llama-3.3-70b-versatile"  # Stage 2 - warm tone
+    CHAT_AI_MODEL: str = "llama-3.3-70b-versatile"
     DATABASE_URL: str = "sqlite:///./students.db"
     UPLOAD_DIR: str = "uploads"
     TELEGRAM_BOT_TOKEN: str = ""  # Set in .env file
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
         return keys
 
     class Config:
-        env_file = ".env"
+        env_file = ("../.env", ".env")
         extra = "ignore"
 
 settings = Settings()

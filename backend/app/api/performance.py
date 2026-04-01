@@ -6,10 +6,9 @@ from datetime import datetime, timedelta
 from typing import List
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.db.database import get_db
 from app.api.deps import get_current_user
@@ -643,13 +642,18 @@ def _build_next_best_action(student_id: int, db: Session) -> dict:
     }
 
 
+# ── GET /students/me/next-action ─────────────────────────────────────────────────
+
 @router.get("/students/me/next-action", response_model=NextBestActionResponse)
-def get_next_best_action(
+async def get_next_best_action(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    action = _build_next_best_action(current_user.id, db)
-    return action
+    context = _build_student_context(current_user.id, db)
+    try:
+        return await _call_ai_pipeline(context, current_user.id, db)
+    except Exception:
+        return _build_next_best_action(current_user.id, db)
 
 
 # ── GET /students/me/history ─────────────────────────────────────────────────
@@ -687,6 +691,22 @@ def get_session_history(
         )
         for s, l in rows
     ]
+
+
+# ── GET /questions/{document_id} ─────────────────────────────────────────────
+
+@router.get("/questions/{document_id}")
+def get_questions_for_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns all McqQuestion IDs + question text for a document.
+    The frontend uses this to map question_text → UUID for performance tracking."""
+    questions = db.query(McqQuestion).filter(
+        McqQuestion.document_id == document_id
+    ).all()
+    return [{"id": q.id, "question_text": q.question_text} for q in questions]
 
 
 # ── POST /questions/save ──────────────────────────────────────────────────────
@@ -981,68 +1001,445 @@ def get_next_question(
     }
 
 
-# ── GET /students/me/ai-insight ───────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
+INSIGHT_STALE_AFTER_N_ANSWERS = 10   # put this in settings if you prefer
+
+# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.get("/students/me/ai-insight")
 async def get_ai_insight(
+    background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Force regeneration even if fresh"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Returns the current AI insight for this student.
-    Regenerates if stale (10+ new answers since last generation).
+
+    Strategy:
+    - If no insight exists → generate now (blocking, first-time only).
+    - If stale (10+ new answers) OR force=true → return cached immediately,
+      kick off regeneration in the background so next request gets fresh data.
+    - If fresh → return cached immediately.
+
+    Response always includes metadata so the frontend knows what it's showing.
     """
     total_answered = db.query(QuestionAttempt).filter(
         QuestionAttempt.student_id == current_user.id
     ).count()
 
-    current_insight = db.query(StudentAiInsight).filter(
-        StudentAiInsight.student_id == current_user.id,
-        StudentAiInsight.is_current == True,
-    ).order_by(StudentAiInsight.generated_at.desc()).first()
-
-    should_regenerate = (
-        current_insight is None or
-        (total_answered - current_insight.questions_answered_at_generation) >= 10
+    current_insight = (
+        db.query(StudentAiInsight)
+        .filter(
+            StudentAiInsight.student_id == current_user.id,
+            StudentAiInsight.is_current == True,
+        )
+        .order_by(StudentAiInsight.generated_at.desc())
+        .first()
     )
 
-    if should_regenerate:
-        context = await _build_student_context(current_user.id, db)
-        insight_data = await _call_ai_for_insight(context)
+    answers_since_generation = (
+        total_answered - (current_insight.questions_answered_at_generation or 0)
+        if current_insight else total_answered
+    )
+    is_stale = answers_since_generation >= INSIGHT_STALE_AFTER_N_ANSWERS or force
 
-        if current_insight:
-            current_insight.is_current = False
+    # ── First ever insight: block and generate now ────────────────────────────
+    if current_insight is None:
+        if total_answered == 0:
+            # No data at all — return a sensible empty state, don't waste an API call
+            return {
+                "status": "no_data",
+                "message": "Complete at least one practice session to unlock your AI insight.",
+                "insight": None,
+                "meta": {
+                    "generated_at": None,
+                    "answers_since_generation": 0,
+                    "is_stale": False,
+                    "is_fresh": False,
+                },
+            }
 
-        new_insight = StudentAiInsight(
-            id=str(uuid4()),
+        insight_data = await _generate_and_persist_insight(
             student_id=current_user.id,
-            insight_json=insight_data,
-            generated_at=datetime.utcnow(),
-            trigger="on_demand",
-            questions_answered_at_generation=total_answered,
-            is_current=True,
+            total_answered=total_answered,
+            trigger="first_time",
+            current_insight=None,
+            db=db,
         )
-        db.add(new_insight)
-        db.commit()
-        return insight_data
+        return {
+            "status": "generated",
+            "insight": insight_data,
+            "meta": {
+                "generated_at": datetime.utcnow().isoformat(),
+                "answers_since_generation": 0,
+                "is_stale": False,
+                "is_fresh": True,
+            },
+        }
 
-    return current_insight.insight_json
+    # ── Stale: return cached now, regenerate in background ───────────────────
+    if is_stale:
+        background_tasks.add_task(
+            _background_regenerate_insight,
+            student_id=current_user.id,
+            total_answered=total_answered,
+            old_insight_id=current_insight.id,
+            trigger="background_stale" if not force else "forced",
+        )
+        return {
+            "status": "stale",  # frontend can show a "Refreshing..." badge
+            "insight": current_insight.insight_json,
+            "meta": {
+                "generated_at": current_insight.generated_at.isoformat(),
+                "answers_since_generation": answers_since_generation,
+                "is_stale": True,
+                "is_fresh": False,
+            },
+        }
 
+    # ── Fresh: return immediately ─────────────────────────────────────────────
+    return {
+        "status": "fresh",
+        "insight": current_insight.insight_json,
+        "meta": {
+            "generated_at": current_insight.generated_at.isoformat(),
+            "answers_since_generation": answers_since_generation,
+            "is_stale": False,
+            "is_fresh": True,
+        },
+    }
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _generate_and_persist_insight(
+    student_id: int,
+    total_answered: int,
+    trigger: str,
+    current_insight,   # the old StudentAiInsight row or None
+    db: Session,
+) -> dict:
+    """Calls the AI, persists the result, flips is_current. Returns the insight dict."""
+    context = _build_student_context(student_id, db)
+    insight_data = await _call_ai_for_insight(context)
+
+    if current_insight:
+        current_insight.is_current = False
+
+    new_insight = StudentAiInsight(
+        id=str(uuid4()),
+        student_id=student_id,
+        insight_json=insight_data,
+        generated_at=datetime.utcnow(),
+        trigger=trigger,
+        questions_answered_at_generation=total_answered,
+        is_current=True,
+    )
+    db.add(new_insight)
+    db.commit()
+    return insight_data
+
+
+async def _background_regenerate_insight(
+    student_id: int,
+    total_answered: int,
+    old_insight_id: str,
+    trigger: str,
+) -> None:
+    """
+    Runs in the background after a stale response is already returned.
+    Opens its own DB session so it doesn't conflict with the closed request session.
+    """
+    from app.db.database import SessionLocal   # local import to avoid circular
+
+    db = SessionLocal()
+    try:
+        old_insight = db.query(StudentAiInsight).filter(
+            StudentAiInsight.id == old_insight_id
+        ).first()
+        await _generate_and_persist_insight(
+            student_id=student_id,
+            total_answered=total_answered,
+            trigger=trigger,
+            current_insight=old_insight,
+            db=db,
+        )
+    except Exception:
+        pass   # background task — never crash the app; log here if you have a logger
+    finally:
+        db.close()
+
+
+# ── AI call ───────────────────────────────────────────────────────────────────
+
+async def _call_ai_for_insight(context: dict) -> dict:
+    """
+    Calls the AI with the full student context and returns a structured insight dict.
+    Falls back gracefully on any failure — never raises.
+    """
+
+    # ── Pull key signals for the system prompt summary ────────────────────────
+    total_q        = context.get("total_questions_answered", 0)
+    weak_topics    = context.get("weak_topics", [])
+    dangerous      = [t["topic"] for t in weak_topics if t.get("dangerous_misconception")]
+    overconf_rate  = context.get("calibration", {}).get("overconfidence_rate")
+    co_failures    = context.get("co_failure_pairs", [])
+    recent         = context.get("recent_sessions", [])
+    last_readiness = recent[0].get("readiness_score") if recent else None
+    decaying_topics = [
+        t["topic"] for t in weak_topics
+        if t.get("decay_rate_days") and t.get("last_attempted_days_ago")
+        and t["last_attempted_days_ago"] > t["decay_rate_days"]
+    ]
+
+    system_prompt = f"""You are CortexQ — an adaptive AI learning coach for medical students.
+You receive complete performance data for one student and return a structured insight report.
+
+Be precise, specific, and direct. Use actual topic names. Never give generic study advice.
+
+STUDENT SIGNALS (pre-computed for you):
+- Total questions answered: {total_q}
+- Dangerous misconceptions: {dangerous or "none"}
+- Overconfidence rate: {f"{overconf_rate:.0%}" if overconf_rate is not None else "unknown"}
+- Decaying topics (overdue for review): {decaying_topics or "none"}
+- Co-failing topic pairs: {[(p["topic_a"], p["topic_b"]) for p in co_failures] or "none"}
+- Last readiness score: {f"{last_readiness:.1f}%" if last_readiness else "unknown"}
+
+PRIORITY ORDER for next_topic_to_study (top takes precedence):
+1. Any topic with dangerous_misconception=true → must be addressed first, always
+2. Confirmed weak topics (≥3 attempts, <60% accuracy) — real, verified gaps
+3. Co-failing pairs — recommend the one that unlocks the other
+4. Decaying topics — overdue for spaced review
+
+RULES:
+1. If dangerous_misconception is true → intervention_type MUST be "misconception_correction"
+2. If overconfidence_rate > 0.3 → behavioral_warning MUST name this pattern explicitly
+3. If any topic's last_attempted_days_ago > decay_rate_days → include it in the daily plan
+4. daily_plan must cover 3 days with specific topic names and concrete question counts
+5. predicted_readiness_7d must be a float, not null — estimate from the trend data
+6. personalized_message must START WITH AN ACTION, not an observation.
+   BAD: "You are struggling with X." GOOD: "Prioritize X this week — it's your biggest verified gap."
+7. Never use: "based on your data", "you have demonstrated", "you failed", "Let's review"
+8. Return ONLY valid JSON. No markdown. No explanation outside the object."""
+
+    user_prompt = f"""FULL STUDENT DATA:
+{json.dumps(context, indent=2)}
+
+Return a JSON object with EXACTLY these fields:
+{{
+  "next_topic_to_study":      "string — the single most important topic right now and exactly why",
+  "intervention_type":        "one of: explanation | easier_questions | harder_questions | spaced_review | misconception_correction | confidence_building",
+  "personalized_message":     "string — one sentence shown directly to the student, honest and specific",
+  "predicted_readiness_7d":   float between 0 and 100,
+  "critical_insight":         "string — one pattern in their data they likely haven't noticed themselves",
+  "daily_plan": [
+    {{"day": 1, "focus": "specific topic name", "question_count": int, "priority": "critical|high|medium"}},
+    {{"day": 2, "focus": "specific topic name", "question_count": int, "priority": "critical|high|medium"}},
+    {{"day": 3, "focus": "specific topic name", "question_count": int, "priority": "critical|high|medium"}}
+  ],
+  "behavioral_warning":       "string — only if overconfidence_rate > 0.3 or a dangerous pattern exists, else null",
+  "strongest_topic":          "string — the topic they're genuinely good at, from the data",
+  "decay_alert":              "string — name the most overdue topic and days since review, else null",
+  "urgency_level":            "one of: routine | elevated | critical"
+}}"""
+
+    insight_model = getattr(settings, "AI_MODEL", "llama-3.3-70b-versatile")
+
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": insight_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    "temperature": 0.25,   # lower than chat — we want consistency
+                    "max_tokens": 1500,
+                },
+            )
+
+            if resp.status_code == 429:
+                raise httpx.HTTPStatusError("rate_limited", request=resp.request, response=resp)
+
+            resp.raise_for_status()
+
+            raw = resp.json()["choices"][0]["message"]["content"]
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+
+            parsed = json.loads(raw)
+
+            # Validate + fill required keys defensively
+            required_keys = {
+                "next_topic_to_study", "intervention_type", "personalized_message",
+                "predicted_readiness_7d", "critical_insight", "daily_plan",
+                "behavioral_warning", "strongest_topic", "decay_alert", "urgency_level",
+            }
+            for key in required_keys:
+                parsed.setdefault(key, None)
+
+            valid_interventions = {
+                "explanation", "easier_questions", "harder_questions",
+                "spaced_review", "misconception_correction", "confidence_building",
+            }
+            if parsed.get("intervention_type") not in valid_interventions:
+                parsed["intervention_type"] = "spaced_review"
+
+            if parsed.get("urgency_level") not in {"routine", "elevated", "critical"}:
+                parsed["urgency_level"] = "routine"
+
+            if not isinstance(parsed.get("daily_plan"), list):
+                parsed["daily_plan"] = []
+
+            return parsed
+
+    except json.JSONDecodeError:
+        return _insight_fallback("parse_error")
+    except httpx.HTTPStatusError as e:
+        reason = "rate_limited" if e.response.status_code == 429 else "api_error"
+        return _insight_fallback(reason)
+    except httpx.TimeoutException:
+        return _insight_fallback("timeout")
+    except Exception:
+        return _insight_fallback("unknown")
+
+
+def _insight_fallback(reason: str = "unknown") -> dict:
+    messages = {
+        "rate_limited": "Insight generation rate-limited — try again in a moment.",
+        "timeout":      "AI took too long to respond. Your cached insight is still valid.",
+        "parse_error":  "Received a response but couldn't parse it. Try refreshing.",
+        "api_error":    "API error during insight generation.",
+        "unknown":      "Something went wrong during insight generation.",
+    }
+    return {
+        "next_topic_to_study":   "Continue with your lowest-accuracy topic",
+        "intervention_type":     "spaced_review",
+        "personalized_message":  messages.get(reason, "Insight temporarily unavailable."),
+        "predicted_readiness_7d": None,
+        "critical_insight":       None,
+        "daily_plan":             [],
+        "behavioral_warning":     None,
+        "strongest_topic":        None,
+        "decay_alert":            None,
+        "urgency_level":          "routine",
+    }
 
 # ── AI chat helper ─────────────────────────────────────────────────────────────
 
-async def _call_ai_for_chat(context: dict, user_message: str) -> dict:
-    prompt = (
-        "You are CortexQ AI Coach. "
-        "Review the student context and answer the question with a single JSON object.\n"
-        "Student context:\n"
-        f"{json.dumps(context, indent=2)}\n\n"
-        f"User question: {user_message}\n"
-        "Return JSON with keys: response, action, next_step, confidence_tip."
-    )
+async def _call_ai_for_chat(
+    context: dict,
+    user_message: str,
+    conversation_history: list[dict] | None = None,
+) -> dict:
+    """
+    AI coaching chat. Supports multi-turn history.
+    conversation_history: list of {"role": "user"|"assistant", "content": "..."}
+    """
 
+    # ── Build a compact, readable context for the AI ─────────────────────────
+    weak_topics_data = context.get("weak_topics", [])
+
+    # Only flag topics with ≥3 attempts as genuinely weak — fewer attempts = still gathering data
+    confirmed_weak  = [t for t in weak_topics_data if t.get("total_attempts", 0) >= 3 and t.get("accuracy", 1.0) < 0.6]
+    early_data      = [t for t in weak_topics_data if t.get("total_attempts", 0) < 3]
+    dangerous       = [t for t in weak_topics_data if t.get("dangerous_misconception")]
+    co_pairs        = [(p["topic_a"], p["topic_b"]) for p in context.get("co_failure_pairs", [])]
+    overconf        = context.get("calibration", {}).get("overconfidence_rate")
+    overconf_str    = f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"
+    total_q         = context.get("total_questions_answered", 0)
+
+    # Compact topic summary (avoid dumping huge JSON)
+    topic_lines = []
+    for t in weak_topics_data[:8]:
+        attempts = t.get("total_attempts", 0)
+        acc = t.get("accuracy", 0)
+        flag = " ⚠ MISCONCEPTION" if t.get("dangerous_misconception") else ""
+        reliability = "confirmed weak" if attempts >= 3 else f"only {attempts} attempt{'s' if attempts != 1 else ''} — too early to judge"
+        topic_lines.append(f"  • {t['topic']}: {acc:.0%} accuracy, {attempts} attempts ({reliability}){flag}")
+
+    topics_summary = "\n".join(topic_lines) if topic_lines else "  • No topic data yet"
+
+    system_prompt = f"""You are CortexQ Coach — a sharp, direct tutor for medical students. Advise like a knowledgeable friend who already read the numbers, not like a report generator.
+
+STUDENT SNAPSHOT:
+- Total questions answered: {total_q}
+- Topics attempted (sorted by accuracy):
+{topics_summary}
+- Dangerous misconceptions (certain + wrong): {[t["topic"] for t in dangerous] or "none"}
+- Overconfidence rate: {overconf_str}
+- Co-failing pairs (topics that tank together): {co_pairs or "none"}
+
+━━━ PRIORITY ORDER — strictly top-to-bottom ━━━
+1. DANGEROUS MISCONCEPTIONS → action="misconception_correction", urgency="critical"
+   If any topic has a dangerous misconception, address it first. No exceptions.
+
+2. CONFIRMED WEAK = {[t["topic"] for t in confirmed_weak] or "none"}
+   ≥3 attempts + <60% accuracy. Real, verified gaps — recommend targeted practice.
+
+3. CO-FAILING PAIRS = {co_pairs or "none"}
+   If Topic A and B fail together, recommend A because "fixing A pulls up B too."
+   Use the relationship explicitly — don't just list both topics separately.
+
+4. EARLY DATA = {[t["topic"] for t in early_data[:4]] or "none"}
+   Fewer than 3 attempts. DO NOT label these as weaknesses.
+   Instead say: "quick check", "only N attempt(s) — worth a pass", "still too early to call."
+   Only recommend these if tiers 1–3 are all empty.
+
+━━━ RESPONSE RULES ━━━
+• YOUR FIRST WORDS = the action. Not the observation.
+  BAD: "You have 0% on X." → GOOD: "Hit X next — 0/1 so far and it drags Y down with it."
+  BAD: "Your weakest topic is X." → GOOD: "Knock out X — confirmed weak at 40% over 5 tries."
+
+• `response` = 1–2 sentences MAX. Short. Conversational. Like texting a smart friend.
+
+• `next_step` = one concrete action with an exact number.
+  e.g. "Do 10 questions on Antifungal Therapy. Aim for >60%."
+
+• `encouraging_note` = honest, tied to their actual data. Zero generic filler.
+  BAD: "Keep going, you've got this!" → GOOD: "Your Pharmacology accuracy has been climbing — that's real progress."
+
+• `confidence_tip` = calibrated to their overconfidence rate of {overconf_str}.
+  If >30%: name the pattern directly. If unknown: give a universal calibration tip.
+
+BANNED PHRASES — must not appear anywhere in the output:
+"based on your data", "your performance data", "you have demonstrated", "you have not demonstrated",
+"you failed", "you struggled", "Let's review", "Let's focus", "Let's dive",
+"It's normal", "Great question", "with focused effort", "you have a chance",
+"keep it up", "keep going", "you're doing great", "identified as weak".
+
+Return ONLY valid JSON. No markdown, no preamble, no explanation outside the object.
+
+RESPONSE SCHEMA:
+{{
+  "response": "1-2 sentence recommendation — action-first, conversational tone",
+  "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic",
+  "topic_focus": "exact topic name from the data, or null",
+  "next_step": "one concrete action with a number: e.g. 'Do 10 questions on X. Aim for >70%.'",
+  "confidence_tip": "specific to their overconfidence rate of {overconf_str} — never generic",
+  "urgency": "low | medium | high | critical",
+  "encouraging_note": "one honest, specific sentence tied to actual data — no hollow filler"
+}}"""
+
+    # ── Build messages array ──────────────────────────────────────────────────
+    messages = [{"role": "system", "content": system_prompt}]
+
+    if conversation_history:
+        # Trim to last 8 turns to stay within context limits
+        messages.extend(conversation_history[-8:])
+
+    messages.append({"role": "user", "content": user_message})
+
+    # ── Call Groq ───────────────────────────────────────────────────────
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=40.0) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -1050,36 +1447,352 @@ async def _call_ai_for_chat(context: dict, user_message: str) -> dict:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.35,
-                    "max_tokens": 750,
+                    "model": getattr(settings, "CHAT_AI_MODEL", "llama-3.3-70b-versatile"),
+                    "messages": messages,
+                    "temperature": 0.3,
+                    "max_tokens": 600,
                 },
             )
+
+            if resp.status_code == 429:
+                raise httpx.HTTPStatusError("rate_limited", request=resp.request, response=resp)
+
             resp.raise_for_status()
+
             raw = resp.json()["choices"][0]["message"]["content"]
+            
+            # More aggressive cleaning
+            # Strip thinking tags
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-            # If it's parsable JSON, return that; else fallback to text in response.
+            # Strip markdown code blocks
+            raw = re.sub(r"```(?:json)?", "", raw).strip()
+            raw = raw.rstrip("```").strip()
+            # Remove any leading/trailing whitespace
+            raw = raw.strip()
+            
+            # Try to find JSON in the response if there's extra text
+            json_match = re.search(r'\{.*\}(?=\s*$|\s*$)', raw, re.DOTALL)
+            if json_match:
+                raw = json_match.group(0)
+            
+            # Try to parse
             try:
                 parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                pass
-            return {
-                "response": raw,
-                "action": "review_topic",
-                "next_step": "Use your weak topics and continue.",
-                "confidence_tip": "If unsure, slow down and explain each step aloud.",
-            }
+            except json.JSONDecodeError as e:
+                # If parsing fails, log and return structured fallback from raw text
+                import logging
+                logging.getLogger(__name__).warning(f"JSON parse error: {e}. Raw: {raw[:200]}")
+                return _chat_fallback_from_text(raw)
+
+            # Validate required keys exist; fill missing ones defensively
+            required = ["response", "action", "topic_focus", "next_step", "confidence_tip", "urgency", "encouraging_note"]
+            for key in required:
+                if key not in parsed:
+                    parsed[key] = None
+
+            valid_actions = {"review_topic", "practice_questions", "misconception_correction",
+                             "spaced_review", "confidence_building", "exam_strategy", "off_topic", "fallback"}
+            if parsed.get("action") not in valid_actions:
+                parsed["action"] = "review_topic"
+
+            valid_urgency = {"low", "medium", "high", "critical"}
+            if parsed.get("urgency") not in valid_urgency:
+                parsed["urgency"] = "medium"
+            
+            # Ensure response is not empty
+            if not parsed.get("response"):
+                parsed["response"] = "Let's work on your weak topics. Check your weak points panel and pick the lowest-accuracy topic."
+
+            return parsed
+
+    except json.JSONDecodeError as e:
+        import logging
+        logging.getLogger(__name__).exception(f"JSON decode error in chat: {e}")
+        return _chat_fallback(reason="parse_error")
+    except httpx.HTTPStatusError as e:
+        reason = "rate_limited" if e.response.status_code == 429 else "api_error"
+        return _chat_fallback(reason=reason)
+    except httpx.TimeoutException:
+        return _chat_fallback(reason="timeout")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("_call_ai_for_chat unexpected error: %s", e)
+        return _chat_fallback(reason="unknown")
+
+
+def _chat_fallback_from_text(raw_text: str) -> dict:
+    """Fallback for non-JSON AI reply that is still actionable text."""
+    text = (raw_text or "").strip()
+    if not text:
+        return _chat_fallback(reason="parse_error")
+
+    action = "practice_questions" if re.search(r"\bpractice\b", text, re.I) else "review_topic"
+    if re.search(r"\bmisconcept(ion|ions)?\b", text, re.I):
+        action = "misconception_correction"
+
+    topic_focus = None
+    topic_match = re.search(r"\b(?:on|for)\s+([A-Za-z0-9 &\-]+?)(?:[\.,]|$)", text, re.I)
+    if topic_match:
+        topic_focus = topic_match.group(1).strip()
+
+    next_step = text if len(text) <= 250 else text[:250].rstrip() + "..."
+
+    # Detect urgency based on weakness signals in the text
+    urgency = "medium"
+    if action == "misconception_correction":
+        urgency = "critical"
+    elif re.search(r"confirmed weak", text, re.I):
+        urgency = "high"
+    elif re.search(r"overdue|decay|dangerous", text, re.I):
+        urgency = "elevated"
+
+    return {
+        "response": text if len(text) <= 300 else text[:300].rstrip() + "...",
+        "action": action,
+        "topic_focus": topic_focus,
+        "next_step": next_step,
+        "confidence_tip": "Slow down on tough options: eliminate at least two wrong choices before committing.",
+        "urgency": urgency,
+        "encouraging_note": "Good signal: you got a clear instruction; follow it and request a new coach check after 10 questions.",
+    }
+
+
+def _chat_fallback(
+    response: str = "I couldn't reach the AI engine right now.",
+    reason: str = "unknown",
+) -> dict:
+    messages = {
+        "rate_limited": "Too many requests — wait a moment and try again.",
+        "timeout":      "The AI took too long to respond. Try a shorter question.",
+        "parse_error":  "Got a response but couldn't read it. Try rephrasing.",
+        "api_error":    "API error on our end. Use the next-action card for now.",
+        "unknown":      "Something went wrong. Use the next-action card for now.",
+    }
+    return {
+        "response":          messages.get(reason, response),
+        "action":            "fallback",
+        "topic_focus":       None,
+        "next_step":         "Check your weak points panel and pick the lowest-accuracy topic.",
+        "confidence_tip":    "When in doubt, eliminate options you're certain are wrong first.",
+        "urgency":           "low",
+        "encouraging_note":  "You're still here — that already puts you ahead.",
+    }
+
+# ── 2-Stage AI Pipeline: Analyzer → Humanizer ────────────────────────────────
+
+async def _run_analyzer(context: dict) -> dict:
+    """
+    Stage 1 — CortexQ Analyzer.
+    Cold, precise logic. Reads student profile, applies priority rules,
+    returns a structured decision object. No human tone. No explanations.
+    Uses ANALYZER_MODEL at temperature=0.1.
+    """
+    weak_topics = context.get("weak_topics", [])
+    co_pairs = context.get("co_failure_pairs", [])
+    overconf = context.get("calibration", {}).get("overconfidence_rate")
+    recent = context.get("recent_sessions", [])
+
+    confirmed_weak = [t for t in weak_topics if t.get("total_attempts", 0) >= 3 and t.get("accuracy", 1.0) < 0.6]
+    dangerous = [t for t in weak_topics if t.get("dangerous_misconception")]
+    early_data = [t for t in weak_topics if t.get("total_attempts", 0) < 3]
+
+    system_prompt = """You are CortexQ Analyzer — a precision learning intelligence engine.
+
+Your job is to analyze a student's performance data and produce a structured decision object.
+
+You do NOT speak to the student.
+You ONLY think, prioritize, and decide.
+
+DECISION RULES (STRICT):
+
+PRIORITY ORDER:
+a) Dangerous misconceptions → ALWAYS highest priority
+b) Confirmed weak topics (≥3 attempts AND accuracy <60%)
+c) Co-failure amplification (topics that fail together)
+d) Early data (<3 attempts) → ONLY if nothing else exists
+
+SAMPLE SIZE:
+<3 attempts = NOT reliable — NEVER treat as confirmed weakness
+
+CO-FAILURE:
+If A and B fail together → recommend A to improve B
+
+OVERCONFIDENCE:
+If overconfidence_rate > 0.3 → mark behavior_issue = true
+
+OUTPUT FORMAT (STRICT JSON ONLY):
+{
+  "primary_topic": "string",
+  "secondary_topic": "string or null",
+  "reason_type": "misconception | weak_topic | co_failure | early_signal",
+  "intervention": "misconception_correction | practice_questions | review | spaced_review",
+  "question_count": integer (5-15),
+  "target_accuracy": integer (60-85),
+  "urgency": "low | medium | high | critical",
+  "behavior_issue": true | false,
+  "confidence_level": "low | medium | high"
+}
+
+IMPORTANT: NO explanations. NO human tone. ONLY structured decision. Be strict and consistent."""
+
+    user_prompt = f"""STUDENT PROFILE:
+
+Topics (sorted by accuracy):
+{json.dumps([{"topic": t["topic"], "accuracy": t["accuracy"], "attempts": t["total_attempts"], "dangerous_misconception": t["dangerous_misconception"]} for t in weak_topics[:10]], indent=2)}
+
+Confirmed weak topics (≥3 attempts, <60% accuracy):
+{json.dumps([t["topic"] for t in confirmed_weak]) if confirmed_weak else "none"}
+
+Dangerous misconceptions:
+{json.dumps([t["topic"] for t in dangerous]) if dangerous else "none"}
+
+Co-failure pairs:
+{json.dumps([{"topic_a": p["topic_a"], "topic_b": p["topic_b"]} for p in co_pairs]) if co_pairs else "none"}
+
+Early data topics (<3 attempts):
+{json.dumps([t["topic"] for t in early_data[:5]]) if early_data else "none"}
+
+Overconfidence rate: {f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"}
+
+Recent sessions: {len(recent)} sessions on record"""
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": getattr(settings, "ANALYZER_MODEL", "llama-3.3-70b-versatile"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 500,
+            },
+        )
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"]
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+        return json.loads(raw)
+
+
+async def _run_humanizer(decision: dict, context: dict) -> dict:
+    """
+    Stage 2 — CortexQ Humanizer.
+    Takes the Analyzer's structured decision and converts it into a natural,
+    conversational coaching message. 1-2 sentences. Action-first. Never robotic.
+    Uses HUMANIZER_MODEL at temperature=0.7.
+    """
+    overconf = context.get("calibration", {}).get("overconfidence_rate")
+
+    system_prompt = """You are CortexQ Coach — a sharp, human-like medical study coach.
+
+Your job is to convert a structured AI decision into a natural, conversational coaching message.
+
+YOUR JOB:
+Turn the decision into a response that is:
+- Natural (like a smart friend)
+- Action-first (start with what to do)
+- Short (1-2 sentences MAX)
+- Specific (use real topic names + numbers)
+
+RULES:
+START WITH ACTION — e.g. "Hit Antifungal Therapy next — it's dragging down Cell Membrane questions."
+
+HANDLE EARLY DATA:
+If reason_type = "early_signal" → say "quick check" or "still early" — DO NOT say "you're weak"
+
+CO-FAILURE:
+If secondary_topic exists → mention it naturally: "because it's tied to X"
+
+MISCONCEPTIONS → sound urgent and corrective
+
+BEHAVIOR FIX:
+If behavior_issue = true → add: "slow down before locking answers"
+
+TONE: Confident but chill. No robotic phrasing. No generic motivation. No analysis explanation.
+
+BANNED PHRASES: "based on your data", "you failed", "you struggled", "Let's review", "keep it up", "you're doing great"
+
+OUTPUT FORMAT (STRICT JSON ONLY):
+{
+  "response": "1-2 sentence natural coaching message",
+  "next_step": "Do X questions on Y. Aim for >Z%",
+  "reason": "max 10 words",
+  "urgency": "low | medium | high | critical",
+  "confidence_tip": "only if behavior_issue = true, else null"
+}
+
+ONLY return JSON. No extra text. No explanations."""
+
+    user_prompt = f"""Convert this decision into coaching:
+
+{json.dumps(decision, indent=2)}
+
+Student overconfidence rate: {f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"}"""
+
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": getattr(settings, "HUMANIZER_MODEL", "llama-3.3-70b-versatile"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 300,
+            },
+        )
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"]
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+        return json.loads(raw)
+
+
+async def _call_ai_pipeline(context: dict, student_id: int, db: Session) -> dict:
+    """
+    Orchestrates Stage 1 (Analyzer) → Stage 2 (Humanizer).
+    Returns a dict compatible with NextBestActionResponse.
+    Falls back to _build_next_best_action if either stage fails.
+    """
+    try:
+        decision = await _run_analyzer(context)
     except Exception:
-        return {
-            "response": "I couldn't reach the AI engine; use the next-action advice.",
-            "action": "fallback",
-            "next_step": "Use the next-action card at the top to continue.",
-            "confidence_tip": "Focus on individual concepts in small blocks.",
-        }
+        return _build_next_best_action(student_id, db)
+
+    if not decision or not decision.get("primary_topic"):
+        return _build_next_best_action(student_id, db)
+
+    try:
+        coaching = await _run_humanizer(decision, context)
+    except Exception:
+        return _build_next_best_action(student_id, db)
+
+    if not coaching or not coaching.get("response"):
+        return _build_next_best_action(student_id, db)
+
+    return {
+        "action_type":             decision.get("intervention", "practice_questions"),
+        "topic":                   decision.get("primary_topic"),
+        "next_step":               coaching.get("next_step", f"Do {decision.get('question_count', 10)} questions on {decision.get('primary_topic')}. Aim for >{decision.get('target_accuracy', 70)}%."),
+        "reason":                  [coaching.get("reason", decision.get("reason_type", ""))],
+        "confidence_gap_alert":    bool(decision.get("behavior_issue", False)),
+        "short_message":           coaching.get("response", ""),
+        "predicted_readiness_24h": _estimate_readiness_24h(student_id, db),
+        "urgency":                 coaching.get("urgency", decision.get("urgency", "medium")),
+        "confidence_tip":          coaching.get("confidence_tip"),
+        "secondary_topic":         decision.get("secondary_topic"),
+    }
 
 
 @router.post("/students/me/chat")
@@ -1092,10 +1805,33 @@ async def chat_with_coach(
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
-    context = await _build_student_context(current_user.id, db)
-    answer = await _call_ai_for_chat(context, message)
-    return answer
+    history = body.get("conversation_history", [])
 
+    context = _build_student_context(current_user.id, db)
+    answer = await _call_ai_for_chat(context, message, conversation_history=history)
+
+    # Attach real practice questions for the topic the coach recommends
+    topic_focus = answer.get("topic_focus")
+    if topic_focus:
+        practice_qs = (
+            db.query(McqQuestion)
+            .filter(McqQuestion.topic == topic_focus)
+            .limit(3)
+            .all()
+        )
+        if practice_qs:
+            answer["practice_questions"] = [
+                {
+                    "id": q.id,
+                    "document_id": q.document_id,
+                    "topic": q.topic,
+                    "preview": (q.question_text[:100] + "…") if len(q.question_text) > 100 else q.question_text,
+                }
+                for q in practice_qs
+            ]
+            answer["practice_document_id"] = practice_qs[0].document_id
+
+    return answer
 
 # ── POST /students/me/exam-date ───────────────────────────────────────────────
 
@@ -1118,6 +1854,7 @@ def set_exam_date(
         pattern = LearningPattern(
             id=str(uuid4()),
             student_id=current_user.id,
+            exam_date=exam_date,
             computed_at=datetime.utcnow(),
         )
         db.add(pattern)
@@ -1134,7 +1871,7 @@ def set_exam_date(
 
 # ── AI helpers ────────────────────────────────────────────────────────────────
 
-async def _build_student_context(student_id: int, db: Session) -> dict:
+def _build_student_context(student_id: int, db: Session) -> dict:
     """
     Builds the complete student profile sent to the AI.
     Rebuilt from the database on every call since LLMs have no persistent memory.
@@ -1254,7 +1991,7 @@ async def _build_student_context(student_id: int, db: Session) -> dict:
 async def _call_ai_for_insight(context: dict) -> dict:
     """
     Calls the AI with the student context and returns structured insight.
-    Uses OpenRouter with the same API key as the rest of the app.
+    Uses Groq with the same API key as the rest of the app.
     """
     prompt = f"""You are an adaptive learning coach for a medical student.
 You have complete data about this student's performance history.
@@ -1290,11 +2027,10 @@ Rules:
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {settings.AI_API_KEY}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://localhost",
                 },
                 json={
                     "model": settings.AI_MODEL,

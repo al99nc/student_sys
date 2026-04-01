@@ -186,7 +186,7 @@ async def _call_single_chunk(
 
     if total_chunks > 1:
         user_prompt += (
-            f"\n\n[NOTE: This is chunk {chunk_index + 1} of {total_chunks} parallel chunks. "
+            f"\n\n[NOTE: This is chunk {chunk_index + 1} of {total_chunks}. "
             f"Generate 8-12 questions ONLY from this content. "
             "Do NOT repeat questions from other chunks. Keep explanations concise.]"
         )
@@ -274,9 +274,19 @@ async def _call_single_chunk(
             if "INVALID_KEY" in err_str:
                 raise
 
-            # TPM per-minute 429 — propagate immediately so caller rotates to next key
+            # TPM per-minute 429 — wait exactly as Groq says, then retry same key
             if "429" in err_str:
-                raise RuntimeError(f"TPM_LIMIT: {e}")
+                # Extract seconds from "TPM_LIMIT:40.5:..." or fallback to 65s
+                try:
+                    retry_wait = float(str(e).split(":")[1]) + 1.0
+                except (IndexError, ValueError):
+                    retry_wait = 65.0
+                logger.warning(
+                    f"[{mode}] Chunk {chunk_index + 1} hit TPM limit — "
+                    f"waiting {retry_wait:.0f}s before retry (attempt {attempt + 1})"
+                )
+                await asyncio.sleep(retry_wait)
+                continue  # retry same key
 
             # Other errors — exponential backoff
             wait = 2 ** attempt
@@ -514,11 +524,19 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
     try:
         t_total_start = time.monotonic()
 
-        # All chunks fire concurrently — paid API key has no per-minute TPM cap.
-        chunk_output = await asyncio.gather(*[
-            _call_chunk_with_rotation(available_keys, chunk, mode, i, total_chunks)
-            for i, chunk in enumerate(chunks)
-        ])
+        # Sequential processing — free-tier Groq has 8 000 TPM so chunks must
+        # not overlap.  Wait _INTER_CHUNK_WAIT seconds between each chunk so
+        # the TPM window fully resets before the next request fires.
+        chunk_output: list[tuple[dict, float]] = []
+        for i, chunk in enumerate(chunks):
+            if i > 0:
+                logger.info(
+                    f"[{mode}] Waiting {_INTER_CHUNK_WAIT}s before chunk {i + 1}/{total_chunks} "
+                    f"(TPM window reset)"
+                )
+                await asyncio.sleep(_INTER_CHUNK_WAIT)
+            result = await _call_chunk_with_rotation(available_keys, chunk, mode, i, total_chunks)
+            chunk_output.append(result)
 
         chunk_results = [data for data, _ in chunk_output]
         chunk_timings = [round(elapsed, 2) for _, elapsed in chunk_output]
