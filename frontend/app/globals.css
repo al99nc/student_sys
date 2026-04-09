@@ -68,3 +68,9 @@ body {
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(251,146,60,0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(251,146,60,0); }
+  100% { box-shadow: 0 0 0 0 rgba(251,146,60,0); }
+}

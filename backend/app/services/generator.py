@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import re
 import time
 import logging
@@ -123,25 +124,30 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
     return chunks
 
 
-def _estimate_processing_time(text: str, mode: str) -> dict:
+def _estimate_processing_time(text: str, mode: str, n_keys: int = 1) -> dict:
     chunks = _chunk_text(text)
     n_chunks = len(chunks)
     max_tokens = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])["max_tokens"]
 
-    # All chunks run concurrently — total time ≈ single chunk time.
     per_chunk_seconds = max_tokens / ESTIMATED_TPS + 2   # +2 for network + prefill
-    total_seconds = per_chunk_seconds
+
+    # Each batch runs min(n_keys, remaining_chunks) chunks in parallel.
+    # Between batches we wait _INTER_CHUNK_WAIT for each key's TPM window to reset.
+    batch_size = max(1, n_keys)
+    n_batches = math.ceil(n_chunks / batch_size)
+    total_seconds = n_batches * per_chunk_seconds + max(0, n_batches - 1) * _INTER_CHUNK_WAIT
 
     return {
         "chunks": n_chunks,
+        "keys": n_keys,
         "estimated_seconds": round(total_seconds),
         "estimated_range": (
             f"{max(5, round(total_seconds * 0.8))}–{round(total_seconds * 1.25)}s"
         ),
         "text_length_chars": len(text),
         "note": (
-            f"Large document — {n_chunks} chunks processed sequentially "
-            f"(~{round(total_seconds)}s total, free-tier TPM budget)."
+            f"{n_chunks} chunk(s), {n_keys} key(s), {n_batches} batch(es) — "
+            f"~{round(total_seconds)}s total."
             if n_chunks > 1
             else "Single chunk — fastest processing."
         ),
@@ -512,31 +518,45 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
         logger.warning(f"Unknown mode '{mode}' — falling back to highyield")
         mode = "highyield"
 
-    time_estimate = _estimate_processing_time(text, mode)
-    logger.info(
-        f"[{mode}] Estimate: {time_estimate['chunks']} chunk(s), "
-        f"~{time_estimate['estimated_range']}"
-    )
-
     chunks = _chunk_text(text)
     total_chunks = len(chunks)
+    n_keys = len(available_keys)
+
+    time_estimate = _estimate_processing_time(text, mode, n_keys)
+    logger.info(
+        f"[{mode}] Estimate: {total_chunks} chunk(s), {n_keys} key(s), "
+        f"~{time_estimate['estimated_range']}"
+    )
 
     try:
         t_total_start = time.monotonic()
 
-        # Sequential processing — free-tier Groq has 8 000 TPM so chunks must
-        # not overlap.  Wait _INTER_CHUNK_WAIT seconds between each chunk so
-        # the TPM window fully resets before the next request fires.
+        # Batch-parallel: run up to n_keys chunks simultaneously, one key per chunk.
+        # Each key has its own 8 000 TPM budget, so parallel chunks don't contend.
+        # Between batches we wait _INTER_CHUNK_WAIT so every key's TPM window resets.
         chunk_output: list[tuple[dict, float]] = []
-        for i, chunk in enumerate(chunks):
-            if i > 0:
+        batch_size = max(1, n_keys)
+
+        for batch_start in range(0, total_chunks, batch_size):
+            batch_indices = list(range(batch_start, min(batch_start + batch_size, total_chunks)))
+
+            if batch_start > 0:
                 logger.info(
-                    f"[{mode}] Waiting {_INTER_CHUNK_WAIT}s before chunk {i + 1}/{total_chunks} "
-                    f"(TPM window reset)"
+                    f"[{mode}] Waiting {_INTER_CHUNK_WAIT}s before batch "
+                    f"{batch_start // batch_size + 1} (TPM window reset)"
                 )
                 await asyncio.sleep(_INTER_CHUNK_WAIT)
-            result = await _call_chunk_with_rotation(available_keys, chunk, mode, i, total_chunks)
-            chunk_output.append(result)
+
+            logger.info(
+                f"[{mode}] Processing chunks {batch_start + 1}–{batch_indices[-1] + 1} "
+                f"of {total_chunks} in parallel ({len(batch_indices)} key(s))"
+            )
+            tasks = [
+                _call_chunk_with_rotation(available_keys, chunks[i], mode, i, total_chunks)
+                for i in batch_indices
+            ]
+            batch_results = await asyncio.gather(*tasks)
+            chunk_output.extend(batch_results)
 
         chunk_results = [data for data, _ in chunk_output]
         chunk_timings = [round(elapsed, 2) for _, elapsed in chunk_output]

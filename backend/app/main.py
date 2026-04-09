@@ -6,9 +6,11 @@ from app.api import auth, lectures, telegram
 from app.api.telegram import bot_router
 from app.api import performance
 from app.api import coach as coach_api
+from app.api import ai_tools
 # Import models so Base.metadata includes them for create_all
 import app.models.performance  # noqa: F401
 import app.models.coach        # noqa: F401
+import app.models.ai_tools     # noqa: F401
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -79,6 +81,7 @@ app.include_router(telegram.router)
 app.include_router(bot_router)
 app.include_router(performance.router)
 app.include_router(coach_api.router)
+app.include_router(ai_tools.router)
 
 @app.get("/")
 def root():

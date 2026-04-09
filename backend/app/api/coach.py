@@ -12,6 +12,8 @@ Endpoints:
 
 import re
 import json
+import logging
+from typing import Any
 from uuid import uuid4
 from datetime import datetime
 
@@ -28,9 +30,36 @@ from app.models.coach import CoachConversation, CoachMessage
 from app.models.performance import McqQuestion
 
 # Re-use helpers from performance module
-from app.api.performance import _build_student_context, _call_ai_for_chat, _chat_fallback
+from app.api.performance import _build_student_context, _call_ai_for_chat, _chat_fallback, _run_analyzer
+from app.api.ai_tools import tool_save_memory
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
+
+
+def sanitize_nulls(obj: Any) -> Any:
+    """
+    Convert AI-generated sentinel strings for missing values into real JSON nulls.
+    Handles nested dicts and lists recursively.
+    """
+    replaced = False
+
+    def _sanitize(value: Any) -> Any:
+        nonlocal replaced
+        if isinstance(value, dict):
+            return {key: _sanitize(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [_sanitize(item) for item in value]
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"null", "none", ""}:
+                replaced = True
+                return None
+        return value
+
+    cleaned = _sanitize(obj)
+    if replaced:
+        logging.getLogger(__name__).debug("Sanitized AI response null-like strings to JSON null")
+    return cleaned
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -216,11 +245,64 @@ async def send_message(
     # ── Call AI ───────────────────────────────────────────────────────────────
     context = _build_student_context(current_user.id, db)
 
+    # Run the Analyzer first so the chat model gets a precise briefing instead
+    # of having to re-derive priority from raw numbers itself.
+    # If the student has no data yet the analyzer gracefully returns nothing.
+    analyzer_decision: dict | None = None
+    try:
+        analyzer_decision = await _run_analyzer(context)
+        if not analyzer_decision.get("primary_topic"):
+            analyzer_decision = None
+    except Exception:
+        analyzer_decision = None  # no data yet — chat works fine without it
+
     if image_data and image_mime:
-        # Use vision-capable model
+        # Vision call also receives the analyzer decision via context extension
+        if analyzer_decision:
+            context = {**context, "_analyzer_decision": analyzer_decision}
         answer = await _call_ai_vision(context, user_message_for_ai, image_data, image_mime, history)
     else:
-        answer = await _call_ai_for_chat(context, user_message_for_ai, conversation_history=history)
+        answer = await _call_ai_for_chat(
+            context,
+            user_message_for_ai,
+            conversation_history=history,
+            analyzer_decision=analyzer_decision,
+        )
+
+    # ── Attach hard-data enrichments (no AI needed — computed from context) ──────
+    if analyzer_decision and analyzer_decision.get("primary_topic"):
+        primary_topic = analyzer_decision["primary_topic"]
+        target_acc    = analyzer_decision.get("target_accuracy", 70)
+
+        # Mastery progress bar data
+        weak_topics   = context.get("weak_topics", [])
+        topic_stat    = next((t for t in weak_topics if t.get("topic") == primary_topic), {})
+        current_acc   = round((topic_stat.get("accuracy", 0)) * 100)
+        answer["mastery_progress"] = {
+            "topic":   primary_topic,
+            "current": current_acc,
+            "target":  target_acc,
+        }
+
+        # Topic unlock chain — all topics that co-fail with the priority topic
+        all_pairs  = context.get("co_failure_pairs", [])
+        unlocks    = []
+        for p in all_pairs:
+            if p.get("topic_a") == primary_topic and p.get("topic_b") not in unlocks:
+                unlocks.append(p["topic_b"])
+            elif p.get("topic_b") == primary_topic and p.get("topic_a") not in unlocks:
+                unlocks.append(p["topic_a"])
+        if unlocks:
+            answer["topic_chain"] = unlocks[:4]  # cap at 4 for UI clarity
+
+        # Days since last session
+        recent = context.get("recent_sessions", [])
+        if recent and recent[0].get("days_ago") is not None:
+            answer["days_since_last"] = recent[0]["days_ago"]
+
+        # Relapse flag — student previously mastered this topic but regressed
+        if topic_stat.get("times_mastered", 0) > 0 and topic_stat.get("accuracy", 1.0) < 0.6:
+            answer["is_relapse"] = True
 
     # ── Attach practice questions for topic_focus ─────────────────────────────
     topic_focus = answer.get("topic_focus")
@@ -242,6 +324,18 @@ async def send_message(
                 for q in practice_qs
             ]
             answer["practice_document_id"] = practice_qs[0].document_id
+
+    # ── Process AI tool calls ─────────────────────────────────────────────────
+    save_memory_req = answer.get("save_memory")
+    if isinstance(save_memory_req, dict):
+        key   = save_memory_req.get("key", "").strip()
+        label = save_memory_req.get("label", "").strip()
+        value = save_memory_req.get("value", "")
+        if key and label and value is not None and str(value).strip():
+            try:
+                tool_save_memory(current_user.id, key, label, str(value), db)
+            except Exception:
+                pass  # never let a memory save failure break the chat
 
     # ── Save assistant message ────────────────────────────────────────────────
     ai_text = answer.get("response", "")
@@ -338,30 +432,42 @@ async def _call_ai_vision(
     dangerous_topics = [t["topic"] for t in weak_topics_data if t.get("dangerous_misconception")]
     overconf = context.get("calibration", {}).get("overconfidence_rate")
     overconf_str = f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"
+    personal_memories = context.get("personal_memories", [])
 
-    system_prompt = f"""You are CortexQ Coach — a knowledgeable, direct tutor for medical students.
-The student has shared an image (likely a diagram, question, or notes). Analyze it and connect it to their study needs.
+    memory_lines = "\n".join(
+        f"  • {m['label']}: {m['value']}" for m in personal_memories
+    ) if personal_memories else "  • Nothing saved yet"
+
+    system_prompt = f"""You are Sage — CortexQ's personal study coach. You have this student's real performance data loaded below and you always use it. You never say "I don't know" or "I don't have access to your data" — that data is right here.
+The student has shared an image. Analyze what it actually shows and respond naturally.
 
 STUDENT DATA:
 - Confirmed weak topics (≥3 attempts, <60%): {confirmed_weak or "none yet"}
 - Dangerous misconceptions: {dangerous_topics or "none"}
 - Overconfidence rate: {overconf_str}
 
+PERSONAL MEMORY (facts you saved about this student across all past conversations):
+{memory_lines}
+
 RULES:
-1. Tell the student what the image shows and what's important about it medically.
-2. If it relates to a confirmed weak topic, connect it explicitly.
-3. Lead with what TO DO — not what they failed at.
-4. Return ONLY valid JSON. No markdown.
+1. Describe what the image actually shows.
+2. If the image is about a medical or study topic AND it relates to a confirmed weak topic, connect it — but only if genuinely relevant.
+3. If the image is personal, off-topic, or about a conversation (e.g. a screenshot of a chat), respond to it naturally WITHOUT forcing a redirect to study topics. Do not shoehorn medical advice into unrelated images.
+4. MEMORY RULE: Personal facts you remember come ONLY from the PERSONAL MEMORY section above or the current conversation. You do NOT have access to previous separate conversations. If the student shows you a screenshot proving you forgot something, acknowledge it honestly — and if they reveal a fact worth saving, include "save_memory" in your response.
+5. SAVING FACTS: When the student reveals a personal fact worth remembering (name, exam date, goals, preferences), include "save_memory" in your JSON.
+6. If the student asks what data you have about them, summarize the STUDENT DATA and PERSONAL MEMORY above — never say you don't have data.
+7. Return ONLY valid JSON. No markdown.
 
 RESPONSE SCHEMA:
 {{
-  "response": "what the image shows + direct coaching insight in 1-2 conversational sentences",
+  "response": "natural reply to what the image actually shows — 1-2 sentences",
   "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic",
-  "topic_focus": "exact topic name from their data, or null",
-  "next_step": "one specific action with a number and target",
-  "confidence_tip": "specific to their {overconf_str} overconfidence rate",
+  "topic_focus": "exact topic name from their data only if genuinely relevant, otherwise null",
+  "next_step": "one specific study action — or null if the image is not study-related",
+  "confidence_tip": "specific to their {overconf_str} overconfidence rate, or null if not relevant",
   "urgency": "low | medium | high | critical",
-  "encouraging_note": "one honest specific sentence — no hollow filler"
+  "encouraging_note": "one honest sentence — or null if not relevant",
+  "save_memory": {{"key": "snake_case_key", "label": "Human readable label", "value": "the fact to save"}} or null
 }}"""
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -373,6 +479,8 @@ RESPONSE SCHEMA:
             {"type": "image_url", "image_url": {"url": image_data}},
         ],
     })
+
+    _log = logging.getLogger(__name__)
 
     try:
         async with httpx.AsyncClient(timeout=40.0) as client:
@@ -387,6 +495,7 @@ RESPONSE SCHEMA:
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 700,
+                    "response_format": {"type": "json_object"},
                 },
             )
             resp.raise_for_status()
@@ -394,10 +503,18 @@ RESPONSE SCHEMA:
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
             parsed = json.loads(raw)
+            parsed = sanitize_nulls(parsed)
             required = ["response", "action", "topic_focus", "next_step", "confidence_tip", "urgency", "encouraging_note"]
             for key in required:
                 parsed.setdefault(key, None)
             return parsed
-    except Exception:
-        # Fall back to text-only call
-        return await _call_ai_for_chat(context, text or "I shared an image.", conversation_history=history)
+    except Exception as e:
+        _log.warning("Vision call failed (%s), falling back to text-only", e)
+        fallback_msg = text if text else "I sent you an image to look at."
+        # Preserve analyzer decision through the fallback path
+        fallback_decision = context.pop("_analyzer_decision", None)
+        return await _call_ai_for_chat(
+            context, fallback_msg,
+            conversation_history=history,
+            analyzer_decision=fallback_decision,
+        )

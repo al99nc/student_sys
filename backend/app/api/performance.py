@@ -1,9 +1,10 @@
 import json
+import logging
 import random
 import re
 from uuid import uuid4
 from datetime import datetime, timedelta
-from typing import List
+from typing import Any, List
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -46,6 +47,32 @@ router = APIRouter(prefix="/api/v1/performance", tags=["performance"])
 
 MASTERY_THRESHOLD = 0.8
 RELAPSE_THRESHOLD = 0.6
+
+
+def sanitize_nulls(obj: Any) -> Any:
+    """
+    Convert AI-generated sentinel strings for missing values into real JSON nulls.
+    Handles nested dicts and lists recursively.
+    """
+    replaced = False
+
+    def _sanitize(value: Any) -> Any:
+        nonlocal replaced
+        if isinstance(value, dict):
+            return {key: _sanitize(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [_sanitize(item) for item in value]
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"null", "none", ""}:
+                replaced = True
+                return None
+        return value
+
+    cleaned = _sanitize(obj)
+    if replaced:
+        logging.getLogger(__name__).debug("Sanitized AI response null-like strings to JSON null")
+    return cleaned
 
 
 # ── POST /sessions/start ──────────────────────────────────────────────────────
@@ -1274,7 +1301,7 @@ Return a JSON object with EXACTLY these fields:
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
 
-            parsed = json.loads(raw)
+            parsed = sanitize_nulls(json.loads(raw))
 
             # Validate + fill required keys defensively
             required_keys = {
@@ -1338,94 +1365,151 @@ async def _call_ai_for_chat(
     context: dict,
     user_message: str,
     conversation_history: list[dict] | None = None,
+    analyzer_decision: dict | None = None,
 ) -> dict:
     """
     AI coaching chat. Supports multi-turn history.
     conversation_history: list of {"role": "user"|"assistant", "content": "..."}
+    analyzer_decision: pre-computed priority decision from _run_analyzer — injected as a
+                       briefing so the chat model focuses on responding naturally instead
+                       of also having to analyse the data itself.
     """
 
-    # ── Build a compact, readable context for the AI ─────────────────────────
+    # ── Build student context ─────────────────────────────────────────────────
     weak_topics_data = context.get("weak_topics", [])
-
-    # Only flag topics with ≥3 attempts as genuinely weak — fewer attempts = still gathering data
-    confirmed_weak  = [t for t in weak_topics_data if t.get("total_attempts", 0) >= 3 and t.get("accuracy", 1.0) < 0.6]
-    early_data      = [t for t in weak_topics_data if t.get("total_attempts", 0) < 3]
     dangerous       = [t for t in weak_topics_data if t.get("dangerous_misconception")]
     co_pairs        = [(p["topic_a"], p["topic_b"]) for p in context.get("co_failure_pairs", [])]
     overconf        = context.get("calibration", {}).get("overconfidence_rate")
     overconf_str    = f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"
     total_q         = context.get("total_questions_answered", 0)
+    personal_memories = context.get("personal_memories", [])
 
-    # Compact topic summary (avoid dumping huge JSON)
     topic_lines = []
     for t in weak_topics_data[:8]:
         attempts = t.get("total_attempts", 0)
         acc = t.get("accuracy", 0)
-        flag = " ⚠ MISCONCEPTION" if t.get("dangerous_misconception") else ""
-        reliability = "confirmed weak" if attempts >= 3 else f"only {attempts} attempt{'s' if attempts != 1 else ''} — too early to judge"
-        topic_lines.append(f"  • {t['topic']}: {acc:.0%} accuracy, {attempts} attempts ({reliability}){flag}")
-
+        flag = " [MISCONCEPTION]" if t.get("dangerous_misconception") else ""
+        status = "confirmed weak" if attempts >= 3 else f"{attempts} attempt(s) — early data"
+        topic_lines.append(f"  • {t['topic']}: {acc:.0%} accuracy, {attempts} attempts ({status}){flag}")
     topics_summary = "\n".join(topic_lines) if topic_lines else "  • No topic data yet"
 
-    system_prompt = f"""You are CortexQ Coach — a sharp, direct tutor for medical students. Advise like a knowledgeable friend who already read the numbers, not like a report generator.
+    memory_lines = "\n".join(
+        f"  • {m['label']}: {m['value']}" for m in personal_memories
+    ) if personal_memories else "  • Nothing saved yet"
 
-STUDENT SNAPSHOT:
-- Total questions answered: {total_q}
-- Topics attempted (sorted by accuracy):
+    # ── Build Analyzer Briefing block ─────────────────────────────────────────
+    # The Analyzer already did the hard thinking. The chat model's only jobs:
+    # respond naturally to the student AND write compelling explanations.
+    recent_sessions = context.get("recent_sessions", [])
+    days_since_last = recent_sessions[0].get("days_ago") if recent_sessions else None
+
+    if analyzer_decision and analyzer_decision.get("primary_topic"):
+        d = analyzer_decision
+        primary     = d.get("primary_topic", "")
+        secondary   = d.get("secondary_topic")
+        reason_type = d.get("reason_type", "weak_topic")
+        q_count     = d.get("question_count", 10)
+        target_acc  = d.get("target_accuracy", 70)
+        urgency_a   = d.get("urgency", "medium")
+        behavior    = d.get("behavior_issue", False)
+        confidence  = d.get("confidence_level", "medium")
+
+        # Find topic stats from context for real numbers
+        topic_stat  = next((t for t in weak_topics_data if t.get("topic") == primary), {})
+        attempts_n  = topic_stat.get("total_attempts", 0)
+        accuracy_n  = topic_stat.get("accuracy", 0)
+        consec_fail = topic_stat.get("consecutive_failures", 0)
+        has_relapse = topic_stat.get("times_mastered", 0) > 0 and accuracy_n < 0.6
+
+        # Build unlock chain — every topic that co-fails with the primary
+        all_pairs   = context.get("co_failure_pairs", [])
+        unlocks     = [
+            p["topic_b"] for p in all_pairs if p.get("topic_a") == primary
+        ] + [
+            p["topic_a"] for p in all_pairs if p.get("topic_b") == primary and p.get("topic_a") != primary
+        ]
+        # Remove secondary (already mentioned separately) to avoid redundancy
+        unlocks     = [u for u in unlocks if u != secondary]
+        unlock_str  = f"Unlocks if fixed: {', '.join(unlocks[:3])}" if unlocks else ""
+        co_link     = f" (it drags down {secondary} too — they always fail together)" if secondary else ""
+        relapse_str = " — NOTE: student previously mastered this then regressed (relapse)" if has_relapse else ""
+
+        status_desc = {
+            "misconception":  f"dangerous misconception — {attempts_n} attempts, {accuracy_n:.0%} accuracy{relapse_str}",
+            "weak_topic":     f"confirmed weak — {attempts_n} attempts, {accuracy_n:.0%} accuracy, {consec_fail} consecutive failures{relapse_str}",
+            "co_failure":     f"co-failing with {secondary} — both drop together{relapse_str}",
+            "early_signal":   f"early signal — only {attempts_n} attempt(s) so far",
+        }.get(reason_type, f"{attempts_n} attempts, {accuracy_n:.0%} accuracy")
+
+        away_str = (
+            f"\n- Days since last session: {days_since_last} days — student has been away"
+            if days_since_last is not None and days_since_last >= 3 else ""
+        )
+
+        briefing_section = f"""
+ANALYZER BRIEFING (pre-computed — trust these numbers, do not re-derive):
+- Priority topic: {primary} ({status_desc}){co_link}
+- Recommended: {q_count} questions, target >{target_acc}%
+- Urgency: {urgency_a.upper()}
+- Behavior flag: {"OVERCONFIDENCE — student locks wrong answers with high confidence" if behavior else "none"}
+- Confidence in this decision: {confidence}{away_str}
+{("- " + unlock_str) if unlock_str else ""}
+
+RULES FOR FILLING RESPONSE FIELDS:
+- next_step → MUST be: "Do {q_count} questions on {primary}. Aim for >{target_acc}%."
+- topic_focus → MUST be: "{primary}"
+- urgency → MUST be: "{urgency_a}"
+- why_this_matters → 1-2 sentences, student-specific, use the real numbers above. If relapse: mention they had this before and it slipped. If co-failure: mention what gets unblocked. Never generic.
+- session_prediction → estimate how many focused sessions to reach target (e.g. "2-3 focused sessions"). Be honest, not overly optimistic.
+- calibration_pulse → {"Write a short, punchy 1-sentence overconfidence warning using their specific rate of " + overconf_str + ". Must sound like a direct coach calling them out, not a generic tip." if behavior else "null"}
+- check_in → {"Write a 1-sentence return message referencing the " + str(days_since_last) + "-day gap. Mention spaced repetition decay. Direct and honest, not preachy." if (days_since_last is not None and days_since_last >= 3) else "null"}
+- If a field has no value, return JSON null. Do NOT use the string "null", "None", or an empty string.
+- If the student is NOT asking for study advice (greeting, off-topic, concept Q) — still fill all study fields correctly. Your 'response' addresses what they said; the study cards render separately in the UI.
+"""
+    else:
+        briefing_section = "\n(No analyzer decision — derive priority from STUDENT DATA above. Set session_prediction, calibration_pulse, check_in to null.)\n"
+
+    system_prompt = f"""You are Sage, a personal study coach inside CortexQ. You're sharp, warm, and direct — like a smart friend who happens to have the student's full academic data open in front of you.
+
+STUDENT DATA:
+- Questions answered: {total_q}
+- Topics:
 {topics_summary}
-- Dangerous misconceptions (certain + wrong): {[t["topic"] for t in dangerous] or "none"}
+- Dangerous misconceptions: {[t["topic"] for t in dangerous] or "none"}
 - Overconfidence rate: {overconf_str}
-- Co-failing pairs (topics that tank together): {co_pairs or "none"}
+- Co-failing topic pairs: {co_pairs or "none"}
 
-━━━ PRIORITY ORDER — strictly top-to-bottom ━━━
-1. DANGEROUS MISCONCEPTIONS → action="misconception_correction", urgency="critical"
-   If any topic has a dangerous misconception, address it first. No exceptions.
+PERSONAL MEMORY (facts you saved about this student across all past conversations):
+{memory_lines}
+{briefing_section}
+HOW TO RESPOND:
+- Talk naturally. Short sentences. Like texting a smart friend.
+- If they say "hi", "hello", "hey" or just small talk: just greet them back warmly. ONE sentence. Do NOT mention their data. Set action="greeting", urgency="low".
+- If they ask for study advice or "what should I study": use the ANALYZER BRIEFING priority.
+- Always use real topic names and real numbers. Never vague.
+- If they ask what data you have, list it directly — never say you don't have access.
+- If they ask a concept question, explain it clearly then tie it to their data if relevant.
+- Never say "based on your data", "you struggled", "let's review", "great question", "keep it up".
+- topic_focus must be ONLY the exact topic name — never add extra words to it.
+- MEMORY RULE: Personal facts come ONLY from PERSONAL MEMORY above or the current conversation. If not there, say honestly you don't have it — never invent.
+- OFF-TOPIC: Respond naturally and warmly. Do NOT force-redirect to study topics.
+- SAVING FACTS: When the student tells you a personal fact worth keeping (name, exam date, goal, preference), include "save_memory" in your JSON.
 
-2. CONFIRMED WEAK = {[t["topic"] for t in confirmed_weak] or "none"}
-   ≥3 attempts + <60% accuracy. Real, verified gaps — recommend targeted practice.
-
-3. CO-FAILING PAIRS = {co_pairs or "none"}
-   If Topic A and B fail together, recommend A because "fixing A pulls up B too."
-   Use the relationship explicitly — don't just list both topics separately.
-
-4. EARLY DATA = {[t["topic"] for t in early_data[:4]] or "none"}
-   Fewer than 3 attempts. DO NOT label these as weaknesses.
-   Instead say: "quick check", "only N attempt(s) — worth a pass", "still too early to call."
-   Only recommend these if tiers 1–3 are all empty.
-
-━━━ RESPONSE RULES ━━━
-• YOUR FIRST WORDS = the action. Not the observation.
-  BAD: "You have 0% on X." → GOOD: "Hit X next — 0/1 so far and it drags Y down with it."
-  BAD: "Your weakest topic is X." → GOOD: "Knock out X — confirmed weak at 40% over 5 tries."
-
-• `response` = 1–2 sentences MAX. Short. Conversational. Like texting a smart friend.
-
-• `next_step` = one concrete action with an exact number.
-  e.g. "Do 10 questions on Antifungal Therapy. Aim for >60%."
-
-• `encouraging_note` = honest, tied to their actual data. Zero generic filler.
-  BAD: "Keep going, you've got this!" → GOOD: "Your Pharmacology accuracy has been climbing — that's real progress."
-
-• `confidence_tip` = calibrated to their overconfidence rate of {overconf_str}.
-  If >30%: name the pattern directly. If unknown: give a universal calibration tip.
-
-BANNED PHRASES — must not appear anywhere in the output:
-"based on your data", "your performance data", "you have demonstrated", "you have not demonstrated",
-"you failed", "you struggled", "Let's review", "Let's focus", "Let's dive",
-"It's normal", "Great question", "with focused effort", "you have a chance",
-"keep it up", "keep going", "you're doing great", "identified as weak".
-
-Return ONLY valid JSON. No markdown, no preamble, no explanation outside the object.
-
-RESPONSE SCHEMA:
+Return ONLY this JSON — no markdown, no extra text:
 {{
-  "response": "1-2 sentence recommendation — action-first, conversational tone",
-  "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic",
-  "topic_focus": "exact topic name from the data, or null",
-  "next_step": "one concrete action with a number: e.g. 'Do 10 questions on X. Aim for >70%.'",
-  "confidence_tip": "specific to their overconfidence rate of {overconf_str} — never generic",
+  "response": "your natural reply to what the student actually said — 1 to 3 sentences",
+  "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic | greeting",
+  "topic_focus": "exact topic name or null",
+  "next_step": "e.g. 'Do 10 questions on X. Aim for >70%.' — or null",
+  "question_count": 10,
+  "why_this_matters": "1-2 sentences: WHY this topic is the priority for THIS student right now. Use real numbers, mention co-failures or relapse if present. null if no study action or greeting.",
+  "session_prediction": "e.g. '2-3 focused sessions to break through this' — or null if no study action",
+  "calibration_pulse": "1-sentence overconfidence callout using their specific rate — or null",
+  "check_in": "1-sentence return message referencing days away and decay — or null",
+  "confidence_tip": "short calibration tip or null",
   "urgency": "low | medium | high | critical",
-  "encouraging_note": "one honest, specific sentence tied to actual data — no hollow filler"
+  "encouraging_note": "one honest sentence tied to their actual numbers — or null",
+  "save_memory": {{"key": "snake_case_key", "label": "Human readable label", "value": "the fact to save"}} or null
 }}"""
 
     # ── Build messages array ──────────────────────────────────────────────────
@@ -1450,7 +1534,8 @@ RESPONSE SCHEMA:
                     "model": getattr(settings, "CHAT_AI_MODEL", "llama-3.3-70b-versatile"),
                     "messages": messages,
                     "temperature": 0.3,
-                    "max_tokens": 600,
+                    "max_tokens": 700,
+                    "response_format": {"type": "json_object"},
                 },
             )
 
@@ -1478,6 +1563,7 @@ RESPONSE SCHEMA:
             # Try to parse
             try:
                 parsed = json.loads(raw)
+                parsed = sanitize_nulls(parsed)
             except json.JSONDecodeError as e:
                 # If parsing fails, log and return structured fallback from raw text
                 import logging
@@ -1509,7 +1595,13 @@ RESPONSE SCHEMA:
         import logging
         logging.getLogger(__name__).exception(f"JSON decode error in chat: {e}")
         return _chat_fallback(reason="parse_error")
+    except (httpx.ConnectError, httpx.RemoteProtocolError):
+        return _chat_fallback(reason="vpn_error")
     except httpx.HTTPStatusError as e:
+        import logging
+        logging.getLogger(__name__).error(
+            "Groq HTTP error %s: %s", e.response.status_code, e.response.text
+        )
         reason = "rate_limited" if e.response.status_code == 429 else "api_error"
         return _chat_fallback(reason=reason)
     except httpx.TimeoutException:
@@ -1535,7 +1627,7 @@ def _chat_fallback_from_text(raw_text: str) -> dict:
     if topic_match:
         topic_focus = topic_match.group(1).strip()
 
-    next_step = text if len(text) <= 250 else text[:250].rstrip() + "..."
+    next_step = None
 
     # Detect urgency based on weakness signals in the text
     urgency = "medium"
@@ -1551,9 +1643,9 @@ def _chat_fallback_from_text(raw_text: str) -> dict:
         "action": action,
         "topic_focus": topic_focus,
         "next_step": next_step,
-        "confidence_tip": "Slow down on tough options: eliminate at least two wrong choices before committing.",
+        "confidence_tip": None,
         "urgency": urgency,
-        "encouraging_note": "Good signal: you got a clear instruction; follow it and request a new coach check after 10 questions.",
+        "encouraging_note": None,
     }
 
 
@@ -1565,8 +1657,9 @@ def _chat_fallback(
         "rate_limited": "Too many requests — wait a moment and try again.",
         "timeout":      "The AI took too long to respond. Try a shorter question.",
         "parse_error":  "Got a response but couldn't read it. Try rephrasing.",
-        "api_error":    "API error on our end. Use the next-action card for now.",
-        "unknown":      "Something went wrong. Use the next-action card for now.",
+        "api_error":    "Couldn't reach the AI right now. Try again in a moment.",
+        "vpn_error":    "Connection failed — if you're on a VPN, try turning it off.",
+        "unknown":      "Something went wrong. Try again in a moment.",
     }
     return {
         "response":          messages.get(reason, response),
@@ -1671,13 +1764,14 @@ Recent sessions: {len(recent)} sessions on record"""
                 ],
                 "temperature": 0.1,
                 "max_tokens": 500,
+                "response_format": {"type": "json_object"},
             },
         )
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"]
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
         raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-        return json.loads(raw)
+        return sanitize_nulls(json.loads(raw))
 
 
 async def _run_humanizer(decision: dict, context: dict) -> dict:
@@ -1750,13 +1844,14 @@ Student overconfidence rate: {f"{overconf:.0%}" if isinstance(overconf, float) e
                 ],
                 "temperature": 0.7,
                 "max_tokens": 300,
+                "response_format": {"type": "json_object"},
             },
         )
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"]
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
         raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-        return json.loads(raw)
+        return sanitize_nulls(json.loads(raw))
 
 
 async def _call_ai_pipeline(context: dict, student_id: int, db: Session) -> dict:
@@ -1875,7 +1970,10 @@ def _build_student_context(student_id: int, db: Session) -> dict:
     """
     Builds the complete student profile sent to the AI.
     Rebuilt from the database on every call since LLMs have no persistent memory.
+    Includes personal memories saved by the AI across all past conversations.
     """
+    from app.api.ai_tools import get_all_memories
+    personal_memories = get_all_memories(student_id, db)
     now = datetime.utcnow()
     cutoff_14d = now - timedelta(days=14)
     seven_days_ago = now.date() - timedelta(days=7)
@@ -1985,6 +2083,8 @@ def _build_student_context(student_id: int, db: Session) -> dict:
                 pattern.behavioral_flags.split(",") if pattern and pattern.behavioral_flags else []
             ),
         },
+
+        "personal_memories": personal_memories,  # facts saved by AI across all conversations
     }
 
 
@@ -2044,7 +2144,7 @@ Rules:
             # Strip thinking tags and markdown fences
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-            return json.loads(raw)
+            return sanitize_nulls(json.loads(raw))
     except Exception:
         return {
             "next_topic_to_study": "Continue with your weakest topics",

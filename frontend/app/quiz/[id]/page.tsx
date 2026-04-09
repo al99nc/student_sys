@@ -19,6 +19,8 @@ export default function QuizPage() {
   const searchParams = useSearchParams();
   const lectureId = parseInt(params.id as string);
   const fromConvId = searchParams.get("from");
+  const countParam = searchParams.get("count");
+  const questionLimit = countParam ? parseInt(countParam) : null;
   const backHref = fromConvId ? `/coach/${fromConvId}` : `/results/${lectureId}`;
 
   const [questions, setQuestions] = useState<QuizMCQ[]>([]);
@@ -34,7 +36,10 @@ export default function QuizPage() {
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
     getResults(lectureId)
-      .then(res => setQuestions(res.data.mcqs || []))
+      .then(res => {
+        const all: QuizMCQ[] = res.data.mcqs || [];
+        setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
+      })
       .catch(() => router.push(`/results/${lectureId}`))
       .finally(() => setLoading(false));
   }, [lectureId, router]);
@@ -119,6 +124,16 @@ export default function QuizPage() {
             Review
           </Link>
         </div>
+        {fromConvId && (
+          <Link
+            href={`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}`}
+            className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold text-white transition-all"
+            style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}
+          >
+            <span className="material-symbols-outlined text-sm">smart_toy</span>
+            Back to Coach with results
+          </Link>
+        )}
       </div>
     );
   }

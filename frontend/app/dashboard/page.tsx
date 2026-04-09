@@ -42,6 +42,15 @@ function formatDate(d: Date): string {
   return `${day} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+function isValid(value: any): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized !== "" && normalized !== "null" && normalized !== "none";
+  }
+  return true;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [lectures, setLectures] = useState<Lecture[]>([]);
@@ -106,9 +115,9 @@ export default function DashboardPage() {
       const res = await postChatCoach(msg, historySnapshot);
       const data = res?.data ?? {};
       const coachText = (data.response || "Sorry, I couldn't produce a response.").toString();
-      const nextStep = data.next_step || null;
+      const nextStep = isValid(data.next_step) ? data.next_step : null;
       const practiceDocId = data.practice_document_id || null;
-      const encouragingNote = data.encouraging_note || null;
+      const encouragingNote = isValid(data.encouraging_note) ? data.encouraging_note : null;
       setChatHistory((prev) => [...prev, { role: "coach", text: coachText, nextStep, practiceDocId, encouragingNote }]);
       setApiHistory((prev) => [
         ...prev,
@@ -393,8 +402,10 @@ export default function DashboardPage() {
                           {nextAction.action_type?.replace(/_/g, " ") || "Exploration Mode"}
                         </span>
                       </div>
-                      <p className="text-sm font-semibold text-white mb-1">{nextAction.next_step}</p>
-                      {nextAction.topic && (
+                      <p className="text-sm font-semibold text-white mb-1">
+                        {isValid(nextAction?.next_step) ? nextAction.next_step : "Start with a new high-yield topic and do 5 focused questions."}
+                      </p>
+                      {isValid(nextAction?.topic) && (
                         <p className="text-xs" style={{ color: "#4a5280" }}>· Topic: {nextAction.topic}</p>
                       )}
                       {(!nextAction.topic && (!nextAction.reason || nextAction.reason.length === 0)) && (
@@ -432,7 +443,7 @@ export default function DashboardPage() {
                   <p className="text-xs" style={{ color: "#6b7280" }}>
                     {lectures.length === 0
                       ? "Upload your first lecture to unlock AI-powered weak point tracking and daily study plans."
-                      : nextAction?.short_message || "Keep practicing to improve your readiness score."}
+                      : isValid(nextAction?.short_message) ? nextAction.short_message : "Keep practicing to improve your readiness score."}
                   </p>
                 </div>
 

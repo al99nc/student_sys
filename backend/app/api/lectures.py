@@ -104,7 +104,7 @@ async def estimate_lecture_processing(
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"PDF extraction failed: {str(e)}")
 
-    return _estimate_processing_time(text, mode)
+    return _estimate_processing_time(text, mode, len(settings.get_all_api_keys()))
 
 
 @router.post("/process/{lecture_id}", response_model=ProcessStatus)

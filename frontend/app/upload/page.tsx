@@ -25,7 +25,7 @@ function UploadContent() {
   const [step, setStep] = useState<"upload" | "process" | "done">("upload");
   const [tab, setTab] = useState<Tab>("study");
   const [mode, setMode] = useState<Mode>("highyield");
-  const [timeEstimate, setTimeEstimate] = useState<{ estimated_range: string; chunks: number } | null>(null);
+  const [timeEstimate, setTimeEstimate] = useState<{ estimated_range: string; chunks: number; keys?: number; estimated_seconds?: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [tgFileLoading, setTgFileLoading] = useState(false);
@@ -187,17 +187,32 @@ function UploadContent() {
                 AI is generating MCQs in <span className="text-secondary font-bold">{modeLabel}</span>
               </p>
               {timeEstimate && (
-                <div className="mb-4 px-5 py-3 rounded-xl bg-surface-container-highest text-left">
+                <div className="mb-4 px-5 py-3 rounded-xl bg-surface-container-highest text-left space-y-1">
                   <p className="text-sm text-secondary font-medium">
                     Estimated: <span className="font-bold text-white">{timeEstimate.estimated_range}</span>
                   </p>
                   {timeEstimate.chunks > 1 && (
-                    <p className="text-xs text-on-surface-variant mt-0.5">Processing in {timeEstimate.chunks} chunks</p>
+                    <p className="text-xs text-on-surface-variant">
+                      {timeEstimate.chunks} chunk{timeEstimate.chunks > 1 ? "s" : ""}
+                      {(timeEstimate.keys ?? 1) > 1 && ` · ${timeEstimate.keys} keys in parallel`}
+                    </p>
+                  )}
+                  {timeEstimate.estimated_seconds && elapsed < timeEstimate.estimated_seconds && (
+                    <p className="text-xs text-on-surface-variant">
+                      ~{Math.max(0, timeEstimate.estimated_seconds - elapsed)}s remaining
+                    </p>
                   )}
                 </div>
               )}
               <div className="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
-                <div className="h-full synapse-gradient rounded-full w-full animate-pulse" />
+                {timeEstimate?.estimated_seconds ? (
+                  <div
+                    className="h-full synapse-gradient rounded-full transition-all duration-1000"
+                    style={{ width: `${Math.min(95, (elapsed / timeEstimate.estimated_seconds) * 100)}%` }}
+                  />
+                ) : (
+                  <div className="h-full synapse-gradient rounded-full w-full animate-pulse" />
+                )}
               </div>
               <p className="text-xs text-on-surface-variant mt-3">{elapsed}s elapsed</p>
             </>
