@@ -16,6 +16,7 @@ import {
   completePerformanceSession,
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { api } from "@/lib/api";
 import Link from "next/link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -177,23 +178,13 @@ interface AiInsight {
 const BASE = "/api/v1/performance";
 
 async function perfGet<T>(path: string): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
-  return res.json();
+  const res = await api.get<T>(`${BASE}${path}`);
+  return res.data;
 }
 
 async function perfPost<T>(path: string, body?: unknown): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`POST ${path} → ${res.status}`);
-  return res.json();
+  const res = await api.post<T>(`${BASE}${path}`, body);
+  return res.data;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -444,8 +435,8 @@ export default function ResultsPage() {
     const elapsed = Math.round((Date.now() - hoverStartRef.current.at) / 1000);
     const key = LETTER_TO_OPTION[letter];
     if (key) {
-      (liveTimelineRef.current as Record<string, number>)[key as string] =
-        ((liveTimelineRef.current as Record<string, number>)[key as string] ?? 0) + elapsed;
+      (liveTimelineRef.current as unknown as Record<string, number>)[key as string] =
+        ((liveTimelineRef.current as unknown as Record<string, number>)[key as string] ?? 0) + elapsed;
     }
     hoverStartRef.current = null;
   }, []);
@@ -573,7 +564,11 @@ export default function ResultsPage() {
     setSaveStatus("saving");
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        await saveQuizSession(lectureId, updated);
+        const answersToSave = Object.entries(updated).reduce((acc, [k, v]) => {
+          acc[parseInt(k)] = v.letter;
+          return acc;
+        }, {} as Record<number, string>);
+        await saveQuizSession(lectureId, answersToSave);
         setSaveStatus("saved");
         setTimeout(() => setSaveStatus("idle"), 2000);
       } catch { setSaveStatus("idle"); }
@@ -638,7 +633,7 @@ export default function ResultsPage() {
     return (
       <div className="min-h-screen flex items-center justify-center relative" style={{ backgroundColor: "#111220" }}>
         <div className="grain-overlay" />
-        <div className="text-center glass-panel rounded-3xl p-12 max-w-md mx-4 relative z-10">
+        <div className="text-center glass-panel rounded-3xl p-6 sm:p-12 max-w-md mx-4 relative z-10 w-full">
           <div className="w-16 h-16 rounded-2xl bg-tertiary/20 flex items-center justify-center mx-auto mb-6">
             <span className="material-symbols-outlined text-3xl text-tertiary">warning</span>
           </div>
@@ -681,7 +676,7 @@ export default function ResultsPage() {
           <div
             key={globalIdx}
             id={`mcq-${globalIdx}`}
-            className={`glass-panel p-8 rounded-xl transition-all duration-300 hover:-translate-y-1 border-l-4 ${
+            className={`glass-panel p-4 sm:p-8 rounded-xl transition-all duration-300 hover:-translate-y-1 border-l-4 ${
               isAnswered
                 ? isCorrect ? "border-green-500/50" : "border-error/50"
                 : isPending ? "border-primary-container/60" : "border-primary-container/30"
@@ -1161,7 +1156,7 @@ export default function ResultsPage() {
         </div>
       </header>
 
-      <main className="pt-24 px-6 md:px-12 max-w-7xl mx-auto">
+      <main className="pt-20 sm:pt-24 px-4 sm:px-6 md:px-12 max-w-7xl mx-auto">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-xs font-bold tracking-widest text-secondary mb-4 uppercase pt-6">
           <Link href="/dashboard" className="hover:text-white transition-colors">Dashboard</Link>
@@ -1208,7 +1203,7 @@ export default function ResultsPage() {
           {/* Sidebar */}
           <div className="lg:col-span-4 flex flex-col gap-6">
             {/* Score panel */}
-            <div className="glass-panel p-8 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.15)] relative overflow-hidden">
+            <div className="glass-panel p-5 sm:p-8 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.15)] relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary-container/10 blur-3xl rounded-full -mr-16 -mt-16" />
               <div className="relative z-10">
                 <p className="text-secondary font-bold uppercase tracking-[0.2em] text-xs mb-2">Performance</p>
@@ -1300,7 +1295,7 @@ export default function ResultsPage() {
             )}
 
             {activeTab === "summary" && (
-              <div className="glass-panel p-8 rounded-xl">
+              <div className="glass-panel p-5 sm:p-8 rounded-xl">
                 <div className="flex items-center gap-3 mb-6">
                   <span className="material-symbols-outlined text-primary">summarize</span>
                   <h3 className="font-bold text-white text-xl">Summary</h3>
@@ -1310,7 +1305,7 @@ export default function ResultsPage() {
             )}
 
             {activeTab === "concepts" && (
-              <div className="glass-panel p-8 rounded-xl">
+              <div className="glass-panel p-5 sm:p-8 rounded-xl">
                 <div className="flex items-center gap-3 mb-6">
                   <span className="material-symbols-outlined text-tertiary">lightbulb</span>
                   <h3 className="font-bold text-white text-xl">High-Yield Key Concepts</h3>

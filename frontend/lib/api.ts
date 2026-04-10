@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getToken, logout } from "./auth";
+import { getToken, logout, removeToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -18,17 +18,91 @@ api.interceptors.request.use((config) => {
 });
 
 // Redirect to /auth on any 401 (expired or invalid token)
+let isLoggingOut = false;
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (typeof window !== "undefined" && error?.response?.status === 401) {
-      logout();
+      // Prevent multiple logout attempts
+      if (!isLoggingOut) {
+        isLoggingOut = true;
+        console.warn("Received 401 - logging out");
+        removeToken();
+        setTimeout(() => {
+          window.location.href = "/auth";
+        }, 100);
+      }
     }
     return Promise.reject(error);
   }
 );
 
 export type Difficulty = "highyield" | "exam" | "harder";
+
+// ── Response types ────────────────────────────────────────────────────────────
+
+export interface UserOut {
+  id: string;
+  email: string;
+  name: string | null;
+  university: string | null;
+  college: string | null;
+  year_of_study: number | null;
+  subject: string | null;
+  topic_area: string | null;
+  created_at: string;
+}
+
+export interface TokenOut {
+  access_token: string;
+  token_type: string;
+}
+
+export interface LectureOut {
+  id: number;
+  user_id: string;
+  title: string;
+  file_path: string;
+  created_at: string;
+}
+
+export interface McqItem {
+  question: string;
+  options: { A: string; B: string; C: string; D: string };
+  answer: string;
+  explanation: string;
+}
+
+export interface ResultOut {
+  id: number;
+  lecture_id: number;
+  summary: string | null;
+  key_concepts: string[];
+  mcqs: McqItem[];
+  created_at: string;
+  share_token: string | null;
+  view_count: number;
+}
+
+export interface SharedResultOut {
+  lecture_id: number;
+  lecture_title: string;
+  summary: string | null;
+  key_concepts: string[];
+  mcqs: McqItem[];
+  view_count: number;
+}
+
+export interface QuizSessionOut {
+  answers: Record<string, string>;
+  retake_count: number;
+}
+
+export interface ViewersOut {
+  view_count: number;
+  active_viewers: number;
+  share_token: string | null;
+}
 
 // Auth
 export const signup = (email: string, password: string) =>
@@ -135,12 +209,7 @@ export const startPerformanceSession = (documentId: number, mode: string, totalQ
   });
 
 export const submitPerformanceAnswer = (
-  sessionId: string,
-  questionId: string,
-  selectedAnswer: string,
-  correctAnswer: string,
-  timeSpentSeconds: number
-) =>
+sessionId: string, questionId: string, selectedAnswer: string, correctAnswer: string, timeSpentSeconds: number, p0: { pre_answer_confidence: number; time_to_confidence: number; answer_changed: boolean; original_answer: string | null; time_to_first_change: number | null; answer_timeline: { time_on_option_a: number; time_on_option_b: number; time_on_option_c: number; time_on_option_d: number; second_choice: string | null; re_read_question: boolean; re_read_count: number; }; }) =>
   api.post(`/api/v1/performance/sessions/${sessionId}/answer`, {
     question_id: questionId,
     selected_answer: selectedAnswer,
@@ -153,3 +222,12 @@ export const completePerformanceSession = (sessionId: string) =>
 
 export const savePerformanceQuestions = (documentId: number, mode: string, mcqs: unknown[]) =>
   api.post("/api/v1/performance/questions/save", { document_id: documentId, mode, mcqs });
+
+export const recordQuizResult = (documentId: number, correct: number, total: number, startedFrom = "quiz_page") =>
+  api.post("/api/v1/performance/sessions/record-quiz", {
+    document_id: documentId,
+    correct,
+    total,
+    mode: "quiz_mode",
+    started_from: startedFrom,
+  });

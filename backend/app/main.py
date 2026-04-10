@@ -1,16 +1,25 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from fastapi.responses import Response
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from sqlalchemy import text, exc as sa_exc
 from app.db.database import Base, engine
 from app.api import auth, lectures, telegram
 from app.api.telegram import bot_router
 from app.api import performance
 from app.api import coach as coach_api
 from app.api import ai_tools
+from app.core.limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 # Import models so Base.metadata includes them for create_all
 import app.models.performance  # noqa: F401
 import app.models.coach        # noqa: F401
 import app.models.ai_tools     # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -38,8 +47,15 @@ with engine.connect() as _conn:
         try:
             _conn.execute(text(_stmt))
             _conn.commit()
-        except Exception:
-            pass  # column already exists
+        except (sa_exc.OperationalError, sa_exc.ProgrammingError) as _e:
+            # PostgreSQL raises ProgrammingError, SQLite raises OperationalError
+            # for "column already exists" — both are safe to ignore.
+            _conn.rollback()
+            _msg = str(_e).lower()
+            if "already exists" in _msg or "duplicate column" in _msg:
+                pass
+            else:
+                logger.warning("Unexpected migration error: %s", _e)
 
 # Back-fill uuid for any existing users that don't have one yet
 from uuid import uuid4 as _uuid4
@@ -52,8 +68,20 @@ with engine.connect() as _conn:
                 {"uuid": str(_uuid4()), "id": row[0]},
             )
         _conn.commit()
-    except Exception:
-        pass
+    except (sa_exc.OperationalError, sa_exc.ProgrammingError):
+        pass  # uuid column may not exist yet on very first boot
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
 
 app = FastAPI(
     title="Students Study Assistant",
@@ -61,18 +89,25 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS for frontend
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security headers
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS — explicit methods and headers only
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://84.235.244.210:3000",
-        "https://themcq.xyz",         # production web
+        "https://themcq.xyz",
         "https://www.themcq.xyz",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 app.include_router(auth.router)
@@ -83,9 +118,11 @@ app.include_router(performance.router)
 app.include_router(coach_api.router)
 app.include_router(ai_tools.router)
 
+
 @app.get("/")
 def root():
     return {"message": "Students Study Assistant API is running"}
+
 
 @app.get("/health")
 def health():

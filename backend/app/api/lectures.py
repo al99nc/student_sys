@@ -3,13 +3,14 @@ import json
 import time
 import secrets
 import shutil
+import threading
 from pathlib import Path
 from collections import defaultdict
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from app.db.database import get_db
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.models import Lecture, Result, QuizSession
 from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave
 from app.api.deps import get_current_user
@@ -27,6 +28,9 @@ SESSION_TIMEOUT = 60  # seconds
 # Tracks which token+session pairs have already been counted as a view
 # so refreshes and strict-mode double-renders don't double-count
 _counted_sessions: set = set()
+_counted_sessions_lock = threading.Lock()
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 def _cleanup_sessions(token: str):
     now = time.time()
@@ -43,17 +47,29 @@ async def upload_lecture(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not file.filename.endswith(".pdf"):
+    if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+
+    content = await file.read()
+
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+
+    # Validate PDF magic bytes (%PDF-)
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="File is not a valid PDF")
 
     ensure_upload_dir()
 
-    # Save file
-    safe_name = f"{current_user.id}_{file.filename}"
-    file_path = os.path.join(settings.UPLOAD_DIR, safe_name)
+    # Sanitize filename to prevent path traversal
+    safe_basename = os.path.basename(file.filename or "upload.pdf")
+    safe_name = f"{current_user.id}_{safe_basename}"
+    upload_dir = os.path.normpath(settings.UPLOAD_DIR)
+    file_path = os.path.normpath(os.path.join(upload_dir, safe_name))
+    if not file_path.startswith(upload_dir):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     with open(file_path, "wb") as f:
-        content = await file.read()
         f.write(content)
 
     # Try to extract text to validate it's a real PDF
@@ -61,7 +77,7 @@ async def upload_lecture(
         extract_text_from_pdf(file_path)
     except Exception as e:
         os.remove(file_path)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Could not read PDF. Ensure the file is not corrupted or password-protected.")
 
     # Save to DB — snapshot user profile onto the lecture at upload time
     lecture = Lecture(
@@ -101,8 +117,8 @@ async def estimate_lecture_processing(
 
     try:
         text = extract_text_from_pdf(lecture.file_path)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"PDF extraction failed: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not extract text from PDF")
 
     return _estimate_processing_time(text, mode, len(settings.get_all_api_keys()))
 
@@ -123,8 +139,8 @@ async def process_lecture(
     # Extract text
     try:
         text = extract_text_from_pdf(lecture.file_path)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"PDF extraction failed: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not extract text from PDF")
 
     # Call AI
     try:
@@ -206,7 +222,7 @@ def create_share_link(
         raise HTTPException(status_code=404, detail="No results yet. Process the lecture first.")
 
     if not result.share_token:
-        result.share_token = secrets.token_urlsafe(16)
+        result.share_token = secrets.token_urlsafe(32)
         db.commit()
         db.refresh(result)
 
@@ -242,11 +258,12 @@ def ping_shared_session(
     sid = session_id or secrets.token_hex(8)
     unique_key = f"{token}:{sid}"
 
-    # Increment view_count only the first time this session is seen
-    if unique_key not in _counted_sessions:
-        _counted_sessions.add(unique_key)
-        result.view_count = (result.view_count or 0) + 1
-        db.commit()
+    # Increment view_count only the first time this session is seen (thread-safe)
+    with _counted_sessions_lock:
+        if unique_key not in _counted_sessions:
+            _counted_sessions.add(unique_key)
+            result.view_count = (result.view_count or 0) + 1
+            db.commit()
 
     _active_sessions[token][sid] = time.time()
     _cleanup_sessions(token)
@@ -315,7 +332,7 @@ def save_quiz_session(
     ).first()
     if session:
         session.answers = json.dumps(data.answers)
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(timezone.utc)
     else:
         session = QuizSession(
             user_id=current_user.id,
@@ -341,7 +358,7 @@ def retake_quiz_session(
     if session:
         session.retake_count = (session.retake_count or 0) + 1
         session.answers = json.dumps({})
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(timezone.utc)
         db.commit()
         return QuizSessionOut(answers={}, retake_count=session.retake_count)
     else:

@@ -33,7 +33,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="relative pt-32 pb-24 px-6 overflow-hidden">
+      <main className="relative pt-28 sm:pt-32 pb-28 md:pb-24 px-4 sm:px-6 overflow-hidden">
         {/* Hero glow */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-container/20 rounded-full blur-[120px] -z-10 animate-pulse pointer-events-none" />
 
@@ -43,7 +43,7 @@ export default function Home() {
             <span className="w-2 h-2 rounded-full bg-secondary-container animate-ping" />
             <span className="text-xs font-bold uppercase tracking-widest text-secondary">New: AI Flashcard Engine</span>
           </div>
-          <h1 className="text-5xl md:text-7xl lg:text-8xl font-black text-white mb-8 leading-[1.1] tracking-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black text-white mb-8 leading-[1.1] tracking-tight">
             Turn Your Lectures Into <br />
             <span className="relative inline-block">
               Mastery
@@ -74,7 +74,7 @@ export default function Home() {
               { icon: "style", color: "primary-container", glow: "rgba(123,47,255,0.3)", title: "Flashcard Decks", desc: "Automatic Anki-style decks synced across all your devices for spaced-repetition learning." },
               { icon: "insights", color: "secondary-container", glow: "rgba(0,210,253,0.3)", title: "Progress Analytics", desc: "Visual heatmaps and performance data to identify exactly where you need more focus." },
             ].map((f) => (
-              <div key={f.title} className="glass-panel border border-outline-variant/15 p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
+              <div key={f.title} className="glass-panel border border-outline-variant/15 p-5 sm:p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
                 <div className={`w-12 h-12 rounded-lg bg-${f.color}/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform`} style={{ boxShadow: `0 0 20px ${f.glow}` }}>
                   <span className={`material-symbols-outlined text-${f.color === "primary-container" ? "primary" : "secondary"}`}>{f.icon}</span>
                 </div>
@@ -97,7 +97,7 @@ export default function Home() {
 
         {/* CTA Banner */}
         <section className="max-w-4xl mx-auto text-center">
-          <div className="glass-panel border border-outline-variant/15 rounded-3xl p-16">
+          <div className="glass-panel border border-outline-variant/15 rounded-3xl p-8 sm:p-16">
             <h2 className="text-4xl font-black text-white mb-4">Ready to learn smarter?</h2>
             <p className="text-on-surface-variant mb-8 max-w-lg mx-auto">Join thousands of students already using cortexQ to ace their exams.</p>
             <Link href="/auth" className="inline-block synapse-gradient text-white font-bold py-4 px-12 rounded-xl text-lg shadow-[0px_12px_32px_rgba(123,47,255,0.3)] hover:-translate-y-1 transition-transform duration-300">

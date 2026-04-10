@@ -4,7 +4,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.db.database import Base
@@ -14,14 +14,18 @@ def _uuid() -> str:
     return str(uuid4())
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class PerformanceSession(Base):
     __tablename__ = "performance_sessions"
 
     id                      = Column(String(36), primary_key=True, default=_uuid)
-    student_id              = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    student_id              = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     document_id             = Column(Integer, ForeignKey("lectures.id"), nullable=False, index=True)
     mode                    = Column(String(20), nullable=False)
-    started_at              = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    started_at              = Column(DateTime, default=_utcnow, nullable=False, index=True)
     completed_at            = Column(DateTime, nullable=True, index=True)
     total_questions         = Column(Integer, nullable=False)
     correct_count           = Column(Integer, default=0, nullable=False)
@@ -55,7 +59,7 @@ class McqQuestion(Base):
     explanation         = Column(String, nullable=False)
     mode                = Column(String(20), nullable=False)
     difficulty_type     = Column(String(20), nullable=False)
-    created_at          = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at          = Column(DateTime, default=_utcnow, nullable=False)
     global_accuracy_rate    = Column(Float, nullable=True)
     global_avg_time         = Column(Float, nullable=True)
     discrimination_index    = Column(Float, nullable=True)
@@ -66,7 +70,7 @@ class QuestionAttempt(Base):
 
     id                  = Column(String(36), primary_key=True, default=_uuid)
     session_id          = Column(String(36), ForeignKey("performance_sessions.id"), nullable=False, index=True)
-    student_id          = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    student_id          = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     question_id         = Column(String(36), ForeignKey("mcq_questions.id"), nullable=False, index=True)  # ← fixed
     selected_answer     = Column(String(1), nullable=False)
     correct_answer      = Column(String(1), nullable=False)
@@ -74,7 +78,7 @@ class QuestionAttempt(Base):
     time_spent_seconds  = Column(Integer, nullable=False)
     attempt_number      = Column(Integer, nullable=False, default=1)
     confidence_proxy    = Column(Float, nullable=True)
-    created_at          = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)  # ← fixed
+    created_at          = Column(DateTime, default=_utcnow, nullable=False, index=True)  # ← fixed
     time_of_day         = Column(Integer, nullable=True)
     day_of_week         = Column(Integer, nullable=True)
     answer_changed      = Column(Boolean, nullable=True)
@@ -92,7 +96,7 @@ class WeakPoint(Base):
     __tablename__ = "weak_points"
 
     id                      = Column(String(36), primary_key=True, default=_uuid)
-    student_id              = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    student_id              = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     topic                   = Column(String(255), nullable=False, index=True)
     total_attempts          = Column(Integer, default=0, nullable=False)
     correct_attempts        = Column(Integer, default=0, nullable=False)
@@ -105,7 +109,7 @@ class WeakPoint(Base):
     accuracy_7d_ago         = Column(Float, nullable=True)
     accuracy_trend          = Column(Float, nullable=True)
     flagged_as_weak         = Column(Boolean, default=False, nullable=False, index=True)
-    updated_at              = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at              = Column(DateTime, default=_utcnow, nullable=False)
     first_mastered_at       = Column(DateTime, nullable=True)
     times_mastered          = Column(Integer, nullable=True)
     times_relapsed          = Column(Integer, nullable=True)
@@ -121,8 +125,8 @@ class WeeklyQuizAssignment(Base):
     __tablename__ = "weekly_quiz_assignments"
 
     id           = Column(String(36), primary_key=True, default=_uuid)
-    student_id   = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    assigned_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    student_id   = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    assigned_at  = Column(DateTime, default=_utcnow, nullable=False)
     week_start   = Column(Date, nullable=False)
     question_ids = Column(JSON, nullable=False)
     status       = Column(String(20), nullable=False, default="pending")
@@ -137,7 +141,7 @@ class TopicCoFailure(Base):
     __tablename__ = "topic_co_failures"
 
     id               = Column(String(36), primary_key=True, default=_uuid)
-    student_id       = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    student_id       = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     topic_a          = Column(String(255), nullable=False)
     topic_b          = Column(String(255), nullable=False)
     co_failure_count = Column(Integer, default=0, nullable=False)
@@ -152,7 +156,7 @@ class TopicSnapshot(Base):
     __tablename__ = "topic_snapshots"
 
     id                    = Column(String(36), primary_key=True, default=_uuid)
-    student_id            = Column(Integer, ForeignKey("users.id"), nullable=False)
+    student_id            = Column(String(36), ForeignKey("users.id"), nullable=False)
     topic                 = Column(String(255), nullable=False)
     accuracy_rate         = Column(Float, nullable=False)
     snapshot_date         = Column(Date, nullable=False)
@@ -171,7 +175,7 @@ class AnswerTimeline(Base):
     id              = Column(String(36), primary_key=True, default=_uuid)
     attempt_id      = Column(String(36), ForeignKey("question_attempts.id"),
                              nullable=False, unique=True)  # ← unique: one per attempt
-    student_id      = Column(Integer, ForeignKey("users.id"), nullable=False)
+    student_id      = Column(String(36), ForeignKey("users.id"), nullable=False)
     time_on_option_a = Column(Float, nullable=True)
     time_on_option_b = Column(Float, nullable=True)
     time_on_option_c = Column(Float, nullable=True)
@@ -179,7 +183,7 @@ class AnswerTimeline(Base):
     second_choice   = Column(String(1), nullable=True)
     re_read_question = Column(Boolean, nullable=True)
     re_read_count   = Column(Integer, nullable=True)
-    created_at      = Column(DateTime, default=datetime.utcnow)
+    created_at      = Column(DateTime, default=_utcnow)
 
     __table_args__ = (
         Index("ix_answer_timelines_student_id", "student_id"),
@@ -190,7 +194,7 @@ class LearningPattern(Base):
     __tablename__ = "learning_patterns"
 
     id              = Column(String(36), primary_key=True, default=_uuid)
-    student_id      = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    student_id      = Column(String(36), ForeignKey("users.id"), nullable=False, unique=True)
     computed_at     = Column(DateTime, nullable=False)
     exam_date       = Column(DateTime, nullable=True)  # ← moved here from PerformanceSession
 
@@ -225,7 +229,7 @@ class StudentAiInsight(Base):
     __tablename__ = "student_ai_insights"
 
     id                              = Column(String(36), primary_key=True, default=_uuid)
-    student_id                      = Column(Integer, ForeignKey("users.id"), nullable=False)
+    student_id                      = Column(String(36), ForeignKey("users.id"), nullable=False)
     insight_json                    = Column(JSON, nullable=False)
     generated_at                    = Column(DateTime, nullable=False)
     trigger                         = Column(String(50), nullable=False)

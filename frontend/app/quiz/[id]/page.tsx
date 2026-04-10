@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { getResults } from "@/lib/api";
+import { getResults, recordQuizResult } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 
 interface QuizMCQ {
@@ -57,6 +57,17 @@ export default function QuizPage() {
     if (revealed && timerRef.current) clearInterval(timerRef.current);
   }, [revealed]);
 
+  // Auto-redirect to coach if coming from there (when quiz completes)
+  useEffect(() => {
+    if (phase === "result" && fromConvId) {
+      const timer = setTimeout(() => {
+        const pct = Math.round((score / questions.length) * 100);
+        router.push(`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}`);
+      }, 2000); // 2 second delay to show results
+      return () => clearTimeout(timer);
+    }
+  }, [phase, fromConvId, score, questions.length, router]);
+
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -73,6 +84,10 @@ export default function QuizPage() {
       setSelectedLetter(null);
       setRevealed(false);
     } else {
+      // Save result to performance DB (fire-and-forget; score already updated by handleSelect)
+      recordQuizResult(lectureId, score, questions.length, fromConvId ? "coach" : "quiz_page")
+        .then(() => console.log(`Quiz result recorded: ${score}/${questions.length} from ${fromConvId ? "coach" : "quiz_page"}`))
+        .catch(err => console.error("Failed to record quiz result:", err));
       setPhase("result");
     }
   };
@@ -97,6 +112,7 @@ export default function QuizPage() {
   // ── End screen ──────────────────────────────────────────────────────────────
   if (phase === "result") {
     const pct = Math.round((score / questions.length) * 100);
+    
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center gap-8"
         style={{ backgroundColor: "#0D0F1C", backgroundImage: "radial-gradient(at 50% 0%, rgba(123,47,255,0.15) 0px, transparent 60%)" }}>
@@ -110,6 +126,11 @@ export default function QuizPage() {
           <span className="text-white font-bold text-lg">{pct}% accuracy</span>
           <span>{pct >= 70 ? "Well done — you're ready." : "Keep reviewing and try again."}</span>
         </div>
+        {fromConvId && (
+          <p className="text-xs text-on-surface-variant animate-pulse">
+            Returning to coach in 2 seconds…
+          </p>
+        )}
         <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
           <button
             onClick={() => { setCurrentQ(0); setSelectedLetter(null); setRevealed(false); setScore(0); setPhase("quiz"); }}
@@ -127,11 +148,11 @@ export default function QuizPage() {
         {fromConvId && (
           <Link
             href={`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}`}
-            className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold text-white transition-all"
+            className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold text-white transition-all hover:-translate-y-0.5"
             style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}
           >
             <span className="material-symbols-outlined text-sm">smart_toy</span>
-            Back to Coach with results
+            Back to Coach with Results
           </Link>
         )}
       </div>

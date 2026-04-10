@@ -1,18 +1,20 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime
 
+
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
+
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+
 class UserOut(BaseModel):
-    id: int
-    uuid: str
+    id: str
     email: str
     name: Optional[str] = None
     university: Optional[str] = None
@@ -25,11 +27,17 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
+
 class OnboardingUpdate(BaseModel):
-    name: str
-    university: str
-    college: str
-    year_of_study: int
+    name: str = Field(..., min_length=1, max_length=120)
+    university: str = Field(..., min_length=1, max_length=255)
+    college: str = Field(..., min_length=1, max_length=120)
+    year_of_study: int = Field(..., ge=1, le=10)
+
+    @field_validator("name", "university", "college")
+    @classmethod
+    def strip_whitespace(cls, v: str) -> str:
+        return v.strip()
 
 class Token(BaseModel):
     access_token: str

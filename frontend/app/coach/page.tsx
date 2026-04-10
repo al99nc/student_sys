@@ -116,13 +116,14 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Active conversation
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [convTitle, setConvTitle] = useState("New Conversation");
   const [loadingConv, setLoadingConv] = useState(false);
+  const [pendingAutoMsg, setPendingAutoMsg] = useState<string | null>(null);
 
   // Input state
   const [input, setInput] = useState("");
@@ -141,6 +142,13 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Open sidebar by default only on large screens
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+      setSidebarOpen(true);
+    }
+  }, []);
 
   // Sync URL to active conversation (no page reload)
   useEffect(() => {
@@ -215,21 +223,41 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     const pathSegments = typeof window !== "undefined" ? window.location.pathname.split("/") : [];
     const pathConvId = pathSegments[2] || null;  // /coach/[id]
     const targetConvId = returnConvId || pathConvId;
+    
+    // Debug logging for quiz params
+    if (quizScore || quizTotal) {
+      console.log(`[Coach] Quiz params detected: score=${quizScore}/${quizTotal} (${quizPct}%)`);
+    }
+    
     coachListConversations()
       .then(async res => {
         setConversations(res.data);
         if (targetConvId) {
+          console.log(`[Coach] Loading conversation: ${targetConvId}`);
           await loadConversation(targetConvId);
-          // Auto-report quiz results back to the AI
+          // Queue quiz result message — sent once activeId state settles (see effect below)
           if (quizScore !== null && quizTotal !== null) {
             const pct = quizPct ?? Math.round((parseInt(quizScore) / parseInt(quizTotal)) * 100);
-            const msg = `I just finished the quiz and got ${quizScore}/${quizTotal} (${pct}%). What do you think about that?`;
-            setInput(msg);
+            const msg = `I just finished the practice quiz and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`;
+            console.log(`[Coach] Setting pending message: ${msg}`);
+            setPendingAutoMsg(msg);
           }
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[Coach] Failed to load conversations:", err);
+      });
   }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct]);
+
+  // ── Auto-send pending quiz result once activeId is ready ─────────────────────
+  useEffect(() => {
+    if (!pendingAutoMsg || !activeId || sending) return;
+    console.log(`[Coach] Auto-sending pending message with activeId=${activeId}`);
+    const msg = pendingAutoMsg;
+    setPendingAutoMsg(null);
+    handleSend(msg);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, pendingAutoMsg]);
 
   // ── New chat ─────────────────────────────────────────────────────────────────
 
@@ -642,7 +670,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
 
               {/* Send */}
               <button
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={sending || (!input.trim() && !imagePreview)}
                 className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 mb-0.5"
                 style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}
@@ -689,8 +717,8 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
     );
   }
 
-  const isStudyAction = isValid(meta?.action) && !["greeting", "off_topic"].includes(meta.action);
-  const urgColor = urgencyColor(isValid(meta?.urgency) ? meta.urgency : undefined);
+  const isStudyAction = isValid(meta?.action) && meta && meta.action && !["greeting", "off_topic"].includes(meta.action);
+  const urgColor = urgencyColor(meta && isValid(meta.urgency) ? meta.urgency : undefined);
 
   // Assistant message
   return (
@@ -722,7 +750,7 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
         ) : (
           <>
             {/* ── 1. Check-in banner (above everything) ── */}
-            {isValid(meta?.check_in) && (
+            {meta && isValid(meta.check_in) && (
               <CheckInBanner text={meta.check_in!} daysAway={meta.days_since_last} />
             )}
 
@@ -848,7 +876,7 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
             )}
 
             {/* ── 5. Calibration pulse ── */}
-            {isValid(meta?.calibration_pulse) && (
+            {meta && isValid(meta.calibration_pulse) && (
               <CalibrationPulse text={meta.calibration_pulse!} />
             )}
 
@@ -874,7 +902,7 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
             )}
 
             {/* ── 7. Encouraging note ── */}
-            {isValid(meta?.encouraging_note) && (
+            {meta && isValid(meta.encouraging_note) && (
               <p
                 className="text-[11px] italic px-1"
                 style={{ color: "#3a3f60" }}

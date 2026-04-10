@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // Load .env from the monorepo root instead of frontend/
+  envDir: '..',
   experimental: {
     proxyTimeout: 600_000, // 10 min — AI processing can take several minutes
   },

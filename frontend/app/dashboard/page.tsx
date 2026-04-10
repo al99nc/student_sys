@@ -138,8 +138,8 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#0d0f1c", color: "#e2e8f0" }}>
 
-      {/* ── SIDEBAR ── */}
-      <aside className="w-[230px] flex-shrink-0 flex flex-col border-r" style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "#0b0d1a" }}>
+      {/* ── SIDEBAR — hidden on mobile, visible on large screens ── */}
+      <aside className="hidden lg:flex w-[230px] flex-shrink-0 flex-col border-r" style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "#0b0d1a" }}>
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-6">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-white text-sm" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
@@ -203,49 +203,56 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Top header */}
-        <header className="flex items-center justify-between px-8 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <div>
-            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-            <p className="text-sm mt-0.5" style={{ color: "#4a5280" }}>// {today} — {loading ? "…" : "00"} active sessions</p>
-          </div>
+        <header className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <div className="flex items-center gap-3">
+            {/* Logo — mobile only */}
+            <div className="flex lg:hidden w-8 h-8 rounded-xl items-center justify-center font-black text-white text-xs flex-shrink-0" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+              cQ
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-white">Dashboard</h1>
+              <p className="text-xs sm:text-sm mt-0.5 hidden sm:block" style={{ color: "#4a5280" }}>// {today} — {loading ? "…" : "00"} active sessions</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
             <button className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors" style={{ border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#6b7280" }}>
               <span className="material-symbols-outlined text-[18px]">notifications</span>
             </button>
-            <Link href="/upload" className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all" style={{ border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.04)" }}>
-              Upload PDF
+            <Link href="/upload" className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all" style={{ border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.04)" }}>
+              <span className="hidden sm:inline">Upload PDF</span>
+              <span className="sm:hidden">Upload</span>
             </Link>
           </div>
         </header>
 
         {/* Scrollable content */}
-        <main className="flex-1 overflow-y-auto px-8 py-6">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-4 sm:py-6 pb-24 lg:pb-6">
 
           {/* ── HERO ── */}
-          <div className="relative rounded-2xl overflow-hidden mb-6" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <div className="flex items-center justify-between p-8">
+          <div className="relative rounded-2xl overflow-hidden mb-4 sm:mb-6" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center justify-between p-5 sm:p-8">
               {/* Left text */}
               <div className="max-w-md">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] mb-4" style={{ color: "#00D2FD" }}>— Lecture Library</p>
-                <h2 className="text-4xl font-black text-white leading-tight mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] mb-3 sm:mb-4" style={{ color: "#00D2FD" }}>— Lecture Library</p>
+                <h2 className="text-2xl sm:text-4xl font-black text-white leading-tight mb-3 sm:mb-4">
                   Start your first{" "}
                   <span style={{ background: "linear-gradient(90deg, #00D2FD, #7B2FFF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                    study<br />session
+                    study session
                   </span>
                 </h2>
-                <p className="text-sm mb-7" style={{ color: "#6b7280" }}>
+                <p className="text-xs sm:text-sm mb-5 sm:mb-7" style={{ color: "#6b7280" }}>
                   Upload a medical PDF — CortexQ will generate adaptive MCQs, track your weak points, and guide your prep.
                 </p>
-                <div className="flex items-center gap-5">
-                  <Link href="/upload" className="px-5 py-2.5 rounded-xl text-white text-sm font-semibold transition-all" style={{ background: "#1e2235", border: "1px solid rgba(255,255,255,0.12)" }}>
-                    + Upload First Lecture
+                <div className="flex items-center gap-3 sm:gap-5">
+                  <Link href="/upload" className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-white text-sm font-semibold transition-all" style={{ background: "#1e2235", border: "1px solid rgba(255,255,255,0.12)" }}>
+                    + Upload Lecture
                   </Link>
-                  <a href="#" className="text-sm transition-colors" style={{ color: "#6b7280" }}>→ see how it works</a>
+                  <a href="#" className="text-sm transition-colors hidden sm:inline" style={{ color: "#6b7280" }}>→ see how it works</a>
                 </div>
               </div>
 
-              {/* Right orb graphic */}
-              <div className="relative flex-shrink-0 w-48 h-48 flex items-center justify-center">
+              {/* Right orb graphic — hidden on small screens */}
+              <div className="relative hidden sm:flex flex-shrink-0 w-48 h-48 items-center justify-center">
                 {/* Concentric rings */}
                 <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200">
                   <circle cx="100" cy="100" r="90" fill="none" stroke="rgba(0,210,253,0.1)" strokeWidth="1" />
@@ -266,7 +273,7 @@ export default function DashboardPage() {
           </div>
 
           {/* ── STATS ── */}
-          <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
             {[
               { label: "TOTAL UPLOADS", emoji: "📄", value: loading ? "—" : String(stats.total_lectures), sub: stats.total_lectures === 0 ? "— awaiting upload" : `${stats.processed_lectures} processed` },
               { label: "PROCESSED", emoji: "✅", value: loading ? "—" : String(stats.processed_lectures), sub: stats.processed_lectures === 0 ? "— ready for MCQs" : "lectures ready" },
@@ -291,7 +298,7 @@ export default function DashboardPage() {
                 <h3 className="text-lg font-bold text-white">Shared With You</h3>
                 <span className="text-xs font-black px-2 py-0.5 rounded-full" style={{ background: "rgba(0,210,253,0.1)", color: "#00D2FD", border: "1px solid rgba(0,210,253,0.2)" }}>{sharedSessions.length}</span>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sharedSessions.map((s) => {
                   const pct = s.total > 0 ? Math.round((s.answered / s.total) * 100) : 0;
                   const score = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
@@ -317,7 +324,7 @@ export default function DashboardPage() {
           )}
 
           {/* ── BOTTOM GRID: Lectures + Coach ── */}
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
 
             {/* Your Lectures */}
             <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
@@ -506,6 +513,26 @@ export default function DashboardPage() {
 
         </main>
       </div>
+
+      {/* ── MOBILE BOTTOM NAV — visible only on mobile ── */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-2" style={{ backgroundColor: "#0b0d1a", borderTop: "1px solid rgba(255,255,255,0.08)", paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))" }}>
+        <a className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl" style={{ color: "#00D2FD" }}>
+          <span className="material-symbols-outlined text-[22px]">grid_view</span>
+          <span className="text-[10px] font-semibold">Home</span>
+        </a>
+        <Link href="/upload" className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl" style={{ color: "#6b7280" }}>
+          <span className="material-symbols-outlined text-[22px]">upload_file</span>
+          <span className="text-[10px] font-semibold">Upload</span>
+        </Link>
+        <Link href="/coach" className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl" style={{ color: "#6b7280" }}>
+          <span className="material-symbols-outlined text-[22px]">smart_toy</span>
+          <span className="text-[10px] font-semibold">Coach</span>
+        </Link>
+        <Link href="/analytics" className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl" style={{ color: "#6b7280" }}>
+          <span className="material-symbols-outlined text-[22px]">trending_up</span>
+          <span className="text-[10px] font-semibold">Analytics</span>
+        </Link>
+      </nav>
     </div>
   );
 }

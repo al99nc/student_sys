@@ -1,12 +1,16 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint, inspect
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from app.db.database import Base
 
 
 def _uuid() -> str:
     return str(uuid4())
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -22,7 +26,7 @@ class User(Base):
     subject = Column(String(255), nullable=True)       # set when uploading a lecture
     topic_area = Column(String(255), nullable=True)    # auto-extracted from PDF
     level = Column(String(50), nullable=True)          # legacy — kept for existing rows
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     lectures = relationship("Lecture", back_populates="owner")
 
@@ -31,10 +35,10 @@ class Lecture(Base):
     __tablename__ = "lectures"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     title = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     university = Column(String(255), nullable=True)
     college = Column(String(120), nullable=True)       # faculty: medicine, pharmacy, etc.
     year_of_study = Column(Integer, nullable=True)     # 1–6
@@ -54,7 +58,7 @@ class Result(Base):
     summary = Column(Text, nullable=True)
     key_concepts = Column(Text, nullable=True)  # JSON string
     mcqs = Column(Text, nullable=True)           # JSON string
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     share_token = Column(String, unique=True, index=True, nullable=True)
     view_count = Column(Integer, default=0, server_default="0")
 
@@ -65,25 +69,13 @@ class QuizSession(Base):
     __tablename__ = "quiz_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     lecture_id = Column(Integer, ForeignKey("lectures.id"), nullable=False)
     answers = Column(Text, nullable=True)        # JSON: {"0": "A", "2": "C"}
     retake_count = Column(Integer, default=0, server_default="0")
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
 
     __table_args__ = (
         UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_session"),
     )
 
-    @staticmethod
-    def create_answer_timeline_table():
-        conn = op.get_bind()
-        insp = inspect(conn)
-        if not insp.has_table("answer_timelines"):
-            op.create_table("answer_timelines", 
-                Column("user_id", Integer, ForeignKey("users.id"), nullable=False),
-                Column("lecture_id", Integer, ForeignKey("lectures.id"), nullable=False),
-                Column("answer", Text, nullable=True),
-                Column("created_at", DateTime, default=datetime.utcnow),
-                UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_answer")
-            )

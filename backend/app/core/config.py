@@ -1,7 +1,20 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
+
 
 class Settings(BaseSettings):
     SECRET_KEY: str = "dev-secret-key-change-in-production"
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        if "dev-secret" in v or len(v) < 32:
+            import warnings
+            warnings.warn(
+                "SECRET_KEY is weak or default — set a strong random value in production",
+                stacklevel=2,
+            )
+        return v
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 20160  # 2 weeks
     AI_API_KEY: str = ""  # Set in .env file

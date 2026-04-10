@@ -33,7 +33,7 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from joiner import join_and_add_bot
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 BOT_TOKEN    = os.environ["BOT_TOKEN"]
 MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://cortexq.net/upload")

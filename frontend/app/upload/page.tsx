@@ -176,7 +176,7 @@ function UploadContent() {
       <div className="min-h-screen flex items-center justify-center relative" style={{ backgroundColor: "#111220" }}>
         <div className="grain-overlay" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary-container/20 rounded-full blur-[120px] pointer-events-none" />
-        <div className="relative z-10 text-center glass-panel rounded-3xl p-12 max-w-md mx-4">
+        <div className="relative z-10 text-center glass-panel rounded-3xl p-6 sm:p-12 max-w-md mx-4 w-full">
           {step === "process" ? (
             <>
               <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mx-auto mb-6 shadow-lg shadow-primary-container/30">

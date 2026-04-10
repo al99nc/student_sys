@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -113,8 +113,8 @@ def create_conversation(
         id=str(uuid4()),
         student_id=current_user.id,
         title="New Conversation",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
         message_count=0,
     )
     db.add(conv)
@@ -198,6 +198,15 @@ async def send_message(
     if not text and not image_data:
         raise HTTPException(status_code=400, detail="message or image_data is required")
 
+    # Enforce message length limit
+    if len(text) > 10_000:
+        raise HTTPException(status_code=400, detail="Message too long (max 10,000 characters)")
+
+    # Enforce image size limit (base64 ~4/3 overhead → 5 MB raw ≈ 6.8 MB base64)
+    _MAX_IMAGE_B64 = 7 * 1024 * 1024
+    if image_data and len(image_data) > _MAX_IMAGE_B64:
+        raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
+
     # ── Save user message ─────────────────────────────────────────────────────
     user_msg = CoachMessage(
         id=str(uuid4()),
@@ -207,7 +216,7 @@ async def send_message(
         content=text or "",
         image_data=image_data,
         image_mime=image_mime,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     db.add(user_msg)
 
@@ -346,13 +355,13 @@ async def send_message(
         role="assistant",
         content=ai_text,
         ai_metadata=answer,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     db.add(assistant_msg)
 
     # ── Update conversation metadata ──────────────────────────────────────────
     conv.message_count = (conv.message_count or 0) + 2
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = datetime.now(timezone.utc)
 
     # Auto-title on first user message
     if conv.title == "New Conversation" and text:
@@ -370,7 +379,7 @@ async def send_message(
 
 @router.get("/search")
 def search_conversations(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

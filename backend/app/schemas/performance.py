@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Any
 from datetime import datetime
 
@@ -28,8 +28,8 @@ class StartSessionResponse(BaseModel):
 class AnswerRequest(BaseModel):
     question_id: str
     selected_answer: str    # 'A' | 'B' | 'C' | 'D'
-    correct_answer: str     # 'A' | 'B' | 'C' | 'D'
-    time_spent_seconds: int
+    correct_answer: str     # kept for client compat; server validates against DB
+    time_spent_seconds: int = Field(..., ge=1)
 
     # Pre-reveal confidence — collected BEFORE answer is shown
     # Optional for backward compatibility: old clients that don't send it still work

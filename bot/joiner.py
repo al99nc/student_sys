@@ -16,6 +16,7 @@ Env:  TELEGRAM_API_ID, TELEGRAM_API_HASH, BOT_USERNAME
 """
 
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -24,13 +25,15 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.tl.functions.channels import (
     JoinChannelRequest,
-    InviteToChannelRequest,
     EditAdminRequest,
 )
-from telethon.tl.functions.messages import ImportChatInviteRequest
-from telethon.tl.types import ChatAdminRights
+from telethon.tl.functions.messages import (
+    ImportChatInviteRequest,
+    EditChatAdminRequest,
+)
+from telethon.tl.types import Channel, Chat, ChatAdminRights
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 API_ID       = int(os.environ["TELEGRAM_API_ID"])
 API_HASH     = os.environ["TELEGRAM_API_HASH"]
@@ -88,17 +91,26 @@ async def join_and_add_bot(link: str) -> str:
         # --- Add bot as admin (if BOT_USERNAME is set) ---
         if BOT_USERNAME:
             bot_entity = await client.get_entity(BOT_USERNAME)
-            admin_rights = ChatAdminRights(
-                post_messages=True,
-                edit_messages=True,
-                delete_messages=True,
-                invite_users=True,
-                pin_messages=True,
-                change_info=False,
-                add_admins=False,
-                ban_users=False,
-            )
-            await client(EditAdminRequest(chat, bot_entity, admin_rights, rank="CortexQ"))
+
+            if isinstance(chat, Channel):
+                # Supergroup or channel — use channels.EditAdminRequest with granular rights
+                admin_rights = ChatAdminRights(
+                    post_messages=True,
+                    edit_messages=True,
+                    delete_messages=True,
+                    invite_users=True,
+                    pin_messages=True,
+                    change_info=False,
+                    add_admins=False,
+                    ban_users=False,
+                )
+                await client(EditAdminRequest(chat, bot_entity, admin_rights, rank="CortexQ"))
+            elif isinstance(chat, Chat):
+                # Basic group — use messages.EditChatAdminRequest (simple is_admin flag)
+                await client(EditChatAdminRequest(chat.id, bot_entity, is_admin=True))
+            else:
+                logging.warning("Unknown chat type: %s", type(chat))
+
             bot_note = f"✅ @{BOT_USERNAME} promoted to admin"
         else:
             bot_note = "⚠️ BOT_USERNAME not set — skipped adding bot"
@@ -109,6 +121,7 @@ async def join_and_add_bot(link: str) -> str:
         return f"✅ Joined *{chat_title}*\n{bot_note}\n👋 Owner account left the chat"
 
     except Exception as exc:
+        logging.error("join_and_add_bot error for %s: %s", link, exc)
         return f"❌ Error: {exc}"
     finally:
         await client.disconnect()

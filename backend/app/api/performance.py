@@ -3,7 +3,7 @@ import logging
 import random
 import re
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 import httpx
@@ -116,7 +116,12 @@ def submit_answer(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    is_correct = body.selected_answer == body.correct_answer
+    # Validate answer server-side — never trust client-provided correct_answer
+    question = db.query(McqQuestion).filter(McqQuestion.id == body.question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    actual_correct = question.correct_answer
+    is_correct = body.selected_answer.upper() == actual_correct.upper()
 
     # Attempt number = how many times this student has answered this question total
     prev_attempts = db.query(QuestionAttempt).filter(
@@ -125,9 +130,9 @@ def submit_answer(
     ).count()
 
     # confidence_proxy: fast+correct = high confidence, wrong = 0
-    confidence_proxy = (1.0 / body.time_spent_seconds) if is_correct and body.time_spent_seconds > 0 else 0.0
+    confidence_proxy = (1.0 / body.time_spent_seconds) if is_correct else 0.0
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     attempt_id = str(uuid4())
     attempt = QuestionAttempt(
         id=attempt_id,
@@ -135,7 +140,7 @@ def submit_answer(
         student_id=current_user.id,
         question_id=body.question_id,
         selected_answer=body.selected_answer,
-        correct_answer=body.correct_answer,
+        correct_answer=actual_correct,
         is_correct=is_correct,
         time_spent_seconds=body.time_spent_seconds,
         attempt_number=prev_attempts + 1,
@@ -206,7 +211,7 @@ def submit_answer(
         if was_mastered and weak_point.accuracy_rate < RELAPSE_THRESHOLD:
             weak_point.times_relapsed = (weak_point.times_relapsed or 0) + 1
             if weak_point.first_mastered_at:
-                days = (now - weak_point.first_mastered_at).days
+                days = (now - weak_point.first_mastered_at.replace(tzinfo=timezone.utc)).days
                 weak_point.decay_rate = days
 
     else:
@@ -311,7 +316,7 @@ def submit_answer(
         WeakPoint.flagged_as_weak == True,
     ).count()
 
-    week_start = datetime.utcnow().date() - timedelta(days=datetime.utcnow().weekday())
+    week_start = datetime.now(timezone.utc).date() - timedelta(days=datetime.now(timezone.utc).weekday())
     existing_assignment = db.query(WeeklyQuizAssignment).filter(
         WeeklyQuizAssignment.student_id == current_user.id,
         WeeklyQuizAssignment.week_start == week_start,
@@ -364,9 +369,9 @@ def complete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     session.completed_at = now
-    session.duration_seconds = int((now - session.started_at).total_seconds())
+    session.duration_seconds = int((now - session.started_at.replace(tzinfo=timezone.utc)).total_seconds())
 
     correct = session.correct_count or 0
     total = session.total_questions or 1
@@ -406,7 +411,7 @@ def complete_session(
             if wp:
                 days_since = None
                 if wp.last_attempted_at:
-                    days_since = (now - wp.last_attempted_at).days
+                    days_since = (now - wp.last_attempted_at.replace(tzinfo=timezone.utc)).days
                 db.add(TopicSnapshot(
                     id=str(uuid4()),
                     student_id=current_user.id,
@@ -453,6 +458,42 @@ def complete_session(
     )
 
 
+# ── POST /sessions/record-quiz ───────────────────────────────────────────────
+# Lightweight endpoint: saves a completed quiz session from the quiz page
+# without per-question tracking (quiz page has no performance question IDs).
+
+@router.post("/sessions/record-quiz")
+def record_quiz_result(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document_id = body.get("document_id")
+    correct     = int(body.get("correct", 0))
+    total       = int(body.get("total", 1))
+    mode        = body.get("mode", "quiz_mode")
+    started_from = body.get("started_from", "quiz_page")
+
+    if not document_id:
+        raise HTTPException(status_code=400, detail="document_id required")
+
+    now = datetime.now(timezone.utc)
+    session = PerformanceSession(
+        student_id      = current_user.id,
+        document_id     = document_id,
+        mode            = mode,
+        started_at      = now,
+        completed_at    = now,
+        total_questions = total,
+        correct_count   = correct,
+        readiness_score = round((correct / total) * 100, 1) if total > 0 else 0,
+        started_from    = started_from,
+    )
+    db.add(session)
+    db.commit()
+    return {"session_id": session.id, "correct": correct, "total": total}
+
+
 # ── GET /students/me/weak-points ─────────────────────────────────────────────
 
 @router.get("/students/me/weak-points", response_model=List[WeakPointOut])
@@ -470,7 +511,7 @@ def get_weak_points(
         .all()
     )
 
-    seven_days_ago = (datetime.utcnow() - timedelta(days=7)).date()
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).date()
     result = []
     for wp in weak_points:
         old_snapshot = (
@@ -498,7 +539,7 @@ def get_readiness(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cutoff = datetime.utcnow() - timedelta(days=14)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
 
     recent_attempts = db.query(QuestionAttempt).filter(
         QuestionAttempt.student_id == current_user.id,
@@ -566,7 +607,7 @@ def _estimate_readiness_24h(student_id: int, db: Session) -> float:
 
 
 def _build_next_best_action(student_id: int, db: Session) -> dict:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     weak_points = db.query(WeakPoint).filter(WeakPoint.student_id == student_id).all()
     pattern = db.query(LearningPattern).filter(LearningPattern.student_id == student_id).first()
@@ -579,7 +620,7 @@ def _build_next_best_action(student_id: int, db: Session) -> dict:
         for wp in weak_points
         if wp.decay_rate is not None
         and wp.last_attempted_at is not None
-        and (now - wp.last_attempted_at).days > wp.decay_rate
+        and (now - wp.last_attempted_at.replace(tzinfo=timezone.utc)).days > wp.decay_rate
     ]
     weak_flagged = [wp for wp in weak_points if wp.flagged_as_weak]
 
@@ -591,7 +632,7 @@ def _build_next_best_action(student_id: int, db: Session) -> dict:
         candidate = sorted(dangerous, key=lambda x: x.accuracy_rate or 0.0)[0]
         action_type = "misconception_correction"
     elif decay_overdue:
-        candidate = sorted(decay_overdue, key=lambda x: (now - x.last_attempted_at).days, reverse=True)[0]
+        candidate = sorted(decay_overdue, key=lambda x: (now - x.last_attempted_at.replace(tzinfo=timezone.utc)).days, reverse=True)[0]
         action_type = "spaced_review"
     elif weak_flagged:
         candidate = sorted(weak_flagged, key=lambda x: x.accuracy_rate or 1.0)[0]
@@ -827,7 +868,7 @@ def get_pending_weekly_quiz(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    week_start = datetime.utcnow().date() - timedelta(days=datetime.utcnow().weekday())
+    week_start = datetime.now(timezone.utc).date() - timedelta(days=datetime.now(timezone.utc).weekday())
 
     assignment = db.query(WeeklyQuizAssignment).filter(
         WeeklyQuizAssignment.student_id == current_user.id,
@@ -1098,7 +1139,7 @@ async def get_ai_insight(
             "status": "generated",
             "insight": insight_data,
             "meta": {
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "answers_since_generation": 0,
                 "is_stale": False,
                 "is_fresh": True,
@@ -1158,7 +1199,7 @@ async def _generate_and_persist_insight(
         id=str(uuid4()),
         student_id=student_id,
         insight_json=insight_data,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(timezone.utc),
         trigger=trigger,
         questions_answered_at_generation=total_answered,
         is_current=True,
@@ -1950,7 +1991,7 @@ def set_exam_date(
             id=str(uuid4()),
             student_id=current_user.id,
             exam_date=exam_date,
-            computed_at=datetime.utcnow(),
+            computed_at=datetime.now(timezone.utc),
         )
         db.add(pattern)
 
@@ -1974,7 +2015,7 @@ def _build_student_context(student_id: int, db: Session) -> dict:
     """
     from app.api.ai_tools import get_all_memories
     personal_memories = get_all_memories(student_id, db)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     cutoff_14d = now - timedelta(days=14)
     seven_days_ago = now.date() - timedelta(days=7)
 
@@ -2026,7 +2067,7 @@ def _build_student_context(student_id: int, db: Session) -> dict:
                 "times_relapsed": wp.times_relapsed or 0,
                 "decay_rate_days": wp.decay_rate,
                 "last_attempted_days_ago": (
-                    (now - wp.last_attempted_at).days
+                    (now - wp.last_attempted_at.replace(tzinfo=timezone.utc)).days
                     if wp.last_attempted_at else None
                 ),
                 "accuracy_trend": wp.accuracy_trend,
@@ -2046,6 +2087,8 @@ def _build_student_context(student_id: int, db: Session) -> dict:
 
         "recent_sessions": [
             {
+                "document_id": s.document_id,
+                "started_from": s.started_from,
                 "mode": s.mode,
                 "correct": s.correct_count,
                 "total": s.total_questions,
@@ -2055,7 +2098,7 @@ def _build_student_context(student_id: int, db: Session) -> dict:
                 "device": s.device_type,
                 "interruptions": s.interruptions,
                 "rushed_count": s.rushed_count,
-                "days_ago": (now - s.completed_at).days if s.completed_at else None,
+                "days_ago": (now - s.completed_at.replace(tzinfo=timezone.utc)).days if s.completed_at else None,
             }
             for s in recent_sessions
         ],

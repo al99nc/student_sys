@@ -75,11 +75,11 @@ export default function AnalyticsPage() {
         </div>
       </aside>
 
-      <main className="lg:ml-72 pt-28 pb-32 md:pb-32 px-6 md:px-12 max-w-7xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)" }}>
+      <main className="lg:ml-72 pt-20 sm:pt-28 pb-32 px-4 sm:px-6 md:px-12 max-w-7xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)" }}>
         {/* Header */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-12">
           <div className="space-y-2">
-            <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight">Your Study Analytics</h1>
+            <h1 className="text-2xl sm:text-4xl md:text-5xl font-black text-white tracking-tight">Your Study Analytics</h1>
             <p className="text-primary-fixed-dim text-lg font-medium">Visualizing your cognitive growth.</p>
           </div>
           <div className="relative inline-block w-full md:w-auto">

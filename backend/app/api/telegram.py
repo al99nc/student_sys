@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, Tuple
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Header
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from app.db.database import get_db
 from app.models.models import User
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
+from app.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["telegram"])
 
@@ -33,13 +34,16 @@ class TelegramInitDataRequest(BaseModel):
     init_data: str
 
 
+_INIT_DATA_MAX_AGE = 300  # 5 minutes
+
+
 def _validate_init_data(init_data: str, bot_token: str) -> dict:
     """
     Validate Telegram WebApp initData using the official algorithm:
     https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
 
     Returns the parsed data dict (with 'user' already decoded from JSON).
-    Raises ValueError if the hash doesn't match.
+    Raises ValueError if the hash doesn't match or data is stale.
     """
     pairs: dict[str, str] = {}
     for part in init_data.split("&"):
@@ -50,6 +54,13 @@ def _validate_init_data(init_data: str, bot_token: str) -> dict:
     received_hash = pairs.pop("hash", None)
     if not received_hash:
         raise ValueError("Missing hash in initData")
+
+    # Validate timestamp to prevent replay attacks
+    auth_date = pairs.get("auth_date")
+    if auth_date is None:
+        raise ValueError("Missing auth_date in initData")
+    if abs(time.time() - int(auth_date)) > _INIT_DATA_MAX_AGE:
+        raise ValueError("initData has expired — please reopen the app")
 
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
 
@@ -77,7 +88,8 @@ def _validate_init_data(init_data: str, bot_token: str) -> dict:
 
 
 @router.post("/telegram")
-def telegram_auth(body: TelegramInitDataRequest, db: Session = Depends(get_db)):
+@limiter.limit("20/minute")
+def telegram_auth(request: Request, body: TelegramInitDataRequest, db: Session = Depends(get_db)):
     """
     Exchange Telegram WebApp initData for a standard JWT access token.
 
@@ -117,15 +129,16 @@ def telegram_auth(body: TelegramInitDataRequest, db: Session = Depends(get_db)):
     return {
         "access_token": token,
         "token_type": "bearer",
-        "telegram_user": tg_user,
     }
 
 
 # ── Bot endpoints ──────────────────────────────────────────────────────────
 
 def _check_bot_secret(x_bot_secret: str = Header(None)):
-    expected = os.environ.get("BOT_SECRET", "cortexq-bot-secret-2026")
-    if not x_bot_secret or x_bot_secret != expected:
+    expected = os.environ.get("BOT_SECRET")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Bot secret not configured on server")
+    if not x_bot_secret or not hmac.compare_digest(x_bot_secret, expected):
         raise HTTPException(status_code=403, detail="Invalid bot secret")
 
 
@@ -153,9 +166,17 @@ async def bot_upload_temp(
 
     _TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
+    content = await file.read()
+
+    # Validate PDF magic bytes to prevent content-type spoofing
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="File is not a valid PDF")
+
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+
     token = secrets.token_urlsafe(20)
     dest = _TEMP_DIR / f"{token}.pdf"
-    content = await file.read()
     dest.write_bytes(content)
 
     _temp_files[token] = (str(dest), file.filename or "lecture.pdf", time.time() + _TEMP_TTL)
