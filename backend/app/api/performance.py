@@ -1434,15 +1434,34 @@ async def _call_ai_for_chat(
         topic_lines.append(f"  • {t['topic']}: {acc:.0%} accuracy, {attempts} attempts ({status}){flag}")
     topics_summary = "\n".join(topic_lines) if topic_lines else "  • No topic data yet"
 
+    # Sort by importance desc, skip very low-signal entries (< 0.3)
+    significant_memories = sorted(
+        [m for m in personal_memories if m.get("importance", 0.5) >= 0.3],
+        key=lambda m: m.get("importance", 0.5),
+        reverse=True,
+    )
     memory_lines = "\n".join(
-        f"  • {m['label']}: {m['value']}" for m in personal_memories
-    ) if personal_memories else "  • Nothing saved yet"
+        f"  • [{m.get('type', 'context').upper()}] {m['label']}: {m['value']}"
+        for m in significant_memories
+    ) if significant_memories else "  • Nothing saved yet"
 
     # ── Build Analyzer Briefing block ─────────────────────────────────────────
     # The Analyzer already did the hard thinking. The chat model's only jobs:
     # respond naturally to the student AND write compelling explanations.
     recent_sessions = context.get("recent_sessions", [])
     days_since_last = recent_sessions[0].get("days_ago") if recent_sessions else None
+
+    # Build a human-readable session history block for the prompt
+    session_lines = []
+    for s in recent_sessions[:5]:
+        title = s.get("lecture_title") or f"lecture #{s.get('document_id', '?')}"
+        correct = s.get("correct", 0)
+        total = s.get("total", 0)
+        pct = round(s.get("accuracy", 0) * 100)
+        days = s.get("days_ago")
+        when = f"{days}d ago" if days is not None else "recently"
+        session_lines.append(f"  • {title}: {correct}/{total} ({pct}%) — {when}")
+    sessions_block = "\n".join(session_lines) if session_lines else "  • No completed sessions yet"
 
     if analyzer_decision and analyzer_decision.get("primary_topic"):
         d = analyzer_decision
@@ -1520,6 +1539,9 @@ STUDENT DATA:
 - Overconfidence rate: {overconf_str}
 - Co-failing topic pairs: {co_pairs or "none"}
 
+RECENT COMPLETED SESSIONS (most recent first — use this to acknowledge what they practiced and how they did):
+{sessions_block}
+
 PERSONAL MEMORY (facts you saved about this student across all past conversations):
 {memory_lines}
 {briefing_section}
@@ -1534,11 +1556,14 @@ HOW TO RESPOND:
 - topic_focus must be ONLY the exact topic name — never add extra words to it.
 - MEMORY RULE: Personal facts come ONLY from PERSONAL MEMORY above or the current conversation. If not there, say honestly you don't have it — never invent.
 - OFF-TOPIC: Respond naturally and warmly. Do NOT force-redirect to study topics.
-- SAVING FACTS: When the student tells you a personal fact worth keeping (name, exam date, goal, preference), include "save_memory" in your JSON.
+- SAVING FACTS: When the student tells you a personal fact worth keeping (name, exam date, goal, preference), include "save_memory" in your JSON with all fields filled (key, label, value, type, importance, reason).
+  Memory types: identity (name/traits, stable), goal (what they want to achieve), context (temporary situation), behavior (pattern you detect over time), emotional (feelings/mood).
+  Importance: 0.9-1.0 = core identity/major goals | 0.7-0.89 = clear preferences/academic info | 0.4-0.69 = temporary context | 0.1-0.39 = weak signals. Never save small talk.
+  Only save if the fact is genuinely worth remembering across future conversations. Do NOT spam saves.
 
 Return ONLY this JSON — no markdown, no extra text:
 {{
-  "response": "your natural reply to what the student actually said — 1 to 3 sentences",
+  "response": "your natural reply to what the student actually said — can be multiple sentences, paragraphs, or a numbered/bulleted list if they asked for a list or explanation. Use \\n for line breaks.",
   "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic | greeting",
   "topic_focus": "exact topic name or null",
   "next_step": "e.g. 'Do 10 questions on X. Aim for >70%.' — or null",
@@ -1550,7 +1575,14 @@ Return ONLY this JSON — no markdown, no extra text:
   "confidence_tip": "short calibration tip or null",
   "urgency": "low | medium | high | critical",
   "encouraging_note": "one honest sentence tied to their actual numbers — or null",
-  "save_memory": {{"key": "snake_case_key", "label": "Human readable label", "value": "the fact to save"}} or null
+  "save_memory": {{
+    "key": "snake_case_key",
+    "label": "Human readable label",
+    "value": "the fact to save",
+    "type": "identity | goal | context | behavior | emotional",
+    "importance": 0.0,
+    "reason": "why this is worth saving across future conversations"
+  }} or null
 }}"""
 
     # ── Build messages array ──────────────────────────────────────────────────
@@ -1575,7 +1607,7 @@ Return ONLY this JSON — no markdown, no extra text:
                     "model": getattr(settings, "CHAT_AI_MODEL", "llama-3.3-70b-versatile"),
                     "messages": messages,
                     "temperature": 0.3,
-                    "max_tokens": 700,
+                    "max_tokens": 1400,
                     "response_format": {"type": "json_object"},
                 },
             )
@@ -1946,6 +1978,24 @@ async def chat_with_coach(
     context = _build_student_context(current_user.id, db)
     answer = await _call_ai_for_chat(context, message, conversation_history=history)
 
+    # ── Process AI tool calls ──────────────────────────────────────────────────
+    save_memory_req = answer.get("save_memory")
+    if isinstance(save_memory_req, dict):
+        key   = save_memory_req.get("key", "").strip()
+        label = save_memory_req.get("label", "").strip()
+        value = save_memory_req.get("value", "")
+        if key and label and value is not None and str(value).strip():
+            try:
+                from app.api.ai_tools import tool_save_memory
+                tool_save_memory(
+                    current_user.id, key, label, str(value), db,
+                    type=save_memory_req.get("type", "context"),
+                    importance=float(save_memory_req.get("importance", 0.5)),
+                    reason=save_memory_req.get("reason") or None,
+                )
+            except Exception:
+                pass
+
     # Attach real practice questions for the topic the coach recommends
     topic_focus = answer.get("topic_focus")
     if topic_focus:
@@ -2023,10 +2073,17 @@ def _build_student_context(student_id: int, db: Session) -> dict:
         WeakPoint.student_id == student_id,
     ).order_by(WeakPoint.accuracy_rate.asc()).all()
 
-    recent_sessions = db.query(PerformanceSession).filter(
-        PerformanceSession.student_id == student_id,
-        PerformanceSession.completed_at.isnot(None),
-    ).order_by(PerformanceSession.completed_at.desc()).limit(5).all()
+    recent_sessions_raw = (
+        db.query(PerformanceSession, Lecture.title)
+        .outerjoin(Lecture, PerformanceSession.document_id == Lecture.id)
+        .filter(
+            PerformanceSession.student_id == student_id,
+            PerformanceSession.completed_at.isnot(None),
+        )
+        .order_by(PerformanceSession.completed_at.desc())
+        .limit(5)
+        .all()
+    )
 
     co_failures = db.query(TopicCoFailure).filter(
         TopicCoFailure.student_id == student_id,
@@ -2088,6 +2145,7 @@ def _build_student_context(student_id: int, db: Session) -> dict:
         "recent_sessions": [
             {
                 "document_id": s.document_id,
+                "lecture_title": title,
                 "started_from": s.started_from,
                 "mode": s.mode,
                 "correct": s.correct_count,
@@ -2100,7 +2158,7 @@ def _build_student_context(student_id: int, db: Session) -> dict:
                 "rushed_count": s.rushed_count,
                 "days_ago": (now - s.completed_at.replace(tzinfo=timezone.utc)).days if s.completed_at else None,
             }
-            for s in recent_sessions
+            for s, title in recent_sessions_raw
         ],
 
         "calibration": {

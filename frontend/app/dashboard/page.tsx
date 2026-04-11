@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getLectures, getStats, getMySharedSessions, getNextBestAction, postChatCoach } from "@/lib/api";
+import { getLectures, getStats, getMySharedSessions, getNextBestAction } from "@/lib/api";
 import { isAuthenticated, logout, getToken } from "@/lib/auth";
 import Link from "next/link";
 
@@ -61,12 +61,6 @@ export default function DashboardPage() {
   const [sharedSessions, setSharedSessions] = useState<SharedSession[]>([]);
   const [nextAction, setNextAction] = useState<any>(null);
   const [nextActionError, setNextActionError] = useState("");
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatHistory, setChatHistory] = useState<{role: "user" | "coach"; text: string; nextStep?: string; practiceDocId?: number; encouragingNote?: string;}[]>([]);
-  const [apiHistory, setApiHistory] = useState<{role: string; content: string}[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState("");
   const [userName, setUserName] = useState("Student");
   const today = formatDate(new Date());
 
@@ -102,35 +96,6 @@ export default function DashboardPage() {
   };
 
   const handleLogout = () => logout();
-
-  const handleSendChat = async () => {
-    if (!chatInput.trim()) return;
-    setChatError("");
-    setChatLoading(true);
-    const msg = chatInput.trim();
-    setChatHistory((prev) => [...prev, { role: "user", text: msg }]);
-    setChatInput("");
-    const historySnapshot = apiHistory;
-    try {
-      const res = await postChatCoach(msg, historySnapshot);
-      const data = res?.data ?? {};
-      const coachText = (data.response || "Sorry, I couldn't produce a response.").toString();
-      const nextStep = isValid(data.next_step) ? data.next_step : null;
-      const practiceDocId = data.practice_document_id || null;
-      const encouragingNote = isValid(data.encouraging_note) ? data.encouraging_note : null;
-      setChatHistory((prev) => [...prev, { role: "coach", text: coachText, nextStep, practiceDocId, encouragingNote }]);
-      setApiHistory((prev) => [
-        ...prev,
-        { role: "user", content: msg },
-        { role: "assistant", content: coachText },
-      ]);
-    } catch {
-      setChatError("Chatbot is unavailable right now.");
-      setChatHistory((prev) => [...prev, { role: "coach", text: "I am temporarily offline." }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
 
   const displayedLectures = lectures;
   const userInitial = userName.charAt(0).toUpperCase();
@@ -228,26 +193,50 @@ export default function DashboardPage() {
         {/* Scrollable content */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-4 sm:py-6 pb-24 lg:pb-6">
 
-          {/* ── HERO ── */}
+          {/* ── HERO — Sage-first ── */}
           <div className="relative rounded-2xl overflow-hidden mb-4 sm:mb-6" style={{ background: "#131525", border: "1px solid rgba(255,255,255,0.06)" }}>
             <div className="flex items-center justify-between p-5 sm:p-8">
-              {/* Left text */}
+              {/* Left: Sage greeting */}
               <div className="max-w-md">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] mb-3 sm:mb-4" style={{ color: "#00D2FD" }}>— Lecture Library</p>
-                <h2 className="text-2xl sm:text-4xl font-black text-white leading-tight mb-3 sm:mb-4">
-                  Start your first{" "}
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] mb-3 sm:mb-4" style={{ color: "#00D2FD" }}>— Your AI Learning Coach</p>
+                <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight mb-3 sm:mb-4">
+                  Hey {userName},{" "}
                   <span style={{ background: "linear-gradient(90deg, #00D2FD, #7B2FFF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                    study session
+                    what do you want to work on?
                   </span>
                 </h2>
-                <p className="text-xs sm:text-sm mb-5 sm:mb-7" style={{ color: "#6b7280" }}>
-                  Upload a medical PDF — CortexQ will generate adaptive MCQs, track your weak points, and guide your prep.
+                <p className="text-xs sm:text-sm mb-5" style={{ color: "#6b7280" }}>
+                  Ask Sage anything — study plans, weak points, practice sessions, or just motivation.
                 </p>
+                {/* Suggestion chips */}
+                <div className="flex flex-wrap gap-2 mb-5">
+                  {[
+                    { label: "Plan my study session", icon: "calendar_today" },
+                    { label: "What are my weak points?", icon: "radio_button_checked" },
+                    { label: "Quiz me on my worst topic", icon: "quiz" },
+                    { label: "Motivate me", icon: "bolt" },
+                  ].map(({ label, icon }) => (
+                    <Link
+                      key={label}
+                      href={`/coach?q=${encodeURIComponent(label)}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#94a3b8" }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(123,47,255,0.5)"; (e.currentTarget as HTMLElement).style.color = "#e2e8f0"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.1)"; (e.currentTarget as HTMLElement).style.color = "#94a3b8"; }}
+                    >
+                      <span className="material-symbols-outlined text-[13px]">{icon}</span>
+                      {label}
+                    </Link>
+                  ))}
+                </div>
                 <div className="flex items-center gap-3 sm:gap-5">
+                  <Link href="/coach" className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-white text-sm font-semibold transition-all flex items-center gap-2" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+                    <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+                    Open Sage
+                  </Link>
                   <Link href="/upload" className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-white text-sm font-semibold transition-all" style={{ background: "#1e2235", border: "1px solid rgba(255,255,255,0.12)" }}>
                     + Upload Lecture
                   </Link>
-                  <a href="#" className="text-sm transition-colors hidden sm:inline" style={{ color: "#6b7280" }}>→ see how it works</a>
                 </div>
               </div>
 
@@ -323,7 +312,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ── BOTTOM GRID: Lectures + Coach ── */}
+          {/* ── BOTTOM GRID: Coach (primary) + Lectures ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
 
             {/* Your Lectures */}
@@ -393,8 +382,9 @@ export default function DashboardPage() {
                     <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "#4a5280" }}>AI Advisor</p>
                   </div>
                 </div>
-                <Link href="/coach" className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 transition-all" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#e2e8f0" }}>
-                  CHAT <span className="text-xs">→</span>
+                <Link href="/coach" className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all text-white" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+                  <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                  Open Sage
                 </Link>
               </div>
 
@@ -454,55 +444,26 @@ export default function DashboardPage() {
                   </p>
                 </div>
 
-                {/* Chat panel */}
-                {chatOpen && (
-                  <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                    <div className="max-h-72 overflow-y-auto p-3 space-y-2">
-                      {chatHistory.length === 0 && (
-                        <p className="text-xs" style={{ color: "#4a5280" }}>Ask the coach anything about your study plan…</p>
-                      )}
-                      {chatHistory.map((entry, i) => (
-                        <div key={i} className="p-2 rounded-lg" style={{ background: entry.role === "coach" ? "rgba(0,210,253,0.06)" : "rgba(255,255,255,0.04)" }}>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "#4a5280" }}>{entry.role === "coach" ? "CortexQ Coach" : "You"}</p>
-                          <p className="text-xs text-white">{entry.text}</p>
-                          {entry.role === "coach" && entry.nextStep && (
-                            <div className="mt-2 px-2 py-1.5 rounded-lg text-xs" style={{ background: "rgba(123,47,255,0.15)", border: "1px solid rgba(123,47,255,0.3)" }}>
-                              <span style={{ color: "#a78bfa", fontWeight: 700 }}>Next step: </span>
-                              <span style={{ color: "#ddd6fe" }}>{entry.nextStep}</span>
-                            </div>
-                          )}
-                          {entry.role === "coach" && entry.encouragingNote && (
-                            <p className="mt-1 text-[10px] italic" style={{ color: "#4a5280" }}>{entry.encouragingNote}</p>
-                          )}
-                          {entry.role === "coach" && entry.practiceDocId && (
-                            <Link
-                              href={`/quiz/${entry.practiceDocId}`}
-                              className="mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                              style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}
-                            >
-                              <span className="material-symbols-outlined text-[14px]">play_circle</span>
-                              Practice these questions →
-                            </Link>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    {chatError && <p className="text-xs px-3 pb-2" style={{ color: "#f87171" }}>{chatError}</p>}
-                    <div className="flex gap-2 p-3" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                      <input
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && !chatLoading && handleSendChat()}
-                        placeholder="Ask the AI coach…"
-                        className="flex-1 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-600 outline-none"
-                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
-                      />
-                      <button onClick={handleSendChat} disabled={chatLoading} className="px-3 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
-                        {chatLoading ? "…" : "Send"}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* Quick ask chips */}
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "Plan my next session", q: "Plan my next study session based on my weak points" },
+                    { label: "Explain my weak points", q: "Explain my weakest topics and how to fix them" },
+                    { label: "What should I do next?", q: "What should I study next?" },
+                  ].map(({ label, q }) => (
+                    <Link
+                      key={label}
+                      href={`/coach?q=${encodeURIComponent(q)}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all"
+                      style={{ background: "rgba(123,47,255,0.1)", border: "1px solid rgba(123,47,255,0.2)", color: "#a78bfa" }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(123,47,255,0.2)"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(123,47,255,0.1)"; }}
+                    >
+                      <span className="material-symbols-outlined text-[12px]">arrow_forward</span>
+                      {label}
+                    </Link>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

@@ -197,6 +197,25 @@ export const coachSendMessage = (
 export const coachSearch = (q: string) =>
   api.get("/api/v1/coach/search", { params: { q } });
 
+// ── Memory (ai-tools) ─────────────────────────────────────────────────────────
+
+export interface StudentMemory {
+  key: string;
+  label: string;
+  value: string;
+  type: "identity" | "goal" | "context" | "behavior" | "emotional";
+  importance: number;
+  reason: string | null;
+  updated_at: string;
+  last_accessed_at: string;
+}
+
+export const listMemories = () =>
+  api.get<StudentMemory[]>("/api/v1/ai-tools/memory");
+
+export const deleteMemory = (key: string) =>
+  api.delete(`/api/v1/ai-tools/memory/${key}`);
+
 // Performance tracking
 export const getPerformanceQuestions = (documentId: number) =>
   api.get(`/api/v1/performance/questions/${documentId}`);

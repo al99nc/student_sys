@@ -177,12 +177,14 @@ def delete_conversation(
 async def send_message(
     conv_id: str,
     body: dict,
+    debug: bool = Query(False, description="Include debug block with memory decision info"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Send a user message and receive an AI reply.
     Body: { message: str, image_data?: str, image_mime?: str }
+    Query: ?debug=1 → adds a 'debug' field to the response with memory decision info.
     """
     conv = db.query(CoachConversation).filter(
         CoachConversation.id == conv_id,
@@ -336,15 +338,38 @@ async def send_message(
 
     # ── Process AI tool calls ─────────────────────────────────────────────────
     save_memory_req = answer.get("save_memory")
+    memory_debug: dict = {"memory_decision": "skipped", "reason": "AI returned no save_memory field"}
+
     if isinstance(save_memory_req, dict):
         key   = save_memory_req.get("key", "").strip()
         label = save_memory_req.get("label", "").strip()
         value = save_memory_req.get("value", "")
         if key and label and value is not None and str(value).strip():
             try:
-                tool_save_memory(current_user.id, key, label, str(value), db)
-            except Exception:
-                pass  # never let a memory save failure break the chat
+                tool_save_memory(
+                    current_user.id, key, label, str(value), db,
+                    type=save_memory_req.get("type", "context"),
+                    importance=float(save_memory_req.get("importance", 0.5)),
+                    reason=save_memory_req.get("reason") or None,
+                )
+                memory_debug = {
+                    "memory_decision": "saved",
+                    "key":             key,
+                    "label":           label,
+                    "type":            save_memory_req.get("type", "context"),
+                    "importance_score": float(save_memory_req.get("importance", 0.5)),
+                    "reason":          save_memory_req.get("reason"),
+                }
+            except Exception as exc:
+                memory_debug = {"memory_decision": "error", "reason": str(exc)}
+        else:
+            memory_debug = {
+                "memory_decision": "skipped",
+                "reason": "AI included save_memory but key/label/value were empty",
+            }
+    elif save_memory_req is not None:
+        # AI returned save_memory but it wasn't a dict (e.g. null explicitly)
+        memory_debug = {"memory_decision": "skipped", "reason": "AI explicitly returned null for save_memory"}
 
     # ── Save assistant message ────────────────────────────────────────────────
     ai_text = answer.get("response", "")
@@ -369,9 +394,13 @@ async def send_message(
 
     db.commit()
 
+    assistant_payload = {**_serialize_message(assistant_msg), **answer}
+    if debug:
+        assistant_payload["debug"] = memory_debug
+
     return {
         "user_message":      _serialize_message(user_msg),
-        "assistant_message": {**_serialize_message(assistant_msg), **answer},
+        "assistant_message": assistant_payload,
     }
 
 
@@ -443,9 +472,16 @@ async def _call_ai_vision(
     overconf_str = f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"
     personal_memories = context.get("personal_memories", [])
 
+    # Sort by importance desc, skip very low-signal entries (< 0.3)
+    significant_memories = sorted(
+        [m for m in personal_memories if m.get("importance", 0.5) >= 0.3],
+        key=lambda m: m.get("importance", 0.5),
+        reverse=True,
+    )
     memory_lines = "\n".join(
-        f"  • {m['label']}: {m['value']}" for m in personal_memories
-    ) if personal_memories else "  • Nothing saved yet"
+        f"  • [{m.get('type', 'context').upper()}] {m['label']}: {m['value']}"
+        for m in significant_memories
+    ) if significant_memories else "  • Nothing saved yet"
 
     system_prompt = f"""You are Sage — CortexQ's personal study coach. You have this student's real performance data loaded below and you always use it. You never say "I don't know" or "I don't have access to your data" — that data is right here.
 The student has shared an image. Analyze what it actually shows and respond naturally.
@@ -463,20 +499,29 @@ RULES:
 2. If the image is about a medical or study topic AND it relates to a confirmed weak topic, connect it — but only if genuinely relevant.
 3. If the image is personal, off-topic, or about a conversation (e.g. a screenshot of a chat), respond to it naturally WITHOUT forcing a redirect to study topics. Do not shoehorn medical advice into unrelated images.
 4. MEMORY RULE: Personal facts you remember come ONLY from the PERSONAL MEMORY section above or the current conversation. You do NOT have access to previous separate conversations. If the student shows you a screenshot proving you forgot something, acknowledge it honestly — and if they reveal a fact worth saving, include "save_memory" in your response.
-5. SAVING FACTS: When the student reveals a personal fact worth remembering (name, exam date, goals, preferences), include "save_memory" in your JSON.
+5. SAVING FACTS: When the student reveals a personal fact worth remembering (name, exam date, goals, preferences), include "save_memory" in your JSON with all fields (key, label, value, type, importance, reason).
+   Memory types: identity (name/traits, stable), goal (what they want to achieve), context (temporary situation), behavior (pattern over time), emotional (feelings/mood).
+   Importance: 0.9-1.0 = core identity/major goals | 0.7-0.89 = clear preferences | 0.4-0.69 = temporary context | 0.1-0.39 = weak signals. Never save small talk.
 6. If the student asks what data you have about them, summarize the STUDENT DATA and PERSONAL MEMORY above — never say you don't have data.
 7. Return ONLY valid JSON. No markdown.
 
 RESPONSE SCHEMA:
 {{
-  "response": "natural reply to what the image actually shows — 1-2 sentences",
+  "response": "natural reply to what the image actually shows — can be multiple sentences or a list if needed. Use \\n for line breaks.",
   "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic",
   "topic_focus": "exact topic name from their data only if genuinely relevant, otherwise null",
   "next_step": "one specific study action — or null if the image is not study-related",
   "confidence_tip": "specific to their {overconf_str} overconfidence rate, or null if not relevant",
   "urgency": "low | medium | high | critical",
   "encouraging_note": "one honest sentence — or null if not relevant",
-  "save_memory": {{"key": "snake_case_key", "label": "Human readable label", "value": "the fact to save"}} or null
+  "save_memory": {{
+    "key": "snake_case_key",
+    "label": "Human readable label",
+    "value": "the fact to save",
+    "type": "identity | goal | context | behavior | emotional",
+    "importance": 0.0,
+    "reason": "why this is worth saving across future conversations"
+  }} or null
 }}"""
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -503,7 +548,7 @@ RESPONSE SCHEMA:
                     "model": "meta-llama/llama-4-scout-17b-16e-instruct",
                     "messages": messages,
                     "temperature": 0.3,
-                    "max_tokens": 700,
+                    "max_tokens": 1400,
                     "response_format": {"type": "json_object"},
                 },
             )

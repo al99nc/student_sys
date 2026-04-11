@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  reactStrictMode: false,  // prevents double useEffect calls in dev
   // Load .env from the monorepo root instead of frontend/
   envDir: '..',
   experimental: {

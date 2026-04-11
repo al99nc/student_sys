@@ -14,7 +14,7 @@ Student-facing REST endpoints (for UI display / management):
   DELETE /api/v1/ai-tools/memory/{key}  delete a memory by key
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -30,14 +30,27 @@ router = APIRouter(prefix="/api/v1/ai-tools", tags=["ai-tools"])
 
 # ── Internal tool functions (called by coach.py, not the student) ─────────────
 
-def tool_save_memory(student_id: int, key: str, label: str, value: str, db: Session) -> dict:
+def tool_save_memory(
+    student_id: int,
+    key: str,
+    label: str,
+    value: str,
+    db: Session,
+    *,
+    type: str = "context",
+    importance: float = 0.5,
+    reason: str | None = None,
+) -> dict:
     """
-    Upsert a memory entry. If the key already exists, update label + value.
+    Upsert a memory entry. If the key already exists, update all fields.
     Returns the saved record as a dict.
     """
     key = key.strip().lower().replace(" ", "_")[:100]
     label = label.strip()[:200]
     value = str(value).strip()
+    type = type if type in ("identity", "goal", "context", "behavior", "emotional") else "context"
+    importance = max(0.0, min(1.0, float(importance)))
+    now = datetime.now(timezone.utc)
 
     existing = db.query(StudentMemory).filter(
         StudentMemory.student_id == student_id,
@@ -47,13 +60,20 @@ def tool_save_memory(student_id: int, key: str, label: str, value: str, db: Sess
     if existing:
         existing.label = label
         existing.value = value
-        existing.updated_at = datetime.utcnow()
+        existing.type = type
+        existing.importance = importance
+        existing.reason = reason
+        existing.updated_at = now
+        existing.last_accessed_at = now
     else:
         existing = StudentMemory(
             student_id=student_id,
             key=key,
             label=label,
             value=value,
+            type=type,
+            importance=importance,
+            reason=reason,
         )
         db.add(existing)
 
@@ -115,8 +135,13 @@ def delete_memory(
 
 def _serialize(m: StudentMemory) -> dict:
     return {
-        "key":        m.key,
-        "label":      m.label,
-        "value":      m.value,
-        "updated_at": m.updated_at.isoformat(),
+        "key":              m.key,
+        "label":            m.label,
+        "value":            m.value,
+        "type":             m.type,
+        "importance":       m.importance,
+        "reason":           m.reason,
+        "updated_at":       m.updated_at.isoformat(),
+        "last_accessed_at": m.last_accessed_at.isoformat(),
     }
+

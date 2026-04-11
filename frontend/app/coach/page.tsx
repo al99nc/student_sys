@@ -111,6 +111,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   const quizScore = searchParams.get("quiz_score");
   const quizTotal = searchParams.get("quiz_total");
   const quizPct   = searchParams.get("quiz_pct");
+  const autoQ     = searchParams.get("q");
 
   // Sidebar state
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -242,12 +243,15 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
             console.log(`[Coach] Setting pending message: ${msg}`);
             setPendingAutoMsg(msg);
           }
+        } else if (autoQ) {
+          // ?q= param: auto-send a message into a fresh conversation
+          setPendingAutoMsg(autoQ);
         }
       })
       .catch((err) => {
         console.error("[Coach] Failed to load conversations:", err);
       });
-  }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct]);
+  }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct, autoQ]);
 
   // ── Auto-send pending quiz result once activeId is ready ─────────────────────
   useEffect(() => {
@@ -583,7 +587,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
                   ].map(prompt => (
                     <button
                       key={prompt}
-                      onClick={() => setInput(prompt)}
+                      onClick={() => handleSend(prompt)}
                       className="px-4 py-3 rounded-xl text-xs text-left transition-all"
                       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8" }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(123,47,255,0.4)"; e.currentTarget.style.color = "#e2e8f0"; }}
@@ -764,6 +768,7 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
                 borderTopLeftRadius: 4,
                 padding: "14px 18px",
                 color: "#cbd5e1",
+                whiteSpace: "pre-wrap",
               }}
             >
               {msg.content}
