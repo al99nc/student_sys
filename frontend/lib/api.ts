@@ -183,15 +183,37 @@ export const coachGetConversation = (id: string) =>
 export const coachDeleteConversation = (id: string) =>
   api.delete(`/api/v1/coach/conversations/${id}`);
 
+export interface QuizResult {
+  topic: string;
+  score: number;
+  total: number;
+}
+
 export const coachSendMessage = (
   convId: string,
   message: string,
   imageData?: string,
   imageMime?: string,
+  quizResult?: QuizResult,
 ) =>
   api.post(`/api/v1/coach/conversations/${convId}/messages`, {
     message,
     ...(imageData ? { image_data: imageData, image_mime: imageMime } : {}),
+    ...(quizResult ? { quiz_result: quizResult } : {}),
+  });
+
+export interface FreshMCQ {
+  question: string;
+  options: string[];   // ["A. ...", "B. ...", "C. ...", "D. ..."]
+  answer: string;      // "A" | "B" | "C" | "D"
+  explanation?: string;
+  topic?: string;
+}
+
+export const coachGeneratePractice = (topic: string, count: number) =>
+  api.post<{ topic: string; questions: FreshMCQ[] }>("/api/v1/coach/practice/generate", {
+    topic,
+    count,
   });
 
 export const coachSearch = (q: string) =>

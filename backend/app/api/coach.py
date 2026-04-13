@@ -8,17 +8,18 @@ Endpoints:
   DELETE /api/v1/coach/conversations/{id}       delete conversation
   POST   /api/v1/coach/conversations/{id}/messages  send message, get AI reply
   GET    /api/v1/coach/search?q=               search conversations by title / message content
+  POST   /api/v1/coach/practice/generate        generate fresh MCQs for a topic (never reuses stored ones)
 """
 
 import re
 import json
 import logging
-from typing import Any
 from uuid import uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -28,38 +29,13 @@ from app.api.deps import get_current_user
 from app.models.models import User
 from app.models.coach import CoachConversation, CoachMessage
 from app.models.performance import McqQuestion
+from app.utils.helpers import sanitize_nulls
 
 # Re-use helpers from performance module
 from app.api.performance import _build_student_context, _call_ai_for_chat, _chat_fallback, _run_analyzer
 from app.api.ai_tools import tool_save_memory
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
-
-
-def sanitize_nulls(obj: Any) -> Any:
-    """
-    Convert AI-generated sentinel strings for missing values into real JSON nulls.
-    Handles nested dicts and lists recursively.
-    """
-    replaced = False
-
-    def _sanitize(value: Any) -> Any:
-        nonlocal replaced
-        if isinstance(value, dict):
-            return {key: _sanitize(val) for key, val in value.items()}
-        if isinstance(value, list):
-            return [_sanitize(item) for item in value]
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"null", "none", ""}:
-                replaced = True
-                return None
-        return value
-
-    cleaned = _sanitize(obj)
-    if replaced:
-        logging.getLogger(__name__).debug("Sanitized AI response null-like strings to JSON null")
-    return cleaned
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -316,25 +292,46 @@ async def send_message(
             answer["is_relapse"] = True
 
     # ── Attach practice questions for topic_focus ─────────────────────────────
+    # Always include the topic so the frontend can generate FRESH questions.
+    # We still attach a practice_document_id as fallback for the quiz page,
+    # but the primary path is fresh generation keyed by topic_focus.
     topic_focus = answer.get("topic_focus")
     if topic_focus:
-        practice_qs = (
+        # Fallback: grab one existing question just to get a document_id for
+        # the quiz page (used only when the fresh-generation API fails).
+        fallback_q = (
             db.query(McqQuestion)
             .filter(McqQuestion.topic == topic_focus)
-            .limit(3)
-            .all()
+            .first()
         )
-        if practice_qs:
-            answer["practice_questions"] = [
-                {
-                    "id": q.id,
-                    "document_id": q.document_id,
-                    "topic": q.topic,
-                    "preview": (q.question_text[:100] + "…") if len(q.question_text) > 100 else q.question_text,
-                }
-                for q in practice_qs
-            ]
-            answer["practice_document_id"] = practice_qs[0].document_id
+        if fallback_q:
+            answer["practice_document_id"] = fallback_q.document_id
+        # Always signal the frontend to use fresh generation for this topic
+        answer["practice_topic"] = topic_focus
+
+    # ── Auto-save quiz result to memory if the user just finished practice ───
+    quiz_result = body.get("quiz_result")  # { topic, score, total, pct }
+    if isinstance(quiz_result, dict):
+        q_topic = (quiz_result.get("topic") or "").strip()
+        q_score = quiz_result.get("score")
+        q_total = quiz_result.get("total")
+        if q_topic and q_score is not None and q_total and q_total > 0:
+            q_pct   = round((q_score / q_total) * 100)
+            today   = date.today().isoformat()
+            mem_key = f"quiz_{q_topic.lower().replace(' ', '_')}_{today}"
+            try:
+                tool_save_memory(
+                    current_user.id,
+                    mem_key,
+                    f"Practice score — {q_topic}",
+                    f"{q_score}/{q_total} ({q_pct}%) on {today}",
+                    db,
+                    type="context",
+                    importance=0.65,
+                    reason=f"Student completed a practice session on {q_topic} and scored {q_pct}%",
+                )
+            except Exception:
+                pass  # never block the chat for a memory save failure
 
     # ── Process AI tool calls ─────────────────────────────────────────────────
     save_memory_req = answer.get("save_memory")
@@ -453,6 +450,101 @@ def search_conversations(
     return [_serialize_conversation(c) for c in results]
 
 
+# ── POST /practice/generate ───────────────────────────────────────────────────
+
+class PracticeGenerateRequest(BaseModel):
+    topic: str
+    count: int = 5
+
+
+@router.post("/practice/generate")
+async def generate_practice(
+    body: PracticeGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate fresh, never-repeated MCQ questions for a topic using AI.
+    Returns a list of question objects ready for the quiz page.
+    """
+    if not body.topic.strip():
+        raise HTTPException(status_code=400, detail="topic is required")
+    count = max(1, min(body.count, 15))  # clamp 1-15
+    questions = await _generate_fresh_mcqs(body.topic.strip(), count)
+    return {"topic": body.topic, "questions": questions}
+
+
+async def _generate_fresh_mcqs(topic: str, count: int) -> list[dict]:
+    """
+    Call AI to produce `count` unique MCQs on `topic`.
+    Returns list of { question, options, answer, explanation, topic }.
+    """
+    _log = logging.getLogger(__name__)
+
+    system_prompt = (
+        "You are a medical exam question writer. Generate fresh, unique multiple-choice questions "
+        "on the given topic. Each question must be different from the others — vary the clinical "
+        "angle, difficulty, and format (clinical vignette, mechanism, application, comparison).\n\n"
+        "RULES:\n"
+        "- Never repeat the same stem or the same answer choice set.\n"
+        "- Use real clinical scenarios, labs, or mechanisms — no trivial naming questions.\n"
+        "- Each option must be plausible; no obviously wrong distractors.\n"
+        "- The answer field must be exactly one letter: A, B, C, or D.\n"
+        "- Explanations must be 1-3 sentences explaining WHY the answer is correct "
+        "AND why the top distractor is wrong.\n"
+        "- Forbidden: 'All of the above', 'None of the above', 'Both A and B'.\n\n"
+        "Return ONLY valid JSON in this exact shape — no markdown, no extra text:\n"
+        '{"questions": [{"question": "...", "options": ["A. ...", "B. ...", "C. ...", "D. ..."], '
+        '"answer": "A", "explanation": "...", "topic": "' + topic + '"}, ...]}'
+    )
+
+    user_prompt = f"Generate exactly {count} high-quality MCQ questions on the topic: {topic}"
+
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": getattr(settings, "CHAT_AI_MODEL", "llama-3.3-70b-versatile"),
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    "temperature": 0.8,   # higher = more variety between runs
+                    "max_tokens": 3000,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"]
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+            parsed = json.loads(raw)
+            questions = parsed.get("questions", [])
+            # Validate each question has required fields
+            valid = []
+            for q in questions:
+                if (
+                    isinstance(q, dict)
+                    and q.get("question")
+                    and isinstance(q.get("options"), list)
+                    and len(q["options"]) == 4
+                    and q.get("answer") in ("A", "B", "C", "D")
+                ):
+                    q.setdefault("topic", topic)
+                    valid.append(q)
+            if not valid:
+                raise ValueError("AI returned no valid questions")
+            return valid
+    except Exception as exc:
+        _log.error("_generate_fresh_mcqs failed for topic=%r: %s", topic, exc)
+        raise HTTPException(status_code=502, detail=f"Failed to generate questions: {exc}")
+
+
 # ── Vision AI call (Groq llama-3.2-vision) ────────────────────────────────────
 
 async def _call_ai_vision(
@@ -483,37 +575,92 @@ async def _call_ai_vision(
         for m in significant_memories
     ) if significant_memories else "  • Nothing saved yet"
 
-    system_prompt = f"""You are Sage — CortexQ's personal study coach. You have this student's real performance data loaded below and you always use it. You never say "I don't know" or "I don't have access to your data" — that data is right here.
-The student has shared an image. Analyze what it actually shows and respond naturally.
+    system_prompt = f"""You are CortexQ — an adaptive AI companion with three dynamic roles: Friend, Teacher, and Coach.
+The student has shared an image. Analyze what it actually shows and respond naturally in the right role.
+You are ONE consistent personality — never feel like switching systems.
 
-STUDENT DATA:
+━━ STEP 0: DETECT STATE FIRST ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Determine the student's current state from their message AND the image:
+  EMOTIONAL  → sadness, stress, overwhelm, relationship issues, vulnerability
+  CASUAL     → personal photo, off-topic image, relaxed conversation
+  STUDYING   → medical/study image, wants explanation or help
+
+━━ PRIORITY RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔴 EMOTIONAL STATE → 100% Friend Mode. Disable Coach + Study completely.
+   - Acknowledge the feeling first. Reflect it naturally.
+     Examples: "Damn… that sounds really heavy." / "I get why that's messing with you."
+   - No advice unless they ask. No redirecting to study.
+   - NEVER mention studying, data, metrics, or performance.
+   - Set action="emotional_support", topic_focus=null, next_step=null, urgency="low".
+   TRANSITION back to study: be soft and gradual, never abrupt.
+     Example: "Alright, we'll keep it light. Let's ease back into this together."
+
+🟡 CASUAL STATE → Friend Mode. Respond to the image naturally. No forced study redirect.
+
+🟢 STUDYING STATE → Teacher + Coach + LEARNING LOOP. Explain what the image shows, tie to weak topics only if genuinely relevant.
+
+━━ LEARNING LOOP (active in STUDYING STATE) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Follow this cycle: TEACH → TEST → ADAPT → REPEAT
+
+TEACH (loop_phase="teach"): Describe what the image shows in 4–6 lines max. Simple, human. End with "Let's see if you got it."
+TEST (loop_phase="test"): Ask 1–3 MCQs based on the image content. Populate mcq_questions array. Do NOT reveal answers in response text.
+ADAPT (loop_phase="adapt"): Check the student's answer. Confirm/correct/reteach. Add a short coach note at the end.
+REPEAT until consistent understanding or student stops.
+
+Set loop_phase=null for CASUAL / EMOTIONAL contexts.
+
+━━ VISIBILITY RULE (internal metrics stay hidden) ━━━━━━━━━━━━━━━━━━━━━
+Do NOT include in the "response" text:
+  ✗ Calibration alerts / confidence levels
+  ✗ Session predictions / time estimates
+  ✗ Knowledge decay warnings
+  ✗ Raw performance percentages
+These live in JSON fields for the UI layer only.
+
+━━ ROLE SYSTEM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. FRIEND MODE (default) — relaxed, short, slightly playful, guide don't lecture.
+2. TEACHER MODE — triggered if the image shows something to explain or the student asks to break it down.
+   Structure: concept → simple explanation → key takeaway.
+3. COACH MODE (ALWAYS ACTIVE) — runs silently. Always include a subtle next_step. Disabled during EMOTIONAL.
+
+━━ STUDENT DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Confirmed weak topics (≥3 attempts, <60%): {confirmed_weak or "none yet"}
 - Dangerous misconceptions: {dangerous_topics or "none"}
 - Overconfidence rate: {overconf_str}
 
-PERSONAL MEMORY (facts you saved about this student across all past conversations):
+PERSONAL MEMORY (facts saved about this student across past conversations):
 {memory_lines}
 
-RULES:
-1. Describe what the image actually shows.
-2. If the image is about a medical or study topic AND it relates to a confirmed weak topic, connect it — but only if genuinely relevant.
-3. If the image is personal, off-topic, or about a conversation (e.g. a screenshot of a chat), respond to it naturally WITHOUT forcing a redirect to study topics. Do not shoehorn medical advice into unrelated images.
-4. MEMORY RULE: Personal facts you remember come ONLY from the PERSONAL MEMORY section above or the current conversation. You do NOT have access to previous separate conversations. If the student shows you a screenshot proving you forgot something, acknowledge it honestly — and if they reveal a fact worth saving, include "save_memory" in your response.
-5. SAVING FACTS: When the student reveals a personal fact worth remembering (name, exam date, goals, preferences), include "save_memory" in your JSON with all fields (key, label, value, type, importance, reason).
-   Memory types: identity (name/traits, stable), goal (what they want to achieve), context (temporary situation), behavior (pattern over time), emotional (feelings/mood).
-   Importance: 0.9-1.0 = core identity/major goals | 0.7-0.89 = clear preferences | 0.4-0.69 = temporary context | 0.1-0.39 = weak signals. Never save small talk.
-6. If the student asks what data you have about them, summarize the STUDENT DATA and PERSONAL MEMORY above — never say you don't have data.
+━━ RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Describe what the image actually shows — short, natural, human.
+2. If the image relates to a confirmed weak topic, connect it — only if genuinely relevant.
+3. If the image is personal, off-topic, or unrelated to study: respond to it naturally. Do NOT shoehorn medical advice in.
+4. MEMORY RULE: Personal facts come ONLY from PERSONAL MEMORY above or the current conversation. Never invent.
+5. SAVING FACTS: When the student reveals a personal fact worth keeping (name, exam date, goals, preferences), include "save_memory" in your JSON.
+   Types: identity | goal | context | behavior | emotional.
+   Importance: 0.9-1.0 = core identity/major goals | 0.7-0.89 = clear preferences | 0.4-0.69 = temporary context | 0.1-0.39 = weak signals.
+6. If the student asks what data you have, summarize STUDENT DATA and PERSONAL MEMORY above — never say you don't have data.
 7. Return ONLY valid JSON. No markdown.
 
 RESPONSE SCHEMA:
 {{
-  "response": "natural reply to what the image actually shows — can be multiple sentences or a list if needed. Use \\n for line breaks.",
-  "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic",
+  "response": "natural reply — short, human, digestible. Friend or Teacher tone based on context. Use \\n for line breaks.",
+  "action": "review_topic | practice_questions | misconception_correction | spaced_review | confidence_building | exam_strategy | off_topic | emotional_support",
   "topic_focus": "exact topic name from their data only if genuinely relevant, otherwise null",
-  "next_step": "one specific study action — or null if the image is not study-related",
+  "next_step": "one specific, personal coach suggestion — always include unless truly off-topic",
   "confidence_tip": "specific to their {overconf_str} overconfidence rate, or null if not relevant",
   "urgency": "low | medium | high | critical",
   "encouraging_note": "one honest sentence — or null if not relevant",
+  "loop_phase": "teach | test | adapt | null",
+  "mcq_questions": [
+    {{
+      "question": "the question stem",
+      "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
+      "answer": "A",
+      "explanation": "why correct + why top distractor is wrong"
+    }}
+  ],
   "save_memory": {{
     "key": "snake_case_key",
     "label": "Human readable label",
@@ -558,7 +705,7 @@ RESPONSE SCHEMA:
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
             parsed = json.loads(raw)
             parsed = sanitize_nulls(parsed)
-            required = ["response", "action", "topic_focus", "next_step", "confidence_tip", "urgency", "encouraging_note"]
+            required = ["response", "action", "topic_focus", "next_step", "confidence_tip", "urgency", "encouraging_note", "loop_phase", "mcq_questions"]
             for key in required:
                 parsed.setdefault(key, None)
             return parsed

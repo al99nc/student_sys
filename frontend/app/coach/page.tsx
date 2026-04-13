@@ -10,6 +10,7 @@ import {
   coachDeleteConversation,
   coachSendMessage,
   coachSearch,
+  QuizResult,
 } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ interface AiMeta {
   urgency?: string;
   encouraging_note?: string | null;
   practice_document_id?: number | null;
+  practice_topic?: string | null;          // always present when there's a practice CTA
   practice_questions?: { id: string; document_id: number; topic: string; preview: string }[];
   // Hard-data enrichments (not AI-generated)
   mastery_progress?: { topic: string; current: number; target: number } | null;
@@ -111,6 +113,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   const quizScore = searchParams.get("quiz_score");
   const quizTotal = searchParams.get("quiz_total");
   const quizPct   = searchParams.get("quiz_pct");
+  const quizTopic = searchParams.get("quiz_topic");   // topic practiced in fresh-mode quiz
   const autoQ     = searchParams.get("q");
 
   // Sidebar state
@@ -239,7 +242,8 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
           // Queue quiz result message — sent once activeId state settles (see effect below)
           if (quizScore !== null && quizTotal !== null) {
             const pct = quizPct ?? Math.round((parseInt(quizScore) / parseInt(quizTotal)) * 100);
-            const msg = `I just finished the practice quiz and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`;
+            const topicPart = quizTopic ? ` on ${quizTopic}` : "";
+            const msg = `I just finished the practice quiz${topicPart} and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`;
             console.log(`[Coach] Setting pending message: ${msg}`);
             setPendingAutoMsg(msg);
           }
@@ -259,7 +263,13 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     console.log(`[Coach] Auto-sending pending message with activeId=${activeId}`);
     const msg = pendingAutoMsg;
     setPendingAutoMsg(null);
-    handleSend(msg);
+    // If this auto-message is a quiz result, pass structured data so the backend
+    // can save it to memory automatically (score + topic).
+    const qr: QuizResult | undefined =
+      quizScore && quizTotal && quizTopic
+        ? { topic: quizTopic, score: parseInt(quizScore), total: parseInt(quizTotal) }
+        : undefined;
+    handleSend(msg, qr);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, pendingAutoMsg]);
 
@@ -335,7 +345,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
 
   // ── Send message ─────────────────────────────────────────────────────────────
 
-  const handleSend = async (overrideText?: string) => {
+  const handleSend = async (overrideText?: string, quizResult?: QuizResult) => {
     const text = overrideText !== undefined ? overrideText.trim() : input.trim();
     if ((!text && !imagePreview) || sending) return;
 
@@ -380,7 +390,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     setMessages(prev => [...prev, thinkingMsg]);
 
     try {
-      const res = await coachSendMessage(convId!, text, imgData ?? undefined, imgMime ?? undefined);
+      const res = await coachSendMessage(convId!, text, imgData ?? undefined, imgMime ?? undefined, quizResult);
       const { user_message, assistant_message } = res.data;
 
       setMessages(prev =>
@@ -886,25 +896,36 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
             )}
 
             {/* ── 6. Practice CTA ── */}
-            {meta?.practice_document_id && (
-              <Link
-                href={`/quiz/${meta.practice_document_id}?count=${meta.question_count ?? 10}${convId ? `&from=${convId}` : ""}`}
-                className="flex items-center justify-center gap-2.5 w-full font-bold text-white transition-all"
-                style={{
-                  background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                  borderRadius: 14,
-                  padding: "13px 20px",
-                  fontSize: 14,
-                  letterSpacing: "0.01em",
-                  boxShadow: "0 4px 20px rgba(123,47,255,0.35)",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
-              >
-                <span className="material-symbols-outlined text-[18px]">play_circle</span>
-                Practice {isValid(meta.topic_focus) ? `"${meta.topic_focus}"` : "now"} →
-              </Link>
-            )}
+            {/* Show CTA if we have either a topic (for fresh generation) or a document_id */}
+            {(meta?.practice_topic || meta?.practice_document_id) && (() => {
+              const topic   = meta.practice_topic ?? meta.topic_focus ?? "";
+              const docId   = meta.practice_document_id ?? 0;
+              const count   = meta.question_count ?? 5;
+              const fromStr = convId ? `&from=${convId}` : "";
+              // Always use fresh=true when we have a topic — generates new questions every time
+              const href = topic
+                ? `/quiz/${docId || 1}?count=${count}${fromStr}&fresh=true&topic=${encodeURIComponent(topic)}`
+                : `/quiz/${docId}?count=${count}${fromStr}`;
+              return (
+                <Link
+                  href={href}
+                  className="flex items-center justify-center gap-2.5 w-full font-bold text-white transition-all"
+                  style={{
+                    background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+                    borderRadius: 14,
+                    padding: "13px 20px",
+                    fontSize: 14,
+                    letterSpacing: "0.01em",
+                    boxShadow: "0 4px 20px rgba(123,47,255,0.35)",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
+                >
+                  <span className="material-symbols-outlined text-[18px]">play_circle</span>
+                  Practice {isValid(topic) ? `"${topic}"` : "now"} →
+                </Link>
+              );
+            })()}
 
             {/* ── 7. Encouraging note ── */}
             {meta && isValid(meta.encouraging_note) && (

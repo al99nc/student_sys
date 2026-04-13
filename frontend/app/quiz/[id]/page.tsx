@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { getResults, recordQuizResult } from "@/lib/api";
+import { getResults, recordQuizResult, coachGeneratePractice, FreshMCQ } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 
 interface QuizMCQ {
@@ -21,6 +21,8 @@ export default function QuizPage() {
   const fromConvId = searchParams.get("from");
   const countParam = searchParams.get("count");
   const questionLimit = countParam ? parseInt(countParam) : null;
+  const freshMode = searchParams.get("fresh") === "true";
+  const freshTopic = searchParams.get("topic") ?? "";
   const backHref = fromConvId ? `/coach/${fromConvId}` : `/results/${lectureId}`;
 
   const [questions, setQuestions] = useState<QuizMCQ[]>([]);
@@ -35,14 +37,42 @@ export default function QuizPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
-    getResults(lectureId)
-      .then(res => {
-        const all: QuizMCQ[] = res.data.mcqs || [];
-        setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
-      })
-      .catch(() => router.push(`/results/${lectureId}`))
-      .finally(() => setLoading(false));
-  }, [lectureId, router]);
+
+    if (freshMode && freshTopic) {
+      // Generate brand-new questions via AI — never reuses stored ones
+      const count = questionLimit ?? 5;
+      coachGeneratePractice(freshTopic, count)
+        .then(res => {
+          const qs: QuizMCQ[] = (res.data.questions as FreshMCQ[]).map(q => ({
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation,
+            topic: q.topic ?? freshTopic,
+          }));
+          setQuestions(qs);
+        })
+        .catch(() => {
+          // Fall back to stored questions if generation fails
+          getResults(lectureId)
+            .then(res => {
+              const all: QuizMCQ[] = res.data.mcqs || [];
+              setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
+            })
+            .catch(() => router.push(`/results/${lectureId}`));
+        })
+        .finally(() => setLoading(false));
+    } else {
+      getResults(lectureId)
+        .then(res => {
+          const all: QuizMCQ[] = res.data.mcqs || [];
+          setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
+        })
+        .catch(() => router.push(`/results/${lectureId}`))
+        .finally(() => setLoading(false));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lectureId, router, freshMode, freshTopic]);
 
   // Per-question timer — resets on each new question, stops on reveal
   useEffect(() => {
@@ -62,11 +92,12 @@ export default function QuizPage() {
     if (phase === "result" && fromConvId) {
       const timer = setTimeout(() => {
         const pct = Math.round((score / questions.length) * 100);
-        router.push(`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}`);
+        const topicParam = freshTopic ? `&quiz_topic=${encodeURIComponent(freshTopic)}` : "";
+        router.push(`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}${topicParam}`);
       }, 2000); // 2 second delay to show results
       return () => clearTimeout(timer);
     }
-  }, [phase, fromConvId, score, questions.length, router]);
+  }, [phase, fromConvId, score, questions.length, router, freshTopic]);
 
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;

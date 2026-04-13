@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, DateTime, Text, Float, UniqueConstraint
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.db.database import Base
@@ -7,6 +7,10 @@ from app.db.database import Base
 
 def _uuid() -> str:
     return str(uuid4())
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class StudentMemory(Base):
@@ -24,9 +28,9 @@ class StudentMemory(Base):
     type             = Column(String(50), default="context", nullable=False)  # identity|goal|context|behavior|emotional
     importance       = Column(Float, default=0.5, nullable=False)             # 0.0 → 1.0
     reason           = Column(Text, nullable=True)                            # why the AI saved this
-    created_at       = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    last_accessed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at       = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    last_accessed_at = Column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("student_id", "key", name="uq_student_memory_key"),

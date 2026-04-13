@@ -1,63 +1,75 @@
 """
-AI Tools — persistent memory and future tool endpoints the AI can trigger.
-
-The AI signals tool use by including special fields in its JSON response.
-The coach endpoint (`/api/v1/coach/conversations/{id}/messages`) detects
-these fields and calls the relevant tool functions here automatically.
-
-Current tools:
-  save_memory   — upsert a personal fact about the student
-  delete_memory — remove a saved fact
-
-Student-facing REST endpoints (for UI display / management):
-  GET    /api/v1/ai-tools/memory        list all saved memories
-  DELETE /api/v1/ai-tools/memory/{key}  delete a memory by key
+AI Tools API - Memory management endpoints for persistent student context.
 """
-
+from typing import List
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
+from pydantic import BaseModel, Field
 
 from app.db.database import get_db
 from app.api.deps import get_current_user
 from app.models.models import User
 from app.models.ai_tools import StudentMemory
 
+
 router = APIRouter(prefix="/api/v1/ai-tools", tags=["ai-tools"])
 
 
-# ── Internal tool functions (called by coach.py, not the student) ─────────────
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+class MemorySaveRequest(BaseModel):
+    key: str = Field(..., min_length=1, max_length=100, description="Unique identifier (snake_case)")
+    label: str = Field(..., min_length=1, max_length=200, description="Human-readable label")
+    value: str = Field(..., min_length=1, description="The fact to store")
+    type: str = Field(default="context", description="identity|goal|context|behavior|emotional")
+    importance: float = Field(default=0.5, ge=0.0, le=1.0, description="Importance score 0.0-1.0")
+    reason: str | None = Field(default=None, description="Why this memory is worth saving")
+
+
+class MemoryOut(BaseModel):
+    id: str
+    key: str
+    label: str
+    value: str
+    type: str
+    importance: float
+    reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    last_accessed_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── Helper Function ───────────────────────────────────────────────────────────
 
 def tool_save_memory(
-    student_id: int,
+    student_id: str,
     key: str,
     label: str,
     value: str,
     db: Session,
-    *,
     type: str = "context",
     importance: float = 0.5,
     reason: str | None = None,
-) -> dict:
+) -> StudentMemory:
     """
-    Upsert a memory entry. If the key already exists, update all fields.
-    Returns the saved record as a dict.
+    Save or update a memory for a student.
+    Used by AI coach to persist facts across conversations.
     """
-    key = key.strip().lower().replace(" ", "_")[:100]
-    label = label.strip()[:200]
-    value = str(value).strip()
-    type = type if type in ("identity", "goal", "context", "behavior", "emotional") else "context"
-    importance = max(0.0, min(1.0, float(importance)))
     now = datetime.now(timezone.utc)
-
+    
+    # Check if memory already exists
     existing = db.query(StudentMemory).filter(
         StudentMemory.student_id == student_id,
         StudentMemory.key == key,
     ).first()
-
+    
     if existing:
+        # Update existing memory
         existing.label = label
         existing.value = value
         existing.type = type
@@ -65,8 +77,12 @@ def tool_save_memory(
         existing.reason = reason
         existing.updated_at = now
         existing.last_accessed_at = now
+        db.commit()
+        db.refresh(existing)
+        return existing
     else:
-        existing = StudentMemory(
+        # Create new memory
+        memory = StudentMemory(
             student_id=student_id,
             key=key,
             label=label,
@@ -74,74 +90,155 @@ def tool_save_memory(
             type=type,
             importance=importance,
             reason=reason,
+            created_at=now,
+            updated_at=now,
+            last_accessed_at=now,
         )
-        db.add(existing)
-
-    db.commit()
-    db.refresh(existing)
-    return _serialize(existing)
-
-
-def tool_delete_memory(student_id: int, key: str, db: Session) -> bool:
-    """Delete a memory by key. Returns True if deleted, False if not found."""
-    key = key.strip().lower().replace(" ", "_")[:100]
-    row = db.query(StudentMemory).filter(
-        StudentMemory.student_id == student_id,
-        StudentMemory.key == key,
-    ).first()
-    if not row:
-        return False
-    db.delete(row)
-    db.commit()
-    return True
+        db.add(memory)
+        db.commit()
+        db.refresh(memory)
+        return memory
 
 
-def get_all_memories(student_id: int, db: Session) -> list[dict]:
-    """Load all memories for a student — used by _build_student_context."""
-    rows = (
-        db.query(StudentMemory)
-        .filter(StudentMemory.student_id == student_id)
-        .order_by(StudentMemory.updated_at.desc())
-        .all()
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.post("/memory", response_model=MemoryOut, status_code=status.HTTP_201_CREATED)
+def save_memory(
+    body: MemorySaveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Save or update a memory for the current user.
+    If a memory with the same key exists, it will be updated.
+    """
+    memory = tool_save_memory(
+        student_id=current_user.id,
+        key=body.key,
+        label=body.label,
+        value=body.value,
+        db=db,
+        type=body.type,
+        importance=body.importance,
+        reason=body.reason,
     )
-    return [_serialize(r) for r in rows]
+    return memory
 
 
-# ── Student-facing REST endpoints ─────────────────────────────────────────────
-
-@router.get("/memory")
+@router.get("/memory", response_model=List[MemoryOut])
 def list_memories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return all memories Sage has saved about this student."""
-    return get_all_memories(current_user.id, db)
+    """
+    List all memories for the current user, ordered by importance (descending).
+    """
+    memories = (
+        db.query(StudentMemory)
+        .filter(StudentMemory.student_id == current_user.id)
+        .order_by(StudentMemory.importance.desc(), StudentMemory.updated_at.desc())
+        .all()
+    )
+    
+    # Update last_accessed_at for all retrieved memories
+    now = datetime.now(timezone.utc)
+    for memory in memories:
+        memory.last_accessed_at = now
+    db.commit()
+    
+    return memories
 
 
-@router.delete("/memory/{key}")
+@router.get("/memory/{key}", response_model=MemoryOut)
+def get_memory(
+    key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get a specific memory by key.
+    """
+    memory = db.query(StudentMemory).filter(
+        StudentMemory.student_id == current_user.id,
+        StudentMemory.key == key,
+    ).first()
+    
+    if not memory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory with key '{key}' not found",
+        )
+    
+    # Update last_accessed_at
+    memory.last_accessed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(memory)
+    
+    return memory
+
+
+@router.delete("/memory/{key}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_memory(
     key: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Let the student delete a memory entry."""
-    deleted = tool_delete_memory(current_user.id, key, db)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    return {"status": "deleted", "key": key}
+    """
+    Delete a specific memory by key.
+    """
+    memory = db.query(StudentMemory).filter(
+        StudentMemory.student_id == current_user.id,
+        StudentMemory.key == key,
+    ).first()
+    
+    if not memory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory with key '{key}' not found",
+        )
+    
+    db.delete(memory)
+    db.commit()
+    return None
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+@router.delete("/memory", status_code=status.HTTP_204_NO_CONTENT)
+def clear_all_memories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Delete all memories for the current user.
+    """
+    db.query(StudentMemory).filter(
+        StudentMemory.student_id == current_user.id
+    ).delete()
+    db.commit()
+    return None
 
-def _serialize(m: StudentMemory) -> dict:
-    return {
-        "key":              m.key,
-        "label":            m.label,
-        "value":            m.value,
-        "type":             m.type,
-        "importance":       m.importance,
-        "reason":           m.reason,
-        "updated_at":       m.updated_at.isoformat(),
-        "last_accessed_at": m.last_accessed_at.isoformat(),
-    }
 
+# ── Internal helper (not an endpoint) ────────────────────────────────────────
+
+def get_all_memories(student_id: str, db: Session) -> list[dict]:
+    """
+    Return all memories for a student as plain dicts, ordered by importance.
+    Used by _build_student_context in performance.py to inject facts into
+    the AI system prompt without going through the HTTP layer.
+    """
+    memories = (
+        db.query(StudentMemory)
+        .filter(StudentMemory.student_id == student_id)
+        .order_by(StudentMemory.importance.desc(), StudentMemory.updated_at.desc())
+        .all()
+    )
+    return [
+        {
+            "key": m.key,
+            "label": m.label,
+            "value": m.value,
+            "type": m.type,
+            "importance": m.importance,
+            "reason": m.reason,
+        }
+        for m in memories
+    ]

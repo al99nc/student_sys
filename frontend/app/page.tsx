@@ -1,20 +1,14 @@
-"use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+// Server component — rendered to static HTML, zero client JS hydration.
+// The only client behaviour (auth redirect) is isolated in <AuthRedirect />.
 import Link from "next/link";
+import { AuthRedirect } from "./auth-redirect";
 
 export default function Home() {
-  const router = useRouter();
-
-  useEffect(() => {
-    if (isAuthenticated()) {
-      router.push("/dashboard");
-    }
-  }, [router]);
-
   return (
     <div className="relative min-h-screen text-on-surface overflow-x-hidden" style={{ backgroundColor: "#0D0F1C", backgroundImage: "radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px)", backgroundSize: "32px 32px" }}>
+      {/* Auth redirect runs client-side without blocking server render */}
+      <AuthRedirect />
+
       <div className="grain-overlay" />
 
       {/* Top Nav */}
@@ -34,8 +28,8 @@ export default function Home() {
       </header>
 
       <main className="relative pt-28 sm:pt-32 pb-28 md:pb-24 px-4 sm:px-6 overflow-hidden">
-        {/* Hero glow */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-container/20 rounded-full blur-[120px] -z-10 animate-pulse pointer-events-none" />
+        {/* Hero glow — decorative, no interaction needed */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-container/20 rounded-full blur-[120px] -z-10 pointer-events-none" />
 
         {/* Hero */}
         <section className="max-w-6xl mx-auto text-center mb-32">
@@ -68,20 +62,34 @@ export default function Home() {
         {/* Features grid */}
         <section className="max-w-7xl mx-auto mb-32">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[
-              { icon: "quiz", color: "primary-container", glow: "rgba(123,47,255,0.3)", title: "AI-Generated MCQs", desc: "Instant multiple-choice questions extracted directly from your course material context." },
-              { icon: "auto_awesome", color: "secondary-container", glow: "rgba(0,210,253,0.3)", title: "Smart Summaries", desc: "Condense 2-hour lectures into 10-minute high-yield reading modules with key takeaways." },
-              { icon: "style", color: "primary-container", glow: "rgba(123,47,255,0.3)", title: "Flashcard Decks", desc: "Automatic Anki-style decks synced across all your devices for spaced-repetition learning." },
-              { icon: "insights", color: "secondary-container", glow: "rgba(0,210,253,0.3)", title: "Progress Analytics", desc: "Visual heatmaps and performance data to identify exactly where you need more focus." },
-            ].map((f) => (
-              <div key={f.title} className="glass-panel border border-outline-variant/15 p-5 sm:p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
-                <div className={`w-12 h-12 rounded-lg bg-${f.color}/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform`} style={{ boxShadow: `0 0 20px ${f.glow}` }}>
-                  <span className={`material-symbols-outlined text-${f.color === "primary-container" ? "primary" : "secondary"}`}>{f.icon}</span>
-                </div>
-                <h3 className="text-white font-bold text-xl mb-3">{f.title}</h3>
-                <p className="text-on-surface-variant text-sm leading-relaxed">{f.desc}</p>
+            <div className="glass-panel border border-outline-variant/15 p-5 sm:p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
+              <div className="w-12 h-12 rounded-lg bg-primary-container/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform" style={{ boxShadow: "0 0 20px rgba(123,47,255,0.3)" }}>
+                <span className="material-symbols-outlined text-primary">quiz</span>
               </div>
-            ))}
+              <h3 className="text-white font-bold text-xl mb-3">AI-Generated MCQs</h3>
+              <p className="text-on-surface-variant text-sm leading-relaxed">Instant multiple-choice questions extracted directly from your course material context.</p>
+            </div>
+            <div className="glass-panel border border-outline-variant/15 p-5 sm:p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
+              <div className="w-12 h-12 rounded-lg bg-secondary-container/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform" style={{ boxShadow: "0 0 20px rgba(0,210,253,0.3)" }}>
+                <span className="material-symbols-outlined text-secondary">auto_awesome</span>
+              </div>
+              <h3 className="text-white font-bold text-xl mb-3">Smart Summaries</h3>
+              <p className="text-on-surface-variant text-sm leading-relaxed">Condense 2-hour lectures into 10-minute high-yield reading modules with key takeaways.</p>
+            </div>
+            <div className="glass-panel border border-outline-variant/15 p-5 sm:p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
+              <div className="w-12 h-12 rounded-lg bg-primary-container/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform" style={{ boxShadow: "0 0 20px rgba(123,47,255,0.3)" }}>
+                <span className="material-symbols-outlined text-primary">style</span>
+              </div>
+              <h3 className="text-white font-bold text-xl mb-3">Flashcard Decks</h3>
+              <p className="text-on-surface-variant text-sm leading-relaxed">Automatic Anki-style decks synced across all your devices for spaced-repetition learning.</p>
+            </div>
+            <div className="glass-panel border border-outline-variant/15 p-5 sm:p-8 rounded-xl hover:-translate-y-1 transition-all duration-300 group">
+              <div className="w-12 h-12 rounded-lg bg-secondary-container/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform" style={{ boxShadow: "0 0 20px rgba(0,210,253,0.3)" }}>
+                <span className="material-symbols-outlined text-secondary">insights</span>
+              </div>
+              <h3 className="text-white font-bold text-xl mb-3">Progress Analytics</h3>
+              <p className="text-on-surface-variant text-sm leading-relaxed">Visual heatmaps and performance data to identify exactly where you need more focus.</p>
+            </div>
           </div>
         </section>
 

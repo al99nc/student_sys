@@ -5,13 +5,15 @@ from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from sqlalchemy import text, exc as sa_exc
-from app.db.database import Base, engine
+from app.db.database import Base, engine, SessionLocal
+from app.core.config import settings
 from app.api import auth, lectures, telegram
 from app.api.telegram import bot_router
 from app.api import performance
 from app.api import coach as coach_api
 from app.api import ai_tools
 from app.core.limiter import limiter
+from app.api import analytics
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 # Import models so Base.metadata includes them for create_all
@@ -96,15 +98,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Security headers
 app.add_middleware(SecurityHeadersMiddleware)
 
-# CORS — explicit methods and headers only
+# CORS — origins loaded from CORS_ORIGINS env var (comma-separated).
+# Set CORS_ORIGINS in .env or the environment; never hardcode production IPs here.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://84.235.244.210:3000",
-        "https://themcq.xyz",
-        "https://www.themcq.xyz",
-    ],
+    allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
@@ -117,6 +115,7 @@ app.include_router(bot_router)
 app.include_router(performance.router)
 app.include_router(coach_api.router)
 app.include_router(ai_tools.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")
@@ -126,4 +125,14 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Liveness + DB connectivity check."""
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        db_status = "ok"
+    except Exception as exc:
+        logger.error("Health check DB query failed: %s", exc)
+        db_status = "error"
+    finally:
+        db.close()
+    return {"status": "ok" if db_status == "ok" else "degraded", "db": db_status}
