@@ -1,17 +1,21 @@
-"use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+"use client"
 
-/**
- * Tiny client component — only responsibility is redirecting logged-in users
- * to /dashboard. Kept separate so the landing page itself can be a server
- * component (renders as static HTML, no JS hydration overhead).
- */
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+
 export function AuthRedirect() {
-  const router = useRouter();
+  const router = useRouter()
+  
   useEffect(() => {
-    if (isAuthenticated()) router.push("/dashboard");
-  }, [router]);
-  return null;
+    const isAuthenticated = () => {
+      if (typeof window === 'undefined') return false
+      return !!localStorage.getItem('auth_token')
+    }
+    
+    if (isAuthenticated()) {
+      router.push("/dashboard")
+    }
+  }, [router])
+  
+  return null
 }

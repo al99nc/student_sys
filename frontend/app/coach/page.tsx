@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { isAuthenticated } from "@/lib/auth";
@@ -36,9 +36,8 @@ interface AiMeta {
   urgency?: string;
   encouraging_note?: string | null;
   practice_document_id?: number | null;
-  practice_topic?: string | null;          // always present when there's a practice CTA
+  practice_topic?: string | null;
   practice_questions?: { id: string; document_id: number; topic: string; preview: string }[];
-  // Hard-data enrichments (not AI-generated)
   mastery_progress?: { topic: string; current: number; target: number } | null;
   topic_chain?: string[] | null;
   days_since_last?: number | null;
@@ -95,7 +94,7 @@ function urgencyColor(urgency?: string) {
   }
 }
 
-function isValid(value: any): boolean {
+function isValid(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
@@ -106,15 +105,24 @@ function isValid(value: any): boolean {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function CoachPage({ initialConvId }: { initialConvId?: string } = {}) {
+function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnConvId = initialConvId ?? searchParams.get("conv");
   const quizScore = searchParams.get("quiz_score");
   const quizTotal = searchParams.get("quiz_total");
   const quizPct   = searchParams.get("quiz_pct");
-  const quizTopic = searchParams.get("quiz_topic");   // topic practiced in fresh-mode quiz
+  const quizTopic = searchParams.get("quiz_topic");
   const autoQ     = searchParams.get("q");
+
+  // Mobile detection (SSR-safe: default false = desktop render first)
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   // Sidebar state
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -132,7 +140,6 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   // Input state
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
 
@@ -154,7 +161,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     }
   }, []);
 
-  // Sync URL to active conversation (no page reload)
+  // Sync URL to active conversation
   useEffect(() => {
     if (typeof window === "undefined") return;
     const target = activeId ? `/coach/${activeId}` : "/coach";
@@ -163,13 +170,14 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     }
   }, [activeId]);
 
-  // Global keypress → focus textarea
+  // Global keypress → focus textarea (desktop only)
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
+      if (window.innerWidth < 1024) return; // skip on mobile
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key.length !== 1) return; // skip non-printable (arrows, F-keys, etc.)
+      if (e.key.length !== 1) return;
       e.preventDefault();
       textareaRef.current?.focus();
       setInput(prev => prev + e.key);
@@ -183,7 +191,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+    ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
   }, [input]);
 
   // ── Search ──────────────────────────────────────────────────────────────────
@@ -219,52 +227,42 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     }
   }, []);
 
-  // ── Init (placed after loadConversation to avoid temporal dead zone) ──────────
+  // ── Init ────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
-    // Also detect UUID in the URL path for direct navigation (e.g. /coach/uuid)
     const pathSegments = typeof window !== "undefined" ? window.location.pathname.split("/") : [];
-    const pathConvId = pathSegments[2] || null;  // /coach/[id]
+    const pathConvId = pathSegments[2] || null;
     const targetConvId = returnConvId || pathConvId;
-    
-    // Debug logging for quiz params
+
     if (quizScore || quizTotal) {
-      console.log(`[Coach] Quiz params detected: score=${quizScore}/${quizTotal} (${quizPct}%)`);
+      console.log(`[Coach] Quiz params: score=${quizScore}/${quizTotal} (${quizPct}%)`);
     }
-    
+
     coachListConversations()
       .then(async res => {
         setConversations(res.data);
         if (targetConvId) {
-          console.log(`[Coach] Loading conversation: ${targetConvId}`);
           await loadConversation(targetConvId);
-          // Queue quiz result message — sent once activeId state settles (see effect below)
           if (quizScore !== null && quizTotal !== null) {
             const pct = quizPct ?? Math.round((parseInt(quizScore) / parseInt(quizTotal)) * 100);
             const topicPart = quizTopic ? ` on ${quizTopic}` : "";
             const msg = `I just finished the practice quiz${topicPart} and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`;
-            console.log(`[Coach] Setting pending message: ${msg}`);
             setPendingAutoMsg(msg);
           }
         } else if (autoQ) {
-          // ?q= param: auto-send a message into a fresh conversation
           setPendingAutoMsg(autoQ);
         }
       })
-      .catch((err) => {
-        console.error("[Coach] Failed to load conversations:", err);
-      });
+      .catch((err) => console.error("[Coach] Failed to load conversations:", err));
   }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct, autoQ]);
 
-  // ── Auto-send pending quiz result once activeId is ready ─────────────────────
+  // ── Auto-send pending quiz result ────────────────────────────────────────────
+
   useEffect(() => {
     if (!pendingAutoMsg || !activeId || sending) return;
-    console.log(`[Coach] Auto-sending pending message with activeId=${activeId}`);
     const msg = pendingAutoMsg;
     setPendingAutoMsg(null);
-    // If this auto-message is a quiz result, pass structured data so the backend
-    // can save it to memory automatically (score + topic).
     const qr: QuizResult | undefined =
       quizScore && quizTotal && quizTopic
         ? { topic: quizTopic, score: parseInt(quizScore), total: parseInt(quizTotal) }
@@ -276,6 +274,7 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   // ── New chat ─────────────────────────────────────────────────────────────────
 
   const handleNewChat = async () => {
+    if (isMobile) setSidebarOpen(false);
     try {
       const res = await coachCreateConversation();
       const newConv: Conversation = res.data;
@@ -311,20 +310,18 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
   };
 
   const removeImage = () => {
-    setImageFile(null);
     setImagePreview(null);
     setImageMime(null);
   };
 
   const applyImageFile = (file: File) => {
-    setImageFile(file);
     setImageMime(file.type);
     const reader = new FileReader();
     reader.onload = (ev) => setImagePreview(ev.target?.result as string);
     reader.readAsDataURL(file);
   };
 
-  // Paste image from clipboard (Ctrl+V / Cmd+V)
+  // Paste image from clipboard
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -354,7 +351,6 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     if (overrideText === undefined) { setInput(""); removeImage(); } else { setInput(""); }
     setSending(true);
 
-    // Ensure we have a conversation
     let convId = activeId;
     if (!convId) {
       try {
@@ -368,7 +364,6 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
       }
     }
 
-    // Optimistic user message
     const optimisticUser: Message = {
       id: `tmp-${Date.now()}`,
       role: "user",
@@ -379,7 +374,6 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     };
     setMessages(prev => [...prev, optimisticUser]);
 
-    // Thinking placeholder
     const thinkingId = `thinking-${Date.now()}`;
     const thinkingMsg: Message = {
       id: thinkingId,
@@ -399,7 +393,6 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
           .concat([user_message, assistant_message])
       );
 
-      // Update title + conversation list
       if (assistant_message) {
         setConversations(prev =>
           prev.map(c =>
@@ -431,117 +424,337 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
     }
   };
 
-  // ── Displayed conversations (search vs full list) ────────────────────────────
+  // ── Displayed conversations ──────────────────────────────────────────────────
 
   const displayedConvs = searchResults ?? conversations;
   const grouped = groupByDate(displayedConvs);
+  const hasContent = input.trim() || imagePreview;
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#0d0f1c", color: "#e2e8f0" }}>
+    <div
+      className="chat-root"
+      style={{ backgroundColor: "#0d0f1c", color: "#e2e8f0" }}
+    >
+
+      {/* ── MOBILE BACKDROP ─────────────────────────────────────────────────── */}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 40,
+            background: "rgba(0,0,0,0.65)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
+          }}
+        />
+      )}
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────────────── */}
       <aside
-        className="flex-shrink-0 flex flex-col transition-all duration-200"
-        style={{
-          width: sidebarOpen ? 260 : 0,
-          minWidth: sidebarOpen ? 260 : 0,
-          overflow: "hidden",
-          backgroundColor: "#0b0d1a",
-          borderRight: "1px solid rgba(255,255,255,0.06)",
-        }}
+        style={
+          isMobile
+            ? {
+                position: "fixed",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                zIndex: 50,
+                width: 300,
+                transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+                transition: "transform 0.3s cubic-bezier(0.4,0,0.2,1)",
+                display: "flex",
+                flexDirection: "column",
+                backgroundColor: "#080a14",
+                borderRight: "1px solid rgba(255,255,255,0.07)",
+                boxShadow: sidebarOpen ? "8px 0 40px rgba(0,0,0,0.6)" : "none",
+              }
+            : {
+                flexShrink: 0,
+                display: "flex",
+                flexDirection: "column",
+                width: sidebarOpen ? 260 : 0,
+                minWidth: sidebarOpen ? 260 : 0,
+                overflow: "hidden",
+                transition: "width 0.22s ease, min-width 0.22s ease",
+                backgroundColor: "#080a14",
+                borderRight: "1px solid rgba(255,255,255,0.06)",
+              }
+        }
       >
-        <div style={{ width: 260 }} className="flex flex-col h-full">
-          {/* Logo + toggle */}
-          <div className="flex items-center justify-between px-4 py-5">
-            <Link href="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-white text-xs flex-shrink-0" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
+        {/* Inner content — fixed 300px wide to prevent layout reflow during animation */}
+        <div
+          style={{
+            width: isMobile ? "100%" : 260,
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            paddingTop: isMobile ? "env(safe-area-inset-top)" : 0,
+          }}
+        >
+          {/* Sidebar header */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "16px 16px 8px",
+              borderBottom: "1px solid rgba(255,255,255,0.05)",
+            }}
+          >
+            <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 10,
+                  background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  fontSize: 11,
+                  fontWeight: 900,
+                  color: "white",
+                }}
+              >
                 cQ
               </div>
-              <span className="text-white font-bold text-sm">CortexQ</span>
+              <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>CortexQ</span>
             </Link>
+            {isMobile && (
+              <button
+                onClick={() => setSidebarOpen(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+              </button>
+            )}
           </div>
 
           {/* New chat button */}
-          <div className="px-3 mb-3">
+          <div style={{ padding: "12px 12px 8px" }}>
             <button
               onClick={handleNewChat}
-              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "rgba(123,47,255,0.15)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 14px",
+                borderRadius: 12,
+                background: "linear-gradient(135deg, rgba(123,47,255,0.18), rgba(0,210,253,0.09))",
+                border: "1px solid rgba(123,47,255,0.28)",
+                color: "#c4b5fd",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "opacity 0.15s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = "0.8")}
+              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
             >
-              <span className="material-symbols-outlined text-[16px]" style={{ color: "#7B2FFF" }}>add</span>
-              New chat
+              <span className="material-symbols-outlined" style={{ fontSize: 17, color: "#a78bfa" }}>add</span>
+              New conversation
             </button>
           </div>
 
           {/* Search */}
-          <div className="px-3 mb-3">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span className="material-symbols-outlined text-[16px]" style={{ color: "#4a5280" }}>search</span>
+          <div style={{ padding: "4px 12px 8px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "9px 12px",
+                borderRadius: 10,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#3a3f60", flexShrink: 0 }}>search</span>
               <input
                 value={searchQuery}
                 onChange={e => handleSearchChange(e.target.value)}
-                placeholder="Search conversations…"
-                className="flex-1 bg-transparent text-xs text-white placeholder:text-slate-600 outline-none"
+                placeholder="Search…"
+                style={{
+                  flex: 1,
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  color: "white",
+                  fontSize: 13,
+                }}
               />
               {searchQuery && (
-                <button onClick={() => handleSearchChange("")} className="text-slate-600 hover:text-white">
-                  <span className="material-symbols-outlined text-[14px]">close</span>
+                <button
+                  onClick={() => handleSearchChange("")}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#4a5280", padding: 0 }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
                 </button>
               )}
             </div>
           </div>
 
           {/* Conversation list */}
-          <div className="flex-1 overflow-y-auto px-2 space-y-4 pb-4">
+          <div
+            className="momentum-scroll"
+            style={{ flex: 1, padding: "0 8px 8px", overflowX: "hidden" }}
+          >
             {searchQuery && searchResults?.length === 0 && (
-              <p className="text-xs px-3 py-2" style={{ color: "#4a5280" }}>No results for "{searchQuery}"</p>
+              <p style={{ color: "#3a3f60", fontSize: 12, padding: "8px 12px" }}>
+                No results for &ldquo;{searchQuery}&rdquo;
+              </p>
             )}
+
             {grouped.map(group => (
-              <div key={group.label}>
-                <p className="text-[10px] font-bold uppercase tracking-widest px-3 mb-1" style={{ color: "#3a3f60" }}>{group.label}</p>
+              <div key={group.label} style={{ marginBottom: 8 }}>
+                <p
+                  style={{
+                    color: "#2a2f50",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    padding: "6px 12px 4px",
+                  }}
+                >
+                  {group.label}
+                </p>
                 {group.items.map(conv => (
                   <div
                     key={conv.id}
-                    onClick={() => loadConversation(conv.id)}
-                    className="group relative flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-all"
-                    style={{
-                      background: activeId === conv.id ? "rgba(123,47,255,0.15)" : "transparent",
-                      borderLeft: activeId === conv.id ? "2px solid #7B2FFF" : "2px solid transparent",
+                    onClick={() => {
+                      loadConversation(conv.id);
+                      if (isMobile) setSidebarOpen(false);
                     }}
-                    onMouseEnter={e => { if (activeId !== conv.id) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
-                    onMouseLeave={e => { if (activeId !== conv.id) e.currentTarget.style.background = "transparent"; }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "9px 10px",
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      background:
+                        activeId === conv.id
+                          ? "rgba(123,47,255,0.14)"
+                          : "transparent",
+                      borderLeft:
+                        activeId === conv.id
+                          ? "2px solid #7B2FFF"
+                          : "2px solid transparent",
+                      transition: "background 0.15s",
+                      position: "relative",
+                    }}
+                    onMouseEnter={e => {
+                      if (activeId !== conv.id)
+                        (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.03)";
+                    }}
+                    onMouseLeave={e => {
+                      if (activeId !== conv.id)
+                        (e.currentTarget as HTMLDivElement).style.background = "transparent";
+                    }}
                   >
-                    <span className="material-symbols-outlined text-[15px] flex-shrink-0" style={{ color: activeId === conv.id ? "#7B2FFF" : "#4a5280" }}>chat</span>
-                    <p className="text-xs text-white truncate flex-1 font-medium">{conv.title}</p>
+                    <span
+                      className="material-symbols-outlined"
+                      style={{
+                        fontSize: 15,
+                        flexShrink: 0,
+                        color: activeId === conv.id ? "#7B2FFF" : "#3a3f60",
+                      }}
+                    >
+                      chat
+                    </span>
+                    <p
+                      style={{
+                        flex: 1,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: activeId === conv.id ? "#e2e8f0" : "#94a3b8",
+                      }}
+                    >
+                      {conv.title}
+                    </p>
                     <button
                       onClick={e => handleDelete(conv.id, e)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                      style={{ color: "#4a5280" }}
-                      onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-                      onMouseLeave={e => (e.currentTarget.style.color = "#4a5280")}
+                      className="group-hover:opacity-100"
+                      style={{
+                        opacity: 0,
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "#4a5280",
+                        padding: "2px",
+                        flexShrink: 0,
+                        transition: "color 0.15s",
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.opacity = "1";
+                        e.currentTarget.style.color = "#f87171";
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.opacity = "0";
+                        e.currentTarget.style.color = "#4a5280";
+                      }}
                     >
-                      <span className="material-symbols-outlined text-[14px]">delete</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: 14 }}>delete</span>
                     </button>
                   </div>
                 ))}
               </div>
             ))}
+
             {conversations.length === 0 && !searchQuery && (
-              <p className="text-xs px-3 py-2" style={{ color: "#4a5280" }}>No conversations yet. Start a new chat!</p>
+              <p style={{ color: "#2a2f50", fontSize: 12, padding: "12px" }}>
+                No conversations yet. Start a new chat!
+              </p>
             )}
           </div>
 
           {/* Dashboard link */}
-          <div className="px-3 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-            <Link href="/dashboard" className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-colors" style={{ color: "#4a5280" }}
-              onMouseEnter={e => (e.currentTarget.style.color = "#e2e8f0")}
-              onMouseLeave={e => (e.currentTarget.style.color = "#4a5280")}
+          <div
+            style={{
+              padding: "12px",
+              borderTop: "1px solid rgba(255,255,255,0.05)",
+              paddingBottom: "max(12px, env(safe-area-inset-bottom))",
+            }}
+          >
+            <Link
+              href="/dashboard"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "9px 12px",
+                borderRadius: 10,
+                color: "#3a3f60",
+                fontSize: 13,
+                textDecoration: "none",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = "#94a3b8")}
+              onMouseLeave={e => (e.currentTarget.style.color = "#3a3f60")}
             >
-              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>arrow_back</span>
               Back to Dashboard
             </Link>
           </div>
@@ -549,75 +762,259 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
       </aside>
 
       {/* ── MAIN AREA ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
 
-        {/* Header */}
-        <header className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "#0d0f1c" }}>
+        {/* ── HEADER ──────────────────────────────────────────────────────── */}
+        <header
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "0 12px",
+            height: 56,
+            paddingTop: "env(safe-area-inset-top)",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            background: "#0d0f1c",
+            zIndex: 10,
+          }}
+        >
+          {/* Menu button */}
           <button
             onClick={() => setSidebarOpen(p => !p)}
-            className="p-1.5 rounded-lg transition-colors"
-            style={{ color: "#4a5280" }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#e2e8f0")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#4a5280")}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: "#4a5280",
+              transition: "color 0.15s, background 0.15s",
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = "#e2e8f0";
+              e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = "#4a5280";
+              e.currentTarget.style.background = "transparent";
+            }}
           >
-            <span className="material-symbols-outlined text-[20px]">menu</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>menu</span>
           </button>
 
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
-              <span className="material-symbols-outlined text-[14px] text-white">smart_toy</span>
+          {/* Coach identity */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 9,
+                background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                boxShadow: "0 0 14px rgba(123,47,255,0.35)",
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 15, color: "white" }}>smart_toy</span>
             </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-white truncate">{activeId ? convTitle : "CortexQ Coach"}</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "#4a5280" }}>AI Advisor · Medical Study Coach</p>
+            <div style={{ minWidth: 0 }}>
+              <p
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "white",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.2,
+                }}
+              >
+                {activeId ? convTitle : "CortexQ Coach"}
+              </p>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.07em",
+                  textTransform: "uppercase",
+                  color: "#3a3f60",
+                  lineHeight: 1.2,
+                }}
+              >
+                AI Study Advisor
+              </p>
             </div>
           </div>
+
+          {/* New chat button */}
+          <button
+            onClick={handleNewChat}
+            title="New conversation"
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              background: "rgba(123,47,255,0.12)",
+              border: "1px solid rgba(123,47,255,0.22)",
+              cursor: "pointer",
+              color: "#a78bfa",
+              transition: "opacity 0.15s",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = "0.75")}
+            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>edit_square</span>
+          </button>
         </header>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
-          <div className="max-w-3xl mx-auto space-y-6">
+        {/* ── MESSAGES ────────────────────────────────────────────────────── */}
+        <div
+          className="momentum-scroll"
+          style={{ flex: 1, padding: "0" }}
+        >
+          <div
+            style={{
+              maxWidth: 700,
+              margin: "0 auto",
+              padding: "20px 16px 16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
 
             {/* Empty state */}
             {!activeId && messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full pt-24 space-y-6">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}>
-                  <span className="material-symbols-outlined text-[32px] text-white">smart_toy</span>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "48px 8px 32px",
+                  gap: 24,
+                }}
+              >
+                {/* Glowing icon */}
+                <div
+                  style={{
+                    width: 72,
+                    height: 72,
+                    borderRadius: 22,
+                    background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 8px 40px rgba(123,47,255,0.45), 0 0 0 1px rgba(123,47,255,0.2)",
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 36, color: "white" }}>smart_toy</span>
                 </div>
-                <div className="text-center space-y-2">
-                  <h2 className="text-2xl font-black text-white">What would you like to study?</h2>
-                  <p className="text-sm" style={{ color: "#4a5280" }}>I have full visibility into your performance data. Ask me anything.</p>
+
+                <div style={{ textAlign: "center" }}>
+                  <h2
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 800,
+                      color: "#e2e8f0",
+                      margin: "0 0 6px",
+                      letterSpacing: "-0.01em",
+                    }}
+                  >
+                    What would you like to study?
+                  </h2>
+                  <p style={{ fontSize: 13, color: "#3a4060", margin: 0, lineHeight: 1.5 }}>
+                    I have full visibility into your performance data.
+                  </p>
                 </div>
-                <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
+
+                {/* Suggestion grid */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                    width: "100%",
+                    maxWidth: 420,
+                  }}
+                >
                   {[
-                    "What are my weakest topics right now?",
-                    "Give me a 10-minute study plan",
-                    "How can I fix my overconfidence?",
-                    "Which topic should I practice first?",
-                  ].map(prompt => (
+                    { icon: "analytics", text: "What are my weakest topics right now?" },
+                    { icon: "event_note", text: "Give me a 10-minute study plan" },
+                    { icon: "psychology", text: "How can I fix my overconfidence?" },
+                    { icon: "priority_high", text: "Which topic should I practice first?" },
+                  ].map(({ icon, text }) => (
                     <button
-                      key={prompt}
-                      onClick={() => handleSend(prompt)}
-                      className="px-4 py-3 rounded-xl text-xs text-left transition-all"
-                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8" }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(123,47,255,0.4)"; e.currentTarget.style.color = "#e2e8f0"; }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#94a3b8"; }}
+                      key={text}
+                      onClick={() => handleSend(text)}
+                      style={{
+                        padding: "14px 14px",
+                        borderRadius: 14,
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.07)",
+                        color: "#64748b",
+                        fontSize: 12,
+                        textAlign: "left",
+                        lineHeight: 1.45,
+                        cursor: "pointer",
+                        transition: "all 0.18s",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.borderColor = "rgba(123,47,255,0.35)";
+                        e.currentTarget.style.background = "rgba(123,47,255,0.07)";
+                        e.currentTarget.style.color = "#c4b5fd";
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)";
+                        e.currentTarget.style.background = "rgba(255,255,255,0.03)";
+                        e.currentTarget.style.color = "#64748b";
+                      }}
                     >
-                      {prompt}
+                      <span
+                        className="material-symbols-outlined"
+                        style={{ fontSize: 18, color: "#4a5280" }}
+                      >
+                        {icon}
+                      </span>
+                      {text}
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Loading conversation */}
+            {/* Loading */}
             {loadingConv && (
-              <div className="flex justify-center pt-12">
-                <div className="w-6 h-6 rounded-full border-2 animate-spin" style={{ borderColor: "rgba(123,47,255,0.2)", borderTopColor: "#7B2FFF" }} />
+              <div style={{ display: "flex", justifyContent: "center", padding: "48px 0" }}>
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    border: "2px solid rgba(123,47,255,0.2)",
+                    borderTopColor: "#7B2FFF",
+                    animation: "spin 0.8s linear infinite",
+                  }}
+                />
               </div>
             )}
 
-            {/* Message list */}
+            {/* Messages */}
             {messages.map(msg => (
               <MessageBubble
                 key={msg.id}
@@ -627,102 +1024,262 @@ export default function CoachPage({ initialConvId }: { initialConvId?: string } 
               />
             ))}
 
-            <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} style={{ height: 4 }} />
           </div>
         </div>
 
-        {/* Input area */}
-        <div className="flex-shrink-0 px-4 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-          <div className="max-w-3xl mx-auto">
+        {/* ── INPUT AREA ──────────────────────────────────────────────────── */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "10px 16px",
+            paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            background: "#0d0f1c",
+          }}
+        >
+          <div style={{ maxWidth: 700, margin: "0 auto" }}>
 
             {/* Image preview */}
             {imagePreview && (
-              <div className="mb-3 relative inline-block">
+              <div style={{ marginBottom: 10, position: "relative", display: "inline-block" }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imagePreview} alt="attachment" className="h-20 rounded-xl object-cover" style={{ border: "1px solid rgba(255,255,255,0.1)" }} />
+                <img
+                  src={imagePreview}
+                  alt="attachment"
+                  style={{
+                    height: 72,
+                    borderRadius: 12,
+                    objectFit: "cover",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                />
                 <button
                   onClick={removeImage}
-                  className="absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center text-white"
-                  style={{ background: "#f87171" }}
+                  style={{
+                    position: "absolute",
+                    top: -8,
+                    right: -8,
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    background: "#f87171",
+                    border: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    color: "white",
+                  }}
                 >
-                  <span className="material-symbols-outlined text-[12px]">close</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 13 }}>close</span>
                 </button>
               </div>
             )}
 
-            <div className="flex items-end gap-2 rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              {/* Image attach */}
+            {/* Input pill */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                gap: 8,
+                padding: "8px 8px 8px 14px",
+                borderRadius: 26,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                transition: "border-color 0.18s",
+              }}
+              onFocus={() => {}}
+            >
+              {/* Attach */}
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex-shrink-0 p-1.5 rounded-lg transition-colors mb-0.5"
-                style={{ color: "#4a5280" }}
-                onMouseEnter={e => (e.currentTarget.style.color = "#e2e8f0")}
-                onMouseLeave={e => (e.currentTarget.style.color = "#4a5280")}
-                title="Attach image (or paste from clipboard)"
+                title="Attach image (or paste)"
+                style={{
+                  flexShrink: 0,
+                  width: 34,
+                  height: 34,
+                  borderRadius: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#3a3f60",
+                  marginBottom: 2,
+                  transition: "color 0.15s",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.color = "#7B2FFF")}
+                onMouseLeave={e => (e.currentTarget.style.color = "#3a3f60")}
               >
-                <span className="material-symbols-outlined text-[20px]">attach_file</span>
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>attach_file</span>
               </button>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                className="hidden"
+                style={{ display: "none" }}
                 onChange={handleFileChange}
               />
 
-              {/* Text input */}
+              {/* Textarea */}
               <textarea
                 ref={textareaRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask the coach anything… (Shift+Enter for new line)"
+                placeholder="Ask the coach anything…"
                 rows={1}
-                className="flex-1 bg-transparent text-sm text-white placeholder:text-slate-600 outline-none resize-none leading-relaxed"
-                style={{ maxHeight: 160 }}
+                style={{
+                  flex: 1,
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  resize: "none",
+                  color: "white",
+                  fontSize: 15,
+                  lineHeight: 1.5,
+                  maxHeight: 140,
+                  overflowY: "auto",
+                  padding: "7px 0",
+                  fontFamily: "inherit",
+                }}
               />
 
-              {/* Send */}
+              {/* Send — active when has content, Claude-style */}
               <button
                 onClick={() => handleSend()}
-                disabled={sending || (!input.trim() && !imagePreview)}
-                className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all disabled:opacity-40 mb-0.5"
-                style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)" }}
+                disabled={sending || !hasContent}
+                style={{
+                  flexShrink: 0,
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: hasContent
+                    ? "linear-gradient(135deg, #7B2FFF, #00D2FD)"
+                    : "rgba(255,255,255,0.07)",
+                  border: "none",
+                  cursor: hasContent ? "pointer" : "default",
+                  marginBottom: 2,
+                  transition: "all 0.2s",
+                  opacity: sending ? 0.7 : 1,
+                }}
               >
-                {sending
-                  ? <div className="w-3.5 h-3.5 rounded-full border-2 animate-spin" style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "white" }} />
-                  : <span className="material-symbols-outlined text-[16px] text-white">arrow_upward</span>
-                }
+                {sending ? (
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: "50%",
+                      border: "2px solid rgba(255,255,255,0.25)",
+                      borderTopColor: "white",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                ) : (
+                  <span
+                    className="material-symbols-outlined"
+                    style={{
+                      fontSize: 18,
+                      color: hasContent ? "white" : "#3a3f60",
+                      fontVariationSettings: "'FILL' 1",
+                    }}
+                  >
+                    arrow_upward
+                  </span>
+                )}
               </button>
             </div>
 
-            <p className="text-[10px] text-center mt-2" style={{ color: "#2a2f50" }}>
+            <p
+              style={{
+                fontSize: 10,
+                color: "#1e2238",
+                textAlign: "center",
+                marginTop: 8,
+              }}
+            >
               CortexQ Coach uses your real performance data — responses are specific to you.
             </p>
           </div>
         </div>
       </div>
+
+      {/* Spin animation for loading states */}
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes coach-bounce {
+          0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+          40% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes msg-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
 
-// ── MessageBubble component ───────────────────────────────────────────────────
+// ── MessageBubble ─────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: string | null; onQuickReply?: (text: string) => void }) {
+function MessageBubble({
+  msg,
+  convId,
+  onQuickReply,
+}: {
+  msg: Message;
+  convId?: string | null;
+  onQuickReply?: (text: string) => void;
+}) {
   const isUser = msg.role === "user";
   const isThinking = msg.content === "…";
   const meta = msg.ai_metadata;
 
+  // ── User bubble ──────────────────────────────────────────────────────────────
   if (isUser) {
     return (
-      <div className="flex justify-end gap-3">
-        <div className="max-w-xl">
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          paddingLeft: "12%",
+          animation: "msg-in 0.2s ease",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, maxWidth: "100%" }}>
           {msg.image_data && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={msg.image_data} alt="attachment" className="mb-2 rounded-xl max-h-64 object-contain" style={{ border: "1px solid rgba(255,255,255,0.1)" }} />
+            <img
+              src={msg.image_data}
+              alt="attachment"
+              style={{
+                maxHeight: 220,
+                borderRadius: 18,
+                objectFit: "contain",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            />
           )}
           {msg.content && (
-            <div className="px-4 py-3 rounded-2xl rounded-tr-sm text-sm" style={{ background: "rgba(123,47,255,0.25)", border: "1px solid rgba(123,47,255,0.3)", color: "#e2e8f0" }}>
+            <div
+              style={{
+                background: "rgba(123,47,255,0.24)",
+                border: "1px solid rgba(123,47,255,0.28)",
+                borderRadius: "18px 18px 4px 18px",
+                padding: "9px 13px",
+                color: "#e2e8f0",
+                fontSize: 14,
+                lineHeight: 1.5,
+                wordBreak: "break-word",
+              }}
+            >
               {msg.content}
             </div>
           )}
@@ -731,219 +1288,132 @@ function MessageBubble({ msg, convId, onQuickReply }: { msg: Message; convId?: s
     );
   }
 
-  const isStudyAction = isValid(meta?.action) && meta && meta.action && !["greeting", "off_topic"].includes(meta.action);
+  const isStudyAction =
+    isValid(meta?.action) && meta && meta.action && !["greeting", "off_topic"].includes(meta.action);
   const urgColor = urgencyColor(meta && isValid(meta.urgency) ? meta.urgency : undefined);
 
-  // Assistant message
+  // ── Assistant bubble ─────────────────────────────────────────────────────────
   return (
-    <div className="flex gap-3 group">
+    <div
+      style={{
+        display: "flex",
+        gap: 7,
+        paddingRight: "4%",
+        animation: "msg-in 0.2s ease",
+      }}
+    >
       {/* Avatar */}
       <div
-        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-1"
-        style={{ background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", boxShadow: "0 0 12px rgba(123,47,255,0.3)" }}
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: 7,
+          background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          marginTop: 3,
+        }}
       >
-        <span className="material-symbols-outlined text-[15px] text-white">smart_toy</span>
+        <span className="material-symbols-outlined" style={{ fontSize: 13, color: "white" }}>smart_toy</span>
       </div>
 
-      <div className="flex-1 min-w-0" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
 
-        {/* ── Thinking ── */}
+        {/* Thinking dots */}
         {isThinking ? (
           <div
-            className="flex items-center gap-1.5 px-4 py-3.5 rounded-2xl rounded-tl-sm w-fit"
-            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "10px 14px",
+              borderRadius: "4px 16px 16px 16px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              width: "fit-content",
+            }}
           >
-            {[0, 160, 320].map(d => (
+            {[0, 150, 300].map(d => (
               <div
                 key={d}
-                className="w-1.5 h-1.5 rounded-full animate-bounce"
-                style={{ background: "#7B2FFF", animationDelay: `${d}ms` }}
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "#7B2FFF",
+                  animation: `coach-bounce 1.4s ease-in-out ${d}ms infinite`,
+                }}
               />
             ))}
           </div>
         ) : (
           <>
-            {/* ── 1. Check-in banner (above everything) ── */}
-            {meta && isValid(meta.check_in) && (
-              <CheckInBanner text={meta.check_in!} daysAway={meta.days_since_last} />
-            )}
-
-            {/* ── 2. Main response bubble ── */}
+            {/* 2. Main text bubble */}
             <div
-              className="text-sm leading-[1.7]"
               style={{
                 background: "rgba(255,255,255,0.035)",
                 border: "1px solid rgba(255,255,255,0.07)",
-                borderRadius: 16,
-                borderTopLeftRadius: 4,
-                padding: "14px 18px",
+                borderRadius: "4px 16px 16px 16px",
+                padding: "9px 13px",
                 color: "#cbd5e1",
+                fontSize: 14,
+                lineHeight: 1.6,
                 whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
               }}
             >
               {msg.content}
             </div>
 
-            {/* ── 3. Unified Action Card ── */}
-            {isStudyAction && isValid(meta?.next_step) && (
-              <div
-                style={{
-                  background: "linear-gradient(135deg, rgba(123,47,255,0.12), rgba(0,210,253,0.06))",
-                  border: "1px solid rgba(123,47,255,0.22)",
-                  borderRadius: 16,
-                  overflow: "hidden",
-                }}
-              >
-                {/* Card header — topic + badges */}
-                <div
-                  className="flex items-center gap-2 flex-wrap px-4 pt-3.5 pb-2"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
-                >
-                  <span
-                    className="material-symbols-outlined text-[15px]"
-                    style={{ color: "#a78bfa" }}
-                  >
-                    bolt
-                  </span>
-                  {isValid(meta.topic_focus) && (
-                    <span className="text-[11px] font-bold tracking-wide" style={{ color: "#c4b5fd" }}>
-                      {meta.topic_focus!.toUpperCase()}
-                    </span>
-                  )}
-                  <div className="flex-1" />
-                  {meta.urgency && meta.urgency !== "low" && (
-                    <span
-                      className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest"
-                      style={{
-                        background: `${urgColor}18`,
-                        color: urgColor,
-                        border: `1px solid ${urgColor}35`,
-                        letterSpacing: "0.08em",
-                      }}
-                    >
-                      {meta.urgency}
-                    </span>
-                  )}
-                  {meta.is_relapse && (
-                    <span
-                      className="px-2 py-0.5 rounded-full text-[9px] font-bold"
-                      style={{ background: "rgba(251,146,60,0.15)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.3)" }}
-                    >
-                      relapse ↩
-                    </span>
-                  )}
-                </div>
 
-                {/* Next step text */}
-                <div className="px-4 pt-3 pb-1">
-                  <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "#6d5fbc" }}>
-                    Your next move
-                  </p>
-                  <p className="text-sm font-semibold" style={{ color: "#e2e8f0" }}>
-                    {meta.next_step}
-                  </p>
-                  {isValid(meta.session_prediction) && (
-                    <p className="text-[11px] mt-1.5" style={{ color: "#6d6f8a" }}>
-                      ⏱ {meta.session_prediction}
-                    </p>
-                  )}
-                </div>
-
-                {/* Mastery bar */}
-                {meta.mastery_progress && (
-                  <div className="px-4 pt-3 pb-1">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[10px] font-semibold" style={{ color: "#6d5fbc" }}>
-                        Mastery gap
-                      </span>
-                      <span className="text-[10px] tabular-nums" style={{ color: "#6d6f8a" }}>
-                        {meta.mastery_progress.current}%
-                        <span style={{ color: "#3a3f60" }}> / </span>
-                        {meta.mastery_progress.target}% target
-                      </span>
-                    </div>
-                    <MasteryBar
-                      current={meta.mastery_progress.current}
-                      target={meta.mastery_progress.target}
-                    />
-                  </div>
-                )}
-
-                {/* Topic unlock chain */}
-                {meta.topic_chain && meta.topic_chain.length > 0 && (
-                  <div
-                    className="px-4 py-3"
-                    style={{ borderTop: "1px solid rgba(255,255,255,0.04)", marginTop: 4 }}
-                  >
-                    <TopicChain chain={meta.topic_chain} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── 4. Why this matters (collapsible) ── */}
-            {isStudyAction && isValid(meta?.why_this_matters) && (
-              <WhyThisMatters
-                text={meta.why_this_matters!}
-                urgency={meta?.urgency}
-                isRelapse={meta.is_relapse}
-              />
-            )}
-
-            {/* ── 5. Calibration pulse ── */}
+            {/* 5. Calibration pulse */}
             {meta && isValid(meta.calibration_pulse) && (
               <CalibrationPulse text={meta.calibration_pulse!} />
             )}
 
-            {/* ── 6. Practice CTA ── */}
-            {/* Show CTA if we have either a topic (for fresh generation) or a document_id */}
+            {/* 6. Practice CTA */}
             {(meta?.practice_topic || meta?.practice_document_id) && (() => {
-              const topic   = meta.practice_topic ?? meta.topic_focus ?? "";
-              const docId   = meta.practice_document_id ?? 0;
-              const count   = meta.question_count ?? 5;
+              const topic  = meta.practice_topic ?? meta.topic_focus ?? "";
+              const docId  = meta.practice_document_id ?? 0;
+              const count  = meta.question_count ?? 5;
               const fromStr = convId ? `&from=${convId}` : "";
-              // Always use fresh=true when we have a topic — generates new questions every time
               const href = topic
                 ? `/quiz/${docId || 1}?count=${count}${fromStr}&fresh=true&topic=${encodeURIComponent(topic)}`
                 : `/quiz/${docId}?count=${count}${fromStr}`;
               return (
                 <Link
                   href={href}
-                  className="flex items-center justify-center gap-2.5 w-full font-bold text-white transition-all"
                   style={{
-                    background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                    borderRadius: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
+                    width: "100%",
                     padding: "13px 20px",
+                    borderRadius: 14,
+                    background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+                    color: "white",
+                    fontWeight: 700,
                     fontSize: 14,
-                    letterSpacing: "0.01em",
+                    textDecoration: "none",
                     boxShadow: "0 4px 20px rgba(123,47,255,0.35)",
+                    transition: "opacity 0.15s, transform 0.15s",
+                    letterSpacing: "0.01em",
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
+                  onMouseEnter={e => { e.currentTarget.style.opacity = "0.85"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "none"; }}
                 >
-                  <span className="material-symbols-outlined text-[18px]">play_circle</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 19, fontVariationSettings: "'FILL' 1" }}>play_circle</span>
                   Practice {isValid(topic) ? `"${topic}"` : "now"} →
                 </Link>
               );
             })()}
 
-            {/* ── 7. Encouraging note ── */}
-            {meta && isValid(meta.encouraging_note) && (
-              <p
-                className="text-[11px] italic px-1"
-                style={{ color: "#3a3f60" }}
-              >
-                {meta.encouraging_note!}
-              </p>
-            )}
-
-            {/* ── 8. Quick replies ── */}
+            {/* 8. Quick replies */}
             {meta?.action && meta.action !== "greeting" && onQuickReply && (
-              <QuickReplies
-                action={meta.action}
-                topicFocus={meta.topic_focus}
-                onSelect={onQuickReply}
-              />
+              <QuickReplies action={meta.action} topicFocus={meta.topic_focus} onSelect={onQuickReply} />
             )}
           </>
         )}
@@ -960,13 +1430,11 @@ function MasteryBar({ current, target }: { current: number; target: number }) {
   const toColor   = current >= target ? "#22c55e" : current >= target * 0.65 ? "#eab308" : "#ef4444";
 
   return (
-    <div
-      className="h-2 rounded-full overflow-hidden"
-      style={{ background: "rgba(255,255,255,0.06)" }}
-    >
+    <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
       <div
-        className="h-full rounded-full"
         style={{
+          height: "100%",
+          borderRadius: 999,
           width: `${pct}%`,
           background: `linear-gradient(90deg, ${fromColor}, ${toColor})`,
           boxShadow: `0 0 8px ${fromColor}60`,
@@ -981,25 +1449,25 @@ function MasteryBar({ current, target }: { current: number; target: number }) {
 
 function TopicChain({ chain }: { chain: string[] }) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#3a4060" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#2a3050" }}>
         Fix this → unlocks
       </span>
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
         {chain.map((topic, i) => (
-          <div key={topic} className="flex items-center gap-1.5">
+          <div key={topic} style={{ display: "flex", alignItems: "center", gap: 5 }}>
             {i > 0 && (
-              <span className="material-symbols-outlined text-[11px]" style={{ color: "#2a3050" }}>
-                arrow_forward
-              </span>
+              <span className="material-symbols-outlined" style={{ fontSize: 11, color: "#2a3050" }}>arrow_forward</span>
             )}
             <span
-              className="px-2.5 py-1 rounded-lg text-[10px] font-semibold"
               style={{
+                padding: "3px 10px",
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 600,
                 background: "rgba(0,210,253,0.08)",
                 color: "#67e8f9",
                 border: "1px solid rgba(0,210,253,0.18)",
-                letterSpacing: "0.02em",
               }}
             >
               {topic}
@@ -1028,44 +1496,45 @@ function WhyThisMatters({ text, urgency, isRelapse }: { text: string; urgency?: 
         borderRadius: 12,
         overflow: "hidden",
         border: `1px solid ${accentColor}20`,
-        background: `linear-gradient(135deg, ${accentColor}08, transparent)`,
+        background: `${accentColor}08`,
       }}
     >
       <button
         onClick={() => setOpen(p => !p)}
-        className="w-full flex items-center gap-3 text-left"
-        style={{ padding: "10px 14px" }}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 14px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
       >
-        <span
-          className="material-symbols-outlined text-[16px] flex-shrink-0"
-          style={{ color: accentColor }}
-        >
+        <span className="material-symbols-outlined" style={{ fontSize: 16, color: accentColor, flexShrink: 0 }}>
           {isRelapse ? "history" : "lightbulb"}
         </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: `${accentColor}cc` }}>
-            {isRelapse ? "You had this — why it slipped" : "Why this topic right now"}
-          </p>
-        </div>
+        <p style={{ flex: 1, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: `${accentColor}cc`, margin: 0 }}>
+          {isRelapse ? "You had this — why it slipped" : "Why this topic right now"}
+        </p>
         <span
-          className="material-symbols-outlined text-[16px] flex-shrink-0 transition-transform duration-200"
-          style={{ color: `${accentColor}80`, transform: open ? "rotate(180deg)" : "rotate(0)" }}
+          className="material-symbols-outlined"
+          style={{
+            fontSize: 16,
+            color: `${accentColor}80`,
+            flexShrink: 0,
+            transition: "transform 0.2s",
+            transform: open ? "rotate(180deg)" : "none",
+          }}
         >
           expand_more
         </span>
       </button>
-
       {open && (
-        <div
-          style={{
-            padding: "0 14px 14px",
-            borderTop: `1px solid ${accentColor}12`,
-          }}
-        >
-          <p
-            className="text-[13px] leading-[1.65] pt-3"
-            style={{ color: "#94a3b8" }}
-          >
+        <div style={{ padding: "0 14px 14px", borderTop: `1px solid ${accentColor}12` }}>
+          <p style={{ fontSize: 13, lineHeight: 1.65, color: "#94a3b8", paddingTop: 10, margin: 0 }}>
             {text}
           </p>
         </div>
@@ -1081,17 +1550,15 @@ function CalibrationPulse({ text }: { text: string }) {
     <div
       style={{
         borderRadius: 14,
-        padding: "14px 16px",
+        padding: "13px 16px",
         background: "rgba(251,146,60,0.07)",
-        border: "1px solid rgba(251,146,60,0.22)",
-        boxShadow: "0 0 20px rgba(251,146,60,0.08) inset",
+        border: "1px solid rgba(251,146,60,0.2)",
         display: "flex",
         alignItems: "flex-start",
         gap: 12,
       }}
     >
-      {/* Pulsing dot */}
-      <div style={{ flexShrink: 0, paddingTop: 3 }}>
+      <div style={{ flexShrink: 0, paddingTop: 4 }}>
         <div
           style={{
             width: 8,
@@ -1102,15 +1569,11 @@ function CalibrationPulse({ text }: { text: string }) {
           }}
         />
       </div>
-
       <div>
-        <p
-          className="text-[10px] font-black uppercase tracking-widest mb-1.5"
-          style={{ color: "#fb923c", letterSpacing: "0.1em" }}
-        >
+        <p style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "#fb923c", marginBottom: 6, margin: "0 0 6px" }}>
           Calibration alert
         </p>
-        <p className="text-[13px] leading-[1.6]" style={{ color: "#fed7aa" }}>
+        <p style={{ fontSize: 13, lineHeight: 1.6, color: "#fed7aa", margin: 0 }}>
           {text}
         </p>
       </div>
@@ -1129,39 +1592,41 @@ function CheckInBanner({ text, daysAway }: { text: string; daysAway?: number | n
     <div
       style={{
         borderRadius: 12,
-        padding: "11px 14px",
+        padding: "10px 14px",
         background: "rgba(100,116,139,0.07)",
-        border: "1px solid rgba(100,116,139,0.15)",
+        border: "1px solid rgba(100,116,139,0.14)",
         display: "flex",
         alignItems: "center",
         gap: 10,
       }}
     >
-      <span
-        className="material-symbols-outlined text-[15px] flex-shrink-0"
-        style={{ color: "#475569" }}
-      >
-        schedule
-      </span>
-      <div className="flex-1 min-w-0">
-        <span
-          className="text-[10px] font-bold uppercase tracking-widest mr-2"
-          style={{ color: "#475569" }}
-        >
+      <span className="material-symbols-outlined" style={{ fontSize: 15, color: "#475569", flexShrink: 0 }}>schedule</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#475569", marginRight: 8 }}>
           {displayDaysAway != null ? `${displayDaysAway}d away` : "Welcome back"}
         </span>
-        <span className="text-[12px]" style={{ color: "#64748b" }}>
-          {text}
-        </span>
+        <span style={{ fontSize: 12, color: "#64748b" }}>{text}</span>
       </div>
       <button
         onClick={() => setDismissed(true)}
-        className="flex-shrink-0 p-1 rounded-lg transition-colors"
-        style={{ color: "#334155" }}
+        style={{
+          flexShrink: 0,
+          width: 28,
+          height: 28,
+          borderRadius: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          color: "#334155",
+          transition: "color 0.15s",
+        }}
         onMouseEnter={e => (e.currentTarget.style.color = "#64748b")}
         onMouseLeave={e => (e.currentTarget.style.color = "#334155")}
       >
-        <span className="material-symbols-outlined text-[14px]">close</span>
+        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
       </button>
     </div>
   );
@@ -1179,23 +1644,26 @@ const QUICK_REPLIES: Record<string, string[]> = {
   off_topic:                ["What should I study today?", "How am I doing?", "Show my weak spots"],
 };
 
-function QuickReplies({ action, topicFocus, onSelect }: {
+function QuickReplies({
+  action,
+  topicFocus,
+  onSelect,
+}: {
   action: string;
   topicFocus?: string | null;
   onSelect: (text: string) => void;
 }) {
   const base = QUICK_REPLIES[action] ?? QUICK_REPLIES["off_topic"];
-  const replies = base.map(r =>
-    topicFocus ? r.replace(/\bthis\b/gi, topicFocus) : r
-  );
+  const replies = base.map(r => (topicFocus ? r.replace(/\bthis\b/gi, topicFocus) : r));
 
   return (
     <div
+      className="momentum-scroll"
       style={{
         display: "flex",
-        gap: 6,
+        gap: 7,
         overflowX: "auto",
-        paddingBottom: 2,
+        paddingBottom: 4,
         paddingTop: 2,
         scrollbarWidth: "none",
         msOverflowStyle: "none",
@@ -1205,17 +1673,19 @@ function QuickReplies({ action, topicFocus, onSelect }: {
         <button
           key={i}
           onClick={() => onSelect(reply)}
-          className="flex-shrink-0 transition-all"
           style={{
-            padding: "6px 14px",
+            flexShrink: 0,
+            padding: "7px 15px",
             borderRadius: 999,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 500,
             background: "rgba(255,255,255,0.04)",
             border: "1px solid rgba(255,255,255,0.09)",
             color: "#64748b",
             whiteSpace: "nowrap",
             cursor: "pointer",
+            transition: "all 0.18s",
+            fontFamily: "inherit",
           }}
           onMouseEnter={e => {
             e.currentTarget.style.background = "rgba(123,47,255,0.1)";
@@ -1232,5 +1702,13 @@ function QuickReplies({ action, topicFocus, onSelect }: {
         </button>
       ))}
     </div>
+  );
+}
+
+export default function CoachPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-background"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" /></div>}>
+      <CoachPageInner />
+    </Suspense>
   );
 }

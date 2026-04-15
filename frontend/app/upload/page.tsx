@@ -1,10 +1,29 @@
 "use client";
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { uploadLecture, processLecture, estimateProcessing, Difficulty } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
-import Link from "next/link";
 import { useTelegram } from "@/lib/useTelegram";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  ArrowLeft,
+  CloudUpload,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  BookOpen,
+  Medal,
+  Brain,
+  Layers,
+  Home,
+  Plus,
+  BarChart3
+} from "lucide-react";
 
 type Tab = "study" | "exam";
 type Mode = "highyield" | "exam" | "harder";
@@ -31,7 +50,7 @@ function UploadContent() {
   const [tgFileLoading, setTgFileLoading] = useState(false);
   const [tgFileReady, setTgFileReady] = useState(false);
 
-  // ── Telegram MainButton control ──────────────────────────────────────────
+  // Telegram MainButton control
   useEffect(() => {
     if (!isInTelegram || !mainButton) return;
 
@@ -53,7 +72,7 @@ function UploadContent() {
   useEffect(() => {
     if (!isInTelegram || !mainButton) return;
     if (uploading || processing) {
-      mainButton.setText("Processing…").showProgress(true).disable();
+      mainButton.setText("Processing...").showProgress(true).disable();
     } else if (step === "done") {
       mainButton.hideProgress().setText("Done!").disable();
     }
@@ -173,134 +192,150 @@ function UploadContent() {
   // Processing / Done states
   if (step === "process" || step === "done") {
     return (
-      <div className="min-h-screen flex items-center justify-center relative" style={{ backgroundColor: "#111220" }}>
+      <div className="min-h-screen flex items-center justify-center relative bg-background">
         <div className="grain-overlay" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary-container/20 rounded-full blur-[120px] pointer-events-none" />
-        <div className="relative z-10 text-center glass-panel rounded-3xl p-6 sm:p-12 max-w-md mx-4 w-full">
-          {step === "process" ? (
-            <>
-              <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mx-auto mb-6 shadow-lg shadow-primary-container/30">
-                <span className="material-symbols-outlined text-4xl text-white animate-spin" style={{ animationDuration: "2s" }}>autorenew</span>
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Processing your lecture…</h2>
-              <p className="text-on-surface-variant mb-6">
-                AI is generating MCQs in <span className="text-secondary font-bold">{modeLabel}</span>
-              </p>
-              {timeEstimate && (
-                <div className="mb-4 px-5 py-3 rounded-xl bg-surface-container-highest text-left space-y-1">
-                  <p className="text-sm text-secondary font-medium">
-                    Estimated: <span className="font-bold text-white">{timeEstimate.estimated_range}</span>
-                  </p>
-                  {timeEstimate.chunks > 1 && (
-                    <p className="text-xs text-on-surface-variant">
-                      {timeEstimate.chunks} chunk{timeEstimate.chunks > 1 ? "s" : ""}
-                      {(timeEstimate.keys ?? 1) > 1 && ` · ${timeEstimate.keys} keys in parallel`}
-                    </p>
-                  )}
-                  {timeEstimate.estimated_seconds && elapsed < timeEstimate.estimated_seconds && (
-                    <p className="text-xs text-on-surface-variant">
-                      ~{Math.max(0, timeEstimate.estimated_seconds - elapsed)}s remaining
-                    </p>
-                  )}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
+        <Card className="relative z-10 glass-panel border-border/50 max-w-md mx-4 w-full">
+          <CardContent className="p-6 sm:p-12 text-center">
+            {step === "process" ? (
+              <>
+                <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mx-auto mb-6 shadow-lg shadow-primary/30">
+                  <Loader2 className="w-10 h-10 text-white animate-spin" />
                 </div>
-              )}
-              <div className="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
-                {timeEstimate?.estimated_seconds ? (
-                  <div
-                    className="h-full synapse-gradient rounded-full transition-all duration-1000"
-                    style={{ width: `${Math.min(95, (elapsed / timeEstimate.estimated_seconds) * 100)}%` }}
-                  />
-                ) : (
-                  <div className="h-full synapse-gradient rounded-full w-full animate-pulse" />
+                <h2 className="text-2xl font-bold text-foreground mb-2">Processing your lecture...</h2>
+                <p className="text-muted-foreground mb-6">
+                  AI is generating MCQs in <span className="text-cyan-400 font-bold">{modeLabel}</span>
+                </p>
+                {timeEstimate && (
+                  <div className="mb-4 px-5 py-3 rounded-xl bg-muted text-left space-y-1">
+                    <p className="text-sm text-cyan-400 font-medium">
+                      Estimated: <span className="font-bold text-foreground">{timeEstimate.estimated_range}</span>
+                    </p>
+                    {timeEstimate.chunks > 1 && (
+                      <p className="text-xs text-muted-foreground">
+                        {timeEstimate.chunks} chunk{timeEstimate.chunks > 1 ? "s" : ""}
+                        {(timeEstimate.keys ?? 1) > 1 && ` - ${timeEstimate.keys} keys in parallel`}
+                      </p>
+                    )}
+                    {timeEstimate.estimated_seconds && elapsed < timeEstimate.estimated_seconds && (
+                      <p className="text-xs text-muted-foreground">
+                        ~{Math.max(0, timeEstimate.estimated_seconds - elapsed)}s remaining
+                      </p>
+                    )}
+                  </div>
                 )}
-              </div>
-              <p className="text-xs text-on-surface-variant mt-3">{elapsed}s elapsed</p>
-            </>
-          ) : (
-            <>
-              <div className="w-20 h-20 rounded-2xl bg-green-500/20 flex items-center justify-center mx-auto mb-6">
-                <span className="material-symbols-outlined text-4xl text-green-400">check_circle</span>
-              </div>
-              <h2 className="text-2xl font-bold text-white">Done! Redirecting…</h2>
-            </>
-          )}
-        </div>
+                <Progress
+                  value={timeEstimate?.estimated_seconds ? Math.min(95, (elapsed / timeEstimate.estimated_seconds) * 100) : 50}
+                  className="h-2 mb-3"
+                />
+                <p className="text-xs text-muted-foreground">{elapsed}s elapsed</p>
+              </>
+            ) : (
+              <>
+                <div className="w-20 h-20 rounded-2xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                </div>
+                <h2 className="text-2xl font-bold text-foreground">Done! Redirecting...</h2>
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   // Upload state
   return (
-    <div className="relative min-h-screen text-on-surface flex flex-col" style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.1) 0px, transparent 50%)" }}>
+    <div className="relative min-h-screen bg-background text-foreground flex flex-col">
       <div className="grain-overlay" />
 
-      {/* Header — hidden inside Telegram (Telegram provides its own chrome) */}
-      {!isInTelegram && <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard" className="text-on-surface-variant hover:text-white transition-colors">
-            <span className="material-symbols-outlined">arrow_back</span>
-          </Link>
-          <span className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</span>
-        </div>
-        <nav className="hidden md:flex items-center gap-8">
-          <a className="text-[#00D2FD] font-bold text-sm tracking-wide">+ Upload</a>
-          <Link href="/dashboard" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Dashboard</Link>
-          <Link href="/analytics" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Analytics</Link>
-        </nav>
-      </header>}
+      {/* Header */}
+      {!isInTelegram && (
+        <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-card/80 backdrop-blur-xl z-50 border-b border-border/50">
+          <div className="flex items-center gap-4">
+            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <Link href="/dashboard" className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">
+              cortexQ
+            </Link>
+          </div>
+          <nav className="hidden md:flex items-center gap-8">
+            <span className="text-primary font-bold text-sm tracking-wide">+ Upload</span>
+            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium">
+              Dashboard
+            </Link>
+            <Link href="/analytics" className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium">
+              Analytics
+            </Link>
+          </nav>
+        </header>
+      )}
 
       <main className={`flex-grow flex flex-col items-center justify-center px-6 max-w-5xl mx-auto w-full ${isInTelegram ? "pt-6 pb-24" : "pt-24 pb-32"}`}>
         <section className="w-full text-center space-y-10">
-
           {/* Heading */}
           <div className="space-y-4">
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tighter text-white">Expand Your Intelligence</h1>
-            <p className="text-on-surface-variant max-w-xl mx-auto text-lg font-medium leading-relaxed">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tighter text-foreground">
+              Expand Your Intelligence
+            </h1>
+            <p className="text-muted-foreground max-w-xl mx-auto text-lg font-medium leading-relaxed">
               Upload your lecture notes or textbooks. Our AI transforms them into structured mastery tools.
             </p>
           </div>
 
           {/* Mode Selector */}
           <div className="w-full max-w-3xl mx-auto">
-            {/* Tab switcher */}
-            <div className="mb-4 glass-panel rounded-xl p-1 flex max-w-xs mx-auto">
-              <button
-                onClick={() => handleTabChange("study")}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${tab === "study" ? "synapse-gradient text-white" : "text-on-surface-variant hover:text-white"}`}
-              >
-                <span className="material-symbols-outlined text-sm">menu_book</span>
-                Study
-              </button>
-              <button
-                onClick={() => handleTabChange("exam")}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${tab === "exam" ? "synapse-gradient text-white" : "text-on-surface-variant hover:text-white"}`}
-              >
-                <span className="material-symbols-outlined text-sm">military_tech</span>
-                Exam
-              </button>
-            </div>
+            <Tabs value={tab} onValueChange={(v) => handleTabChange(v as Tab)} className="mb-4">
+              <TabsList className="grid w-full grid-cols-2 max-w-xs mx-auto bg-muted/50">
+                <TabsTrigger value="study" className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4" />
+                  Study
+                </TabsTrigger>
+                <TabsTrigger value="exam" className="flex items-center gap-2">
+                  <Medal className="w-4 h-4" />
+                  Exam
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
             {/* Mode cards */}
             {tab === "study" ? (
-              <div className="glass-panel p-5 rounded-xl border-l-4 border-primary-container text-left">
-                <p className="font-bold text-white mb-1">High Yield MCQs</p>
-                <p className="text-xs text-on-surface-variant">Balanced mix across all lecture topics with clinical vignettes, mechanism questions, and key concept summaries.</p>
-              </div>
+              <Card className="glass-panel border-l-4 border-primary text-left">
+                <CardContent className="p-5">
+                  <p className="font-bold text-foreground mb-1">High Yield MCQs</p>
+                  <p className="text-xs text-muted-foreground">
+                    Balanced mix across all lecture topics with clinical vignettes, mechanism questions, and key concept summaries.
+                  </p>
+                </CardContent>
+              </Card>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   onClick={() => setMode("exam")}
-                  className={`p-5 rounded-xl text-left transition-all border-l-4 ${mode === "exam" ? "glass-panel border-primary-container" : "bg-surface-container-low/40 border-transparent hover:border-outline-variant"}`}
+                  className={`p-5 rounded-xl text-left transition-all border-l-4 ${
+                    mode === "exam"
+                      ? "glass-panel border-primary"
+                      : "bg-muted/30 border-transparent hover:border-border"
+                  }`}
                 >
-                  <p className={`font-bold mb-1 ${mode === "exam" ? "text-white" : "text-on-surface-variant"}`}>Hard</p>
-                  <p className="text-xs text-on-surface-variant">40% &ldquo;All FALSE EXCEPT&rdquo; questions, clinical vignettes, mechanism traps.</p>
+                  <p className={`font-bold mb-1 ${mode === "exam" ? "text-foreground" : "text-muted-foreground"}`}>Hard</p>
+                  <p className="text-xs text-muted-foreground">
+                    40% "All FALSE EXCEPT" questions, clinical vignettes, mechanism traps.
+                  </p>
                 </button>
                 <button
                   onClick={() => setMode("harder")}
-                  className={`p-5 rounded-xl text-left transition-all border-l-4 ${mode === "harder" ? "glass-panel border-secondary-container" : "bg-surface-container-low/40 border-transparent hover:border-outline-variant"}`}
+                  className={`p-5 rounded-xl text-left transition-all border-l-4 ${
+                    mode === "harder"
+                      ? "glass-panel border-cyan-500"
+                      : "bg-muted/30 border-transparent hover:border-border"
+                  }`}
                 >
-                  <p className={`font-bold mb-1 ${mode === "harder" ? "text-white" : "text-on-surface-variant"}`}>Harder</p>
-                  <p className="text-xs text-on-surface-variant">~50% &ldquo;All FALSE EXCEPT&rdquo; like real boards. Multi-step vignettes, max difficulty.</p>
+                  <p className={`font-bold mb-1 ${mode === "harder" ? "text-foreground" : "text-muted-foreground"}`}>Harder</p>
+                  <p className="text-xs text-muted-foreground">
+                    ~50% "All FALSE EXCEPT" like real boards. Multi-step vignettes, max difficulty.
+                  </p>
                 </button>
               </div>
             )}
@@ -308,186 +343,159 @@ function UploadContent() {
 
           {/* Upload Zone */}
           <div className="relative group w-full max-w-3xl mx-auto">
-            <div className="absolute -inset-1 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-10 group-hover:opacity-25 transition duration-500" />
+            <div className="absolute -inset-1 synapse-gradient rounded-xl blur opacity-10 group-hover:opacity-25 transition duration-500" />
             <div
-              className={`relative flex flex-col items-center justify-center w-full min-h-[280px] border-2 border-dashed rounded-xl px-8 py-12 transition-all duration-300 ${
+              className={`relative flex flex-col items-center justify-center w-full min-h-[280px] border-2 border-dashed rounded-xl px-8 py-12 transition-all duration-300 cursor-pointer ${
                 tgFileLoading
-                  ? "border-primary-container/60 bg-primary-container/5 cursor-default"
+                  ? "border-primary/60 bg-primary/5"
                   : dragging
-                  ? "border-secondary-container/80 bg-secondary-container/5 cursor-pointer"
+                  ? "border-cyan-500/80 bg-cyan-500/5"
                   : file
-                  ? "border-green-500/50 bg-green-500/5 cursor-pointer"
-                  : "border-primary-container/40 bg-surface-container-low/60 hover:border-secondary-container/60 hover:-translate-y-1 cursor-pointer"
+                  ? "border-emerald-500/50 bg-emerald-500/5"
+                  : "border-border/40 bg-muted/30 hover:border-primary/60 hover:-translate-y-1"
               }`}
-              onDragOver={(e) => { if (!tgFileLoading) { e.preventDefault(); setDragging(true); } }}
+              onDragOver={(e) => {
+                if (!tgFileLoading) {
+                  e.preventDefault();
+                  setDragging(true);
+                }
+              }}
               onDragLeave={() => setDragging(false)}
-              onDrop={(e) => { if (!tgFileLoading) handleDrop(e); }}
-              onClick={() => { if (!tgFileLoading) fileInputRef.current?.click(); }}
+              onDrop={(e) => {
+                if (!tgFileLoading) handleDrop(e);
+              }}
+              onClick={() => {
+                if (!tgFileLoading) fileInputRef.current?.click();
+              }}
             >
               <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
 
               {tgFileLoading ? (
-                /* ── Skeleton: PDF pages being attached ── */
                 <div className="flex flex-col items-center justify-center w-full pointer-events-none select-none">
-                  {/* Stacked pages */}
                   <div className="relative w-28 h-36 mb-8" style={{ animation: "floatPage 3s ease-in-out infinite" }}>
-                    {/* Page 3 — back */}
-                    <div className="absolute inset-0 rounded-xl border border-outline-variant/20 bg-surface-container-highest/40"
-                      style={{ transform: "rotate(7deg) translate(10px, 8px)" }} />
-                    {/* Page 2 — middle */}
-                    <div className="absolute inset-0 rounded-xl border border-outline-variant/20 bg-surface-container-highest/60"
-                      style={{ transform: "rotate(3deg) translate(5px, 4px)" }} />
-                    {/* Page 1 — front */}
-                    <div className="absolute inset-0 rounded-xl border border-outline-variant/30 bg-surface-container-highest overflow-hidden">
-                      {/* shimmer sweep */}
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent"
-                        style={{ animation: "sweepShimmer 1.8s ease-in-out infinite" }} />
-                      <div className="p-3 flex flex-col gap-2">
-                        {/* PDF icon + title row */}
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="w-5 h-5 rounded bg-primary-container/40 animate-pulse" />
-                          <div className="flex-1 h-2 rounded-full bg-on-surface-variant/25 animate-pulse" style={{ animationDelay: "0.1s" }} />
-                        </div>
-                        {/* Content lines */}
-                        {[100, 88, 95, 72, 83, 60, 78].map((w, i) => (
-                          <div key={i} className="h-1.5 rounded-full bg-on-surface-variant/15 animate-pulse"
-                            style={{ width: `${w}%`, animationDelay: `${i * 0.07}s` }} />
-                        ))}
-                        {/* Highlight block */}
-                        <div className="mt-1 flex gap-1.5">
-                          {[42, 58, 33].map((w, i) => (
-                            <div key={i} className="h-1.5 rounded-full bg-primary-container/25 animate-pulse"
-                              style={{ width: `${w}%`, animationDelay: `${0.5 + i * 0.1}s` }} />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Label */}
-                  <h3 className="text-lg font-bold text-white mb-1">Attaching your PDF…</h3>
-                  <p className="text-sm text-on-surface-variant mb-5">Fetching file from Telegram</p>
-
-                  {/* Progress bar */}
-                  <div className="w-56 h-1 rounded-full bg-surface-container-highest overflow-hidden">
-                    <div className="h-full w-2/5 rounded-full synapse-gradient"
-                      style={{ animation: "progressBar 1.4s ease-in-out infinite" }} />
-                  </div>
-
-                  {/* Bouncing dots */}
-                  <div className="flex gap-1.5 mt-4">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="w-1.5 h-1.5 rounded-full bg-primary-container/70 animate-bounce"
-                        style={{ animationDelay: `${i * 0.15}s` }} />
+                    {[2, 1, 0].map((i) => (
+                      <div
+                        key={i}
+                        className="absolute inset-0 rounded-xl border border-border/20 bg-muted"
+                        style={{ transform: `rotate(${i * 4 - 4}deg) translate(${i * 5}px, ${i * 5}px)` }}
+                      />
                     ))}
                   </div>
+                  <h3 className="text-lg font-bold text-foreground mb-1">Attaching your PDF...</h3>
+                  <p className="text-sm text-muted-foreground mb-5">Fetching file from Telegram</p>
+                  <Progress value={40} className="w-56 h-1" />
                 </div>
-
               ) : file ? (
-                /* ── File ready ── */
-                <div style={{ animation: tgFileReady ? "popIn 0.45s cubic-bezier(0.34,1.56,0.64,1) forwards" : undefined }}
-                  className="flex flex-col items-center">
-                  <div className="w-16 h-16 rounded-2xl bg-green-500/20 flex items-center justify-center mb-4">
-                    <span className="material-symbols-outlined text-4xl text-green-400">description</span>
+                <div className="flex flex-col items-center">
+                  <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 flex items-center justify-center mb-4">
+                    <FileText className="w-8 h-8 text-emerald-400" />
                   </div>
-                  <h3 className="text-xl font-bold text-white mb-1">{file.name}</h3>
-                  <p className="text-on-surface-variant text-sm">{(file.size / 1024 / 1024).toFixed(2)} MB · Click to change</p>
+                  <h3 className="text-xl font-bold text-foreground mb-1">{file.name}</h3>
+                  <p className="text-muted-foreground text-sm">
+                    {(file.size / 1024 / 1024).toFixed(2)} MB - Click to change
+                  </p>
                   {tgFileReady && (
-                    <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-green-400">
-                      <span className="material-symbols-outlined text-sm">check_circle</span>
+                    <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                      <CheckCircle2 className="w-4 h-4" />
                       Attached from Telegram
                     </div>
                   )}
                 </div>
-
               ) : (
-                /* ── Empty state ── */
                 <>
-                  <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mb-6 shadow-lg shadow-primary-container/20">
-                    <span className="material-symbols-outlined text-4xl text-white">cloud_upload</span>
+                  <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mb-6 shadow-lg shadow-primary/20">
+                    <CloudUpload className="w-10 h-10 text-white" />
                   </div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Drag &amp; Drop your PDF here</h3>
-                  <p className="text-on-surface-variant mb-6 font-medium">PDF files up to 50MB</p>
-                  <button className="px-8 py-3 bg-surface-variant/40 border border-outline-variant/20 rounded-lg font-bold text-secondary transition-all hover:bg-surface-variant/60 hover:scale-105 active:scale-95">
+                  <h3 className="text-2xl font-bold text-foreground mb-2">Drag & Drop your PDF here</h3>
+                  <p className="text-muted-foreground mb-6 font-medium">PDF files up to 50MB</p>
+                  <Button variant="outline" className="rounded-lg">
                     Browse Files
-                  </button>
+                  </Button>
                 </>
               )}
             </div>
           </div>
 
           {error && (
-            <div className="w-full max-w-3xl mx-auto bg-error/10 border border-error/20 text-error rounded-xl px-4 py-3 text-sm">
+            <div className="w-full max-w-3xl mx-auto bg-destructive/10 border border-destructive/20 text-destructive rounded-xl px-4 py-3 text-sm">
               {error}
             </div>
           )}
 
-          {/* In Telegram the MainButton handles this; in browser we show the regular button */}
+          {/* Upload button */}
           {file && !isInTelegram && (
-            <button
+            <Button
               onClick={handleUpload}
               disabled={uploading}
-              className="w-full max-w-3xl mx-auto synapse-gradient text-white font-bold py-4 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.3)] hover:shadow-[0px_12px_32px_rgba(0,210,253,0.4)] hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full max-w-3xl mx-auto synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50"
             >
               {uploading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                  Uploading…
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Uploading...
                 </span>
-              ) : mode === "harder" ? "Generate Harder Questions" : mode === "exam" ? "Generate Exam Questions" : "Generate High Yield MCQs"}
-            </button>
+              ) : mode === "harder"
+              ? "Generate Harder Questions"
+              : mode === "exam"
+              ? "Generate Exam Questions"
+              : "Generate High Yield MCQs"}
+            </Button>
           )}
 
           {/* Info Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full pt-6">
             {[
-              { icon: "quiz", color: "primary", label: "MCQ Questions", desc: "Automated multiple choice questions based on key concepts found in your text." },
-              { icon: "summarize", color: "secondary", label: "Smart Summary", desc: "High-level overview of complex topics, distilled into readable bullet points." },
-              { icon: "style", color: "tertiary", label: "Flashcard Deck", desc: "Spaced-repetition ready cards automatically generated for long-term retention." },
+              { icon: Brain, label: "MCQ Questions", desc: "Automated multiple choice questions based on key concepts found in your text." },
+              { icon: Layers, label: "Smart Summary", desc: "High-level overview of complex topics, distilled into readable bullet points." },
+              { icon: BookOpen, label: "Flashcard Deck", desc: "Spaced-repetition ready cards automatically generated for long-term retention." },
             ].map((c) => (
-              <div key={c.label} className="glass-panel p-6 rounded-xl flex flex-col items-start text-left hover:-translate-y-1 transition-transform duration-300">
-                <div className="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center mb-4">
-                  <span className={`material-symbols-outlined text-${c.color}`}>{c.icon}</span>
-                </div>
-                <h4 className="text-lg font-bold text-white mb-2">{c.label}</h4>
-                <p className="text-sm text-on-surface-variant leading-relaxed">{c.desc}</p>
-              </div>
+              <Card key={c.label} className="glass-panel border-border/50 hover:-translate-y-1 transition-transform duration-300">
+                <CardContent className="p-6 flex flex-col items-start text-left">
+                  <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                    <c.icon className="w-6 h-6 text-primary" />
+                  </div>
+                  <h4 className="text-lg font-bold text-foreground mb-2">{c.label}</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{c.desc}</p>
+                </CardContent>
+              </Card>
             ))}
           </div>
         </section>
       </main>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-slate-950/90 backdrop-blur-lg rounded-t-3xl border-t border-white/5">
-        <Link href="/dashboard" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined text-[24px]">home</span>
+      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-card/95 backdrop-blur-lg rounded-t-3xl border-t border-border/50">
+        <Link href="/dashboard" className="flex flex-col items-center text-muted-foreground">
+          <Home className="w-6 h-6" />
           <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
         </Link>
-        <div className="flex flex-col items-center text-[#00D2FD] scale-110 -translate-y-2">
-          <div className="w-12 h-12 rounded-full synapse-gradient flex items-center justify-center shadow-lg shadow-primary-container/30">
-            <span className="material-symbols-outlined text-white text-[28px]">add</span>
+        <div className="flex flex-col items-center text-primary scale-110 -translate-y-2">
+          <div className="w-12 h-12 rounded-full synapse-gradient flex items-center justify-center shadow-lg shadow-primary/30">
+            <Plus className="w-7 h-7 text-white" />
           </div>
         </div>
-        <Link href="/analytics" className="flex flex-col items-center text-slate-500">
-          <span className="material-symbols-outlined text-[24px]">insights</span>
+        <Link href="/analytics" className="flex flex-col items-center text-muted-foreground">
+          <BarChart3 className="w-6 h-6" />
           <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
         </Link>
       </nav>
 
       {/* Decorative blobs */}
-      <div className="fixed top-1/4 -left-20 w-80 h-80 bg-primary-container/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed bottom-1/4 -right-20 w-80 h-80 bg-secondary-container/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="fixed top-1/4 -left-20 w-80 h-80 bg-primary/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="fixed bottom-1/4 -right-20 w-80 h-80 bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
     </div>
   );
 }
 
 export default function UploadPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#111220" }}>
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-container" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+        </div>
+      }
+    >
       <UploadContent />
     </Suspense>
   );
