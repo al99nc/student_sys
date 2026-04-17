@@ -24,7 +24,8 @@ import {
   Sparkles,
   ChevronRight,
   BarChart3,
-  CircleDot
+  CircleDot,
+  Coins,
 } from "lucide-react";
 
 interface Lecture {
@@ -134,6 +135,7 @@ export default function DashboardPage() {
     { icon: BookOpen, label: "Lectures", href: "/lectures" },
     { icon: Clock, label: "Practice", href: "/practice" },
     { icon: TrendingUp, label: "Analytics", href: "/analytics" },
+    { icon: Coins, label: "Credits", href: "/billing" },
     { icon: CircleDot, label: "Weak Points", href: "/weak-points" },
   ];
 

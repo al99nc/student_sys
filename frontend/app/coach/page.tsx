@@ -10,6 +10,7 @@ import {
   coachDeleteConversation,
   coachSendMessage,
   coachSearch,
+  getMe,
   QuizResult,
 } from "@/lib/api";
 
@@ -52,6 +53,7 @@ interface Message {
   image_mime?: string | null;
   ai_metadata?: AiMeta | null;
   created_at: string;
+  payg_limit?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -137,11 +139,26 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const [loadingConv, setLoadingConv] = useState(false);
   const [pendingAutoMsg, setPendingAutoMsg] = useState<string | null>(null);
 
+  // User plan
+  const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">("free");
+  const [creditBalance, setCreditBalance] = useState(0);
+  const [lockedDueToLimit, setLockedDueToLimit] = useState(false);
+  const [countdown, setCountdown] = useState("");
+
   // Input state
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
+
+  // Per-conversation lock (derived — must be before countdown useEffect)
+  const FREE_MSG_LIMIT = 10;
+  const isFreeUser = userPlan === "free" && creditBalance === 0;
+  const userMsgs = messages.filter(m => m.role === "user");
+  const isConvLocked = isFreeUser && userMsgs.length >= FREE_MSG_LIMIT;
+  const lockExpiresAt = isConvLocked
+    ? new Date(userMsgs[FREE_MSG_LIMIT - 1].created_at).getTime() + 24 * 3_600_000
+    : null;
 
   // UI refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -153,6 +170,30 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fetch user plan/credits
+  useEffect(() => {
+    getMe().then(res => {
+      setUserPlan(res.data.plan ?? "free");
+      setCreditBalance(res.data.credit_balance ?? 0);
+    }).catch(() => {});
+  }, []);
+
+  // Countdown timer for conv lock
+  useEffect(() => {
+    if (!lockExpiresAt) { setCountdown(""); return; }
+    const update = () => {
+      const diff = lockExpiresAt - Date.now();
+      if (diff <= 0) { setCountdown(""); return; }
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      setCountdown(`${h}h ${m}m`);
+    };
+    update();
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockExpiresAt]);
 
   // Open sidebar by default only on large screens
   useEffect(() => {
@@ -275,6 +316,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
 
   const handleNewChat = async () => {
     if (isMobile) setSidebarOpen(false);
+    setLockedDueToLimit(false);
     try {
       const res = await coachCreateConversation();
       const newConv: Conversation = res.data;
@@ -403,13 +445,24 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
         );
         setConvTitle(text.slice(0, 60) || convTitle);
       }
-    } catch {
+    } catch (err: unknown) {
       setMessages(prev => prev.filter(m => m.id !== thinkingId));
+      const errResp = (err as { response?: { status?: number; data?: { detail?: { message?: string; hint?: string; payg_limit?: boolean } | string } } })?.response;
+      const is403 = errResp?.status === 403;
+      const detail = errResp?.data?.detail;
+      const isPayg = typeof detail === "object" && detail?.payg_limit === true;
+      if (is403) setLockedDueToLimit(true);
+      const errContent = is403
+        ? typeof detail === "object"
+          ? `${detail.message ?? ""} ${detail.hint ?? ""}`.trim()
+          : (detail ?? "You've reached your message limit.")
+        : "I'm temporarily offline. Check your connection and try again.";
       const errMsg: Message = {
         id: `err-${Date.now()}`,
         role: "assistant",
-        content: "I'm temporarily offline. Check your connection and try again.",
+        content: errContent,
         created_at: new Date().toISOString(),
+        payg_limit: isPayg,
       };
       setMessages(prev => [...prev.filter(m => m.id !== optimisticUser.id), optimisticUser, errMsg]);
     } finally {
@@ -429,6 +482,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const displayedConvs = searchResults ?? conversations;
   const grouped = groupByDate(displayedConvs);
   const hasContent = input.trim() || imagePreview;
+  const inputLocked = isConvLocked || lockedDueToLimit;
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -1077,6 +1131,66 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
               </div>
             )}
 
+            {/* Lock banner */}
+            {inputLocked && (
+              <div style={{
+                padding: "14px 16px",
+                borderRadius: 16,
+                background: "rgba(15,15,28,0.97)",
+                border: "1px solid rgba(123,47,255,0.35)",
+                marginBottom: 8,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 17, color: "#a855f7" }}>lock</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>
+                    Chat limit reached
+                  </span>
+                  {countdown && (
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: "#64748b" }}>
+                      Unlocks in {countdown}
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 12px" }}>
+                  You've used {FREE_MSG_LIMIT} messages in this chat. Start a new chat now (free model) or wait for this one to unlock.
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => { handleNewChat(); }}
+                    style={{
+                      flex: 1,
+                      padding: "8px 0",
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      color: "#cbd5e1",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    New Chat
+                  </button>
+                  <Link
+                    href="/billing"
+                    style={{
+                      flex: 1,
+                      padding: "8px 0",
+                      borderRadius: 10,
+                      background: "linear-gradient(135deg,#7b2fff,#a855f7)",
+                      color: "#fff",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      textDecoration: "none",
+                      textAlign: "center",
+                    }}
+                  >
+                    Get Pro
+                  </Link>
+                </div>
+              </div>
+            )}
+
             {/* Input pill */}
             <div
               style={{
@@ -1085,16 +1199,18 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 gap: 8,
                 padding: "8px 8px 8px 14px",
                 borderRadius: 26,
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.1)",
+                background: inputLocked ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.05)",
+                border: `1px solid ${inputLocked ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.1)"}`,
                 transition: "border-color 0.18s",
+                opacity: inputLocked ? 0.5 : 1,
+                pointerEvents: inputLocked ? "none" : "auto",
               }}
-              onFocus={() => {}}
             >
-              {/* Attach */}
+              {/* Attach — locked for free users */}
               <button
-                onClick={() => fileInputRef.current?.click()}
-                title="Attach image (or paste)"
+                onClick={() => isFreeUser ? null : fileInputRef.current?.click()}
+                title={isFreeUser ? "Image upload is a Pro feature" : "Attach image (or paste)"}
+                disabled={isFreeUser}
                 style={{
                   flexShrink: 0,
                   width: 34,
@@ -1105,15 +1221,18 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                   justifyContent: "center",
                   background: "transparent",
                   border: "none",
-                  cursor: "pointer",
-                  color: "#3a3f60",
+                  cursor: isFreeUser ? "not-allowed" : "pointer",
+                  color: isFreeUser ? "#2a2f4a" : "#3a3f60",
                   marginBottom: 2,
                   transition: "color 0.15s",
+                  position: "relative",
                 }}
-                onMouseEnter={e => (e.currentTarget.style.color = "#7B2FFF")}
-                onMouseLeave={e => (e.currentTarget.style.color = "#3a3f60")}
+                onMouseEnter={e => { if (!isFreeUser) e.currentTarget.style.color = "#7B2FFF"; }}
+                onMouseLeave={e => { if (!isFreeUser) e.currentTarget.style.color = "#3a3f60"; }}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>attach_file</span>
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
+                  {isFreeUser ? "lock" : "attach_file"}
+                </span>
               </button>
               <input
                 ref={fileInputRef}
@@ -1150,7 +1269,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
               {/* Send — active when has content, Claude-style */}
               <button
                 onClick={() => handleSend()}
-                disabled={sending || !hasContent}
+                disabled={sending || !hasContent || inputLocked}
                 style={{
                   flexShrink: 0,
                   width: 36,
@@ -1367,6 +1486,27 @@ function MessageBubble({
               {msg.content}
             </div>
 
+            {/* Buy credits CTA for PAYG limit */}
+            {msg.payg_limit && (
+              <Link
+                href="/billing"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 10,
+                  padding: "10px 18px",
+                  borderRadius: 12,
+                  background: "linear-gradient(135deg,#7b2fff,#a855f7)",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  textDecoration: "none",
+                }}
+              >
+                Buy More Credits →
+              </Link>
+            )}
 
             {/* 5. Calibration pulse */}
             {meta && isValid(meta.calibration_pulse) && (

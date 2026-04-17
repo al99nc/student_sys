@@ -6,6 +6,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 export const api = axios.create({
   baseURL: API_URL,
   headers: { "Content-Type": "application/json" },
+  timeout: 15000, // 15 s — prevents requests from hanging forever if backend is unreachable
 });
 
 // Attach token automatically
@@ -50,6 +51,8 @@ export interface UserOut {
   year_of_study: number | null;
   subject: string | null;
   topic_area: string | null;
+  credit_balance: number;
+  plan: "free" | "pro" | "enterprise";
   created_at: string;
 }
 
@@ -111,6 +114,43 @@ export const signup = (email: string, password: string) =>
 export const login = (email: string, password: string) =>
   api.post("/auth/login", { email, password });
 
+export const getMe = () => api.get<UserOut>("/auth/me");
+
+export interface BillingConfig {
+  credit_price_cents: number;
+  currency: string;
+  credit_price_iqd: number;
+}
+
+export const getBillingConfig = () => api.get<BillingConfig>("/billing/config");
+
+export const createWaylCheckoutSession = (credits: number) =>
+  api.post<{ checkout_url: string; reference_id: string }>("/billing/wayl-checkout", { credits });
+
+export const verifyWaylPayment = (referenceId: string) =>
+  api.post<{ detail: string; credit_balance: number }>(`/billing/wayl-verify/${referenceId}`);
+
+export const syncWaylPayments = () =>
+  api.post<{ payments_found: number; credits_added: number; credit_balance: number }>("/billing/wayl-sync");
+
+export interface Entitlements {
+  premium: boolean;
+  credit_balance: number;
+  uploads_this_month: number;
+  uploads_limit: number;
+  coach_messages_this_month: number;
+  coach_messages_limit: number;
+  free_ai_model: string;
+  premium_ai_model: string;
+  credit_cost_mcq_process: number;
+  credit_cost_coach_message: number;
+}
+
+export const getEntitlements = () => api.get<Entitlements>("/billing/entitlements");
+
+export const createCheckoutSession = (credits: number) =>
+  api.post<{ checkout_url: string }>("/billing/checkout-session", { credits });
+
 export const saveOnboarding = (name: string, university: string, college: string, year_of_study: number) =>
   api.post("/auth/onboarding", { name, university, college, year_of_study });
 
@@ -119,6 +159,17 @@ export const uploadLecture = (file: File) => {
   const form = new FormData();
   form.append("file", file);
   return api.post("/upload", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
+export const uploadText = (text: string, title: string) =>
+  api.post("/upload-text", { text, title });
+
+export const extractImageText = (imageFile: File) => {
+  const form = new FormData();
+  form.append("file", imageFile);
+  return api.post<{ text: string }>("/extract-image-text", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
 };
