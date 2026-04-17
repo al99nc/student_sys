@@ -1,27 +1,55 @@
 import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from sqlalchemy import text, exc as sa_exc
-from app.db.database import Base, engine, SessionLocal
-from app.core.config import settings
-from app.api import auth, lectures, telegram
-from app.api.telegram import bot_router
-from app.api import performance
-from app.api import coach as coach_api
-from app.api import ai_tools
-from app.core.limiter import limiter
-from app.api import analytics
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import exc as sa_exc, text
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+from app.api import ai_tools, analytics, billing
+from app.api import auth, lectures, telegram
+from app.api import coach as coach_api
+from app.api import performance
+from app.api.telegram import bot_router
+from app.core.config import settings
+from app.core.global_token_guard import (
+    close_global_token_guard,
+    init_global_token_guard,
+)
+from app.core.limiter import limiter
+from app.db.database import Base, SessionLocal, engine
+
 # Import models so Base.metadata includes them for create_all
+import app.models.billing      # noqa: F401  # Subscription, AIUsageLog
 import app.models.performance  # noqa: F401
 import app.models.coach        # noqa: F401
 import app.models.ai_tools     # noqa: F401
+import app.models.models       # noqa: F401  # User, CheckoutPayment on Base.metadata
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup → yield → shutdown."""
+    # ── Startup ───────────────────────────────────────────────────────────
+    db = SessionLocal()
+    try:
+        init_global_token_guard(
+            db,
+            redis_url=settings.REDIS_URL or None,
+        )
+    finally:
+        db.close()
+
+    yield  # app is running
+
+    # ── Shutdown ──────────────────────────────────────────────────────────
+    close_global_token_guard()
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -45,6 +73,9 @@ with engine.connect() as _conn:
         "ALTER TABLE lectures ADD COLUMN subject VARCHAR(255)",
         "ALTER TABLE lectures ADD COLUMN topic_area VARCHAR(255)",
         "ALTER TABLE lectures ADD COLUMN level VARCHAR(50)",
+        "ALTER TABLE users ADD COLUMN credit_balance INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN plan VARCHAR(20) NOT NULL DEFAULT 'free'",
+        "ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(255)",
     ]:
         try:
             _conn.execute(text(_stmt))
@@ -89,6 +120,7 @@ app = FastAPI(
     title="Students Study Assistant",
     description="Upload lectures, get MCQs, summaries, and key concepts powered by AI",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Rate limiting
@@ -116,6 +148,7 @@ app.include_router(performance.router)
 app.include_router(coach_api.router)
 app.include_router(ai_tools.router)
 app.include_router(analytics.router)
+app.include_router(billing.router)
 
 
 @app.get("/")

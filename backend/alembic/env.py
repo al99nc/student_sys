@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.db.database import Base
 
 # Import all models so Alembic's autogenerate can see every table
-from app.models.models import User, Lecture, Result, QuizSession  # noqa: F401
+from app.models.models import User, Lecture, Result, QuizSession, CheckoutPayment, CoachPerformanceUsage  # noqa: F401
 from app.models.coach import CoachConversation, CoachMessage  # noqa: F401
 from app.models.ai_tools import StudentMemory  # noqa: F401
 from app.models.performance import (  # noqa: F401

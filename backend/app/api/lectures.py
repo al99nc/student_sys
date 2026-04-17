@@ -1,12 +1,15 @@
 import os
 import json
 import time
+import base64
 import secrets
 import shutil
 import threading
+import httpx
 from pathlib import Path
 from collections import defaultdict
 from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from app.db.database import get_db
@@ -18,6 +21,20 @@ from app.models.models import User
 from app.services.pdf_service import extract_text_from_pdf
 from app.services.ai_service import generate_study_content, _estimate_processing_time
 from app.core.config import settings
+from app.core.entitlements import (
+    assert_can_upload,
+    refund_credits,
+    try_spend_credits,
+    will_use_premium_for_mcq,
+    is_premium,
+)
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+class UploadTextRequest(BaseModel):
+    text: str
+    title: str = "Pasted content"
 
 router = APIRouter(tags=["lectures"])
 
@@ -59,6 +76,8 @@ async def upload_lecture(
     if not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=400, detail="File is not a valid PDF")
 
+    assert_can_upload(db, current_user)
+
     ensure_upload_dir()
 
     # Sanitize filename to prevent path traversal
@@ -95,6 +114,112 @@ async def upload_lecture(
     db.refresh(lecture)
     return lecture
 
+@router.post("/upload-text", response_model=LectureOut)
+async def upload_text(
+    body: UploadTextRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Accept raw pasted text and store it as a lecture."""
+    text = body.text.strip()
+    if len(text) < 100:
+        raise HTTPException(status_code=400, detail="Text is too short (minimum 100 characters)")
+    if len(text) > 500_000:
+        raise HTTPException(status_code=413, detail="Text is too long (max 500,000 characters)")
+
+    assert_can_upload(db, current_user)
+
+    ensure_upload_dir()
+    safe_title = "".join(c for c in body.title if c.isalnum() or c in " _-")[:60].strip() or "pasted"
+    file_name = f"{current_user.id}_{safe_title}.txt"
+    upload_dir = os.path.normpath(settings.UPLOAD_DIR)
+    file_path = os.path.normpath(os.path.join(upload_dir, file_name))
+    if not file_path.startswith(upload_dir):
+        raise HTTPException(status_code=400, detail="Invalid title")
+
+    Path(file_path).write_text(text, encoding="utf-8")
+
+    lecture = Lecture(
+        user_id=current_user.id,
+        title=body.title[:120],
+        file_path=file_path,
+        university=current_user.university,
+        college=current_user.college,
+        year_of_study=current_user.year_of_study,
+        subject=current_user.subject,
+        topic_area=body.title[:120],
+    )
+    db.add(lecture)
+    db.commit()
+    db.refresh(lecture)
+    return lecture
+
+
+@router.post("/extract-image-text")
+async def extract_image_text(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Use a vision model to extract text from an uploaded image (camera capture or paste)."""
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, or GIF images are supported")
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (max 10 MB)")
+
+    if not settings.CHAT_AI_API_KEY:
+        raise HTTPException(status_code=503, detail="Vision AI is not configured")
+
+    b64 = base64.b64encode(content).decode()
+    data_url = f"data:{content_type};base64,{b64}"
+
+    try:
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "You are an academic content extractor. "
+                                        "Extract ALL text from this image exactly as written — "
+                                        "preserve headings, bullet points, numbered lists, and structure. "
+                                        "Do not summarize, paraphrase, or add any commentary. "
+                                        "Output only the extracted text, nothing else."
+                                    ),
+                                },
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        }
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 4096,
+                },
+            )
+            resp.raise_for_status()
+            extracted = resp.json()["choices"][0]["message"]["content"].strip()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Vision model error: {e.response.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Vision model failed: {str(e)}")
+
+    if not extracted or len(extracted) < 20:
+        raise HTTPException(status_code=422, detail="Could not extract readable text from the image")
+
+    return {"text": extracted}
+
+
 @router.get("/lectures", response_model=List[LectureOut])
 def get_lectures(
     db: Session = Depends(get_db),
@@ -118,9 +243,17 @@ async def estimate_lecture_processing(
     try:
         text = extract_text_from_pdf(lecture.file_path)
     except Exception:
-        raise HTTPException(status_code=422, detail="Could not extract text from PDF")
+        raise HTTPException(status_code=422, detail="Could not extract text from the uploaded file")
 
-    return _estimate_processing_time(text, mode, len(settings.get_all_api_keys()))
+    premium = will_use_premium_for_mcq(current_user)
+    inter = (
+        settings.PREMIUM_INTER_CHUNK_WAIT_SECONDS
+        if premium
+        else settings.FREE_INTER_CHUNK_WAIT_SECONDS
+    )
+    return _estimate_processing_time(
+        text, mode, len(settings.get_all_api_keys()), inter_chunk_wait=inter
+    )
 
 
 @router.post("/process/{lecture_id}", response_model=ProcessStatus)
@@ -140,12 +273,22 @@ async def process_lecture(
     try:
         text = extract_text_from_pdf(lecture.file_path)
     except Exception:
-        raise HTTPException(status_code=422, detail="Could not extract text from PDF")
+        raise HTTPException(status_code=422, detail="Could not extract text from the uploaded file")
 
-    # Call AI
+    # Spend credits for premium MCQ generation; insufficient balance ⇒ free model (no spend)
+    cost = settings.CREDIT_COST_MCQ_PROCESS
+    spent = False
+    if cost > 0:
+        spent = try_spend_credits(db, current_user, cost, commit=True)
+        use_premium = spent
+    else:
+        use_premium = is_premium(current_user)
+
     try:
-        ai_data = await generate_study_content(text, mode=mode)
+        ai_data = await generate_study_content(text, mode=mode, is_premium=use_premium)
     except Exception as e:
+        if spent and cost > 0:
+            refund_credits(db, current_user, cost, commit=True)
         err_str = str(e)
         if "DAILY_LIMIT:" in err_str:
             raise HTTPException(

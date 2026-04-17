@@ -2,10 +2,16 @@ from pathlib import Path
 from pypdf import PdfReader
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """Extract all text from a PDF file."""
+    """Extract all text from a PDF or plain-text file."""
     path = Path(file_path)
     if not path.exists():
-        raise FileNotFoundError(f"PDF not found: {file_path}")
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    if path.suffix.lower() == ".txt":
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            raise ValueError("Text file is empty.")
+        return text.strip()
 
     text = ""
     try:

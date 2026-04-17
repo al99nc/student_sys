@@ -124,10 +124,17 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
     return chunks
 
 
-def _estimate_processing_time(text: str, mode: str, n_keys: int = 1) -> dict:
+def _estimate_processing_time(
+    text: str,
+    mode: str,
+    n_keys: int = 1,
+    *,
+    inter_chunk_wait: int | None = None,
+) -> dict:
     chunks = _chunk_text(text)
     n_chunks = len(chunks)
     max_tokens = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])["max_tokens"]
+    wait = inter_chunk_wait if inter_chunk_wait is not None else _INTER_CHUNK_WAIT
 
     per_chunk_seconds = max_tokens / ESTIMATED_TPS + 2   # +2 for network + prefill
 
@@ -135,7 +142,7 @@ def _estimate_processing_time(text: str, mode: str, n_keys: int = 1) -> dict:
     # Between batches we wait _INTER_CHUNK_WAIT for each key's TPM window to reset.
     batch_size = max(1, n_keys)
     n_batches = math.ceil(n_chunks / batch_size)
-    total_seconds = n_batches * per_chunk_seconds + max(0, n_batches - 1) * _INTER_CHUNK_WAIT
+    total_seconds = n_batches * per_chunk_seconds + max(0, n_batches - 1) * wait
 
     return {
         "chunks": n_chunks,
@@ -186,6 +193,8 @@ async def _call_single_chunk(
     total_chunks: int,
     api_key: str | None = None,
     max_retries: int = 3,
+    *,
+    model: str | None = None,
 ) -> tuple[dict, float]:
     system_prompt, user_prompt_template = _get_prompts(mode)
     user_prompt = user_prompt_template.format(text=text)
@@ -198,12 +207,13 @@ async def _call_single_chunk(
         )
 
     cfg = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])
+    resolved_model = model or settings.FREE_AI_MODEL
     headers = {
         "Authorization": f"Bearer {api_key or settings.AI_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": settings.AI_MODEL,
+        "model": resolved_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -423,6 +433,8 @@ async def _call_chunk_with_rotation(
     mode: str,
     chunk_index: int,
     total_chunks: int,
+    *,
+    model: str,
 ) -> tuple[dict, float]:
     """Call a single chunk, rotating keys on TPM, daily-limit, and invalid-key errors.
 
@@ -445,7 +457,9 @@ async def _call_chunk_with_rotation(
         if key not in available_keys:
             continue  # another concurrent chunk already removed this key
         try:
-            return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
+            return await _call_single_chunk(
+                text, mode, chunk_index, total_chunks, api_key=key, model=model
+            )
         except RuntimeError as e:
             err_str = str(e)
             if "DAILY_LIMIT" in err_str:
@@ -487,7 +501,9 @@ async def _call_chunk_with_rotation(
         await asyncio.sleep(wait)
         for key in list(available_keys):
             try:
-                return await _call_single_chunk(text, mode, chunk_index, total_chunks, api_key=key)
+                return await _call_single_chunk(
+                    text, mode, chunk_index, total_chunks, api_key=key, model=model
+                )
             except RuntimeError as e:
                 last_error = e
                 err_str = str(e)
@@ -507,7 +523,9 @@ async def _call_chunk_with_rotation(
     )
 
 
-async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str, Any]:
+async def generate_study_content(
+    text: str, mode: str = "highyield", *, is_premium: bool = False
+) -> Dict[str, Any]:
     available_keys = settings.get_all_api_keys()
     if not available_keys:
         logger.warning("No API keys configured — returning mock data")
@@ -518,11 +536,20 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
         logger.warning(f"Unknown mode '{mode}' — falling back to highyield")
         mode = "highyield"
 
+    ai_model = settings.PREMIUM_AI_MODEL if is_premium else settings.FREE_AI_MODEL
+    inter_wait = (
+        settings.PREMIUM_INTER_CHUNK_WAIT_SECONDS
+        if is_premium
+        else settings.FREE_INTER_CHUNK_WAIT_SECONDS
+    )
+
     chunks = _chunk_text(text)
     total_chunks = len(chunks)
     n_keys = len(available_keys)
 
-    time_estimate = _estimate_processing_time(text, mode, n_keys)
+    time_estimate = _estimate_processing_time(
+        text, mode, n_keys, inter_chunk_wait=inter_wait
+    )
     logger.info(
         f"[{mode}] Estimate: {total_chunks} chunk(s), {n_keys} key(s), "
         f"~{time_estimate['estimated_range']}"
@@ -533,7 +560,7 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
 
         # Batch-parallel: run up to n_keys chunks simultaneously, one key per chunk.
         # Each key has its own 8 000 TPM budget, so parallel chunks don't contend.
-        # Between batches we wait _INTER_CHUNK_WAIT so every key's TPM window resets.
+        # Between batches we wait inter_wait so every key's TPM window resets.
         chunk_output: list[tuple[dict, float]] = []
         batch_size = max(1, n_keys)
 
@@ -542,17 +569,19 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
 
             if batch_start > 0:
                 logger.info(
-                    f"[{mode}] Waiting {_INTER_CHUNK_WAIT}s before batch "
+                    f"[{mode}] Waiting {inter_wait}s before batch "
                     f"{batch_start // batch_size + 1} (TPM window reset)"
                 )
-                await asyncio.sleep(_INTER_CHUNK_WAIT)
+                await asyncio.sleep(inter_wait)
 
             logger.info(
                 f"[{mode}] Processing chunks {batch_start + 1}–{batch_indices[-1] + 1} "
                 f"of {total_chunks} in parallel ({len(batch_indices)} key(s))"
             )
             tasks = [
-                _call_chunk_with_rotation(available_keys, chunks[i], mode, i, total_chunks)
+                _call_chunk_with_rotation(
+                    available_keys, chunks[i], mode, i, total_chunks, model=ai_model
+                )
                 for i in batch_indices
             ]
             batch_results = await asyncio.gather(*tasks)
@@ -582,6 +611,8 @@ async def generate_study_content(text: str, mode: str = "highyield") -> Dict[str
         merged["mcqs"] = valid_mcqs
         merged["_meta"] = {
             "mode": mode,
+            "ai_model": ai_model,
+            "premium_tier": is_premium,
             "total_generated": len(raw_mcqs),
             "total_after_dedup": len(deduped),
             "total_valid": len(valid_mcqs),

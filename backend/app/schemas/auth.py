@@ -22,10 +22,21 @@ class UserOut(BaseModel):
     year_of_study: Optional[int] = None
     subject: Optional[str] = None
     topic_area: Optional[str] = None
+    credit_balance: int = 0
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_str(cls, v) -> str:
+        return str(v)
+
+    @field_validator("credit_balance", mode="before")
+    @classmethod
+    def credit_balance_none(cls, v: Optional[int]) -> int:
+        return 0 if v is None else v
 
 
 class OnboardingUpdate(BaseModel):

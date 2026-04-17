@@ -1383,6 +1383,8 @@ async def _call_ai_for_chat(
     user_message: str,
     conversation_history: list[dict] | None = None,
     analyzer_decision: dict | None = None,
+    *,
+    premium: bool = False,
 ) -> dict:
     """
     AI coaching chat. Supports multi-turn history.
@@ -1505,7 +1507,38 @@ RULES FOR FILLING RESPONSE FIELDS:
     else:
         briefing_section = "\n(No analyzer decision — derive priority from STUDENT DATA above. Set session_prediction, calibration_pulse, check_in to null.)\n"
 
+    # ── Field-awareness block ─────────────────────────────────────────────────
+    primary_field   = (context.get("primary_field") or "").strip()
+    secondary_fields: list[str] = context.get("secondary_fields") or []
+
+    if primary_field:
+        sec_str = ", ".join(secondary_fields) if secondary_fields else "none yet"
+        field_block = f"""
+━━ DOMAIN AWARENESS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Primary field: {primary_field}
+Secondary interests (detected from repeated questions): {sec_str}
+
+DEPTH RULES — follow strictly:
+1. PRIMARY FIELD ({primary_field}):
+   → Full depth. Use domain-specific methods (e.g. IRAC for law, clinical reasoning for medicine).
+   → Detailed explanations, examples, and structured breakdowns.
+
+2. SECONDARY FIELDS ({sec_str if secondary_fields else "none"}):
+   → Medium depth. Clear explanation with key points. No deep dives unless asked.
+
+3. ALL OTHER FIELDS:
+   → Short summary only (1–3 sentences max). Never refuse — just keep it brief.
+   → Example: user is a law student asking about SIADH → one sentence, done.
+
+NEVER reject a question. NEVER say "that's outside your field."
+NEVER force-redirect off-field questions back to {primary_field}.
+Feel natural — not like a filtered system.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+    else:
+        field_block = ""
+
     system_prompt = f"""You are CortexQ — an adaptive AI companion with three dynamic roles: Friend, Teacher, and Coach.
+{field_block}
 
 Your goal is NOT to dump information. Your goal is to guide, support, and adapt to the student like a real human companion.
 You are ONE consistent personality across all modes — never feel like switching systems.
@@ -1674,8 +1707,16 @@ Return ONLY this JSON — no markdown, no extra text:
     messages.append({"role": "user", "content": user_message})
 
     # ── Call Groq ───────────────────────────────────────────────────────
+    if not settings.CHAT_AI_API_KEY:
+        logging.error("_call_ai_for_chat: CHAT_AI_API_KEY is not set — skipping AI call")
+        return None
+
+    _chat_model = settings.PREMIUM_CHAT_MODEL if premium else settings.FREE_CHAT_MODEL
+    _timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
+    print(f"[MODEL] _call_ai_for_chat using: {_chat_model} (premium={premium})", flush=True)
+
     try:
-        async with httpx.AsyncClient(timeout=40.0) as client:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -1683,7 +1724,7 @@ Return ONLY this JSON — no markdown, no extra text:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": getattr(settings, "CHAT_AI_MODEL", "llama-3.3-70b-versatile"),
+                    "model": _chat_model,
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 1400,
@@ -1919,6 +1960,9 @@ Overconfidence rate: {f"{overconf:.0%}" if isinstance(overconf, float) else "unk
 
 Recent sessions: {len(recent)} sessions on record"""
 
+    _analyzer_model = getattr(settings, "ANALYZER_MODEL", "llama-3.3-70b-versatile")
+    print(f"[MODEL] _run_analyzer using: {_analyzer_model}", flush=True)
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -1927,12 +1971,11 @@ Recent sessions: {len(recent)} sessions on record"""
                 "Content-Type": "application/json",
             },
             json={
-                "model": getattr(settings, "ANALYZER_MODEL", "llama-3.3-70b-versatile"),
+                "model": _analyzer_model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "temperature": 0.1,
                 "max_tokens": 500,
                 "response_format": {"type": "json_object"},
             },
@@ -1999,6 +2042,9 @@ ONLY return JSON. No extra text. No explanations."""
 
 Student overconfidence rate: {f"{overconf:.0%}" if isinstance(overconf, float) else "unknown"}"""
 
+    _humanizer_model = getattr(settings, "HUMANIZER_MODEL", "llama-3.3-70b-versatile")
+    print(f"[MODEL] _run_humanizer using: {_humanizer_model}", flush=True)
+
     async with httpx.AsyncClient(timeout=25.0) as client:
         resp = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -2007,7 +2053,7 @@ Student overconfidence rate: {f"{overconf:.0%}" if isinstance(overconf, float) e
                 "Content-Type": "application/json",
             },
             json={
-                "model": getattr(settings, "HUMANIZER_MODEL", "llama-3.3-70b-versatile"),
+                "model": _humanizer_model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -2066,14 +2112,46 @@ async def chat_with_coach(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from uuid import uuid4
+
+    from app.core.entitlements import (
+        assert_can_send_coach_message,
+        is_premium,
+        refund_credits,
+        try_spend_credits,
+    )
+    from app.models.models import CoachPerformanceUsage
+
     message = body.get("message")
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
+    assert_can_send_coach_message(db, current_user)
+
+    cost = settings.CREDIT_COST_COACH_MESSAGE
+    spent = False
+    if cost > 0:
+        spent = try_spend_credits(db, current_user, cost, commit=True)
+        _premium = spent
+    else:
+        _premium = is_premium(current_user)
+
     history = body.get("conversation_history", [])
 
     context = _build_student_context(current_user.id, db)
-    answer = await _call_ai_for_chat(context, message, conversation_history=history)
+    try:
+        answer = await _call_ai_for_chat(
+            context,
+            message,
+            conversation_history=history,
+            premium=_premium,
+        )
+    except Exception:
+        if cost > 0 and spent:
+            refund_credits(db, current_user, cost, commit=True)
+        raise
+
+    db.add(CoachPerformanceUsage(id=str(uuid4()), user_id=current_user.id))
 
     # ── Process AI tool calls ──────────────────────────────────────────────────
     save_memory_req = answer.get("save_memory")
@@ -2114,6 +2192,7 @@ async def chat_with_coach(
             ]
             answer["practice_document_id"] = practice_qs[0].document_id
 
+    db.commit()
     return answer
 
 # ── POST /students/me/exam-date ───────────────────────────────────────────────

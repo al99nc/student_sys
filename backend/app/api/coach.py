@@ -24,6 +24,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.entitlements import (
+    assert_can_send_coach_message,
+    is_premium,
+    refund_credits,
+    try_spend_credits,
+)
 from app.db.database import get_db
 from app.api.deps import get_current_user
 from app.models.models import User
@@ -36,6 +42,132 @@ from app.api.performance import _build_student_context, _call_ai_for_chat, _chat
 from app.api.ai_tools import tool_save_memory
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
+
+# ── Field-awareness constants ──────────────────────────────────────────────────
+# Maps each detectable academic field to keyword signals
+_FIELD_KEYWORDS: dict[str, list[str]] = {
+    "medicine":    ["anatomy", "physiology", "pharmacology", "diagnosis", "disease", "symptom",
+                    "treatment", "pathology", "clinical", "patient", "surgery", "drug", "dose",
+                    "infection", "bacteria", "virus", "heart", "liver", "kidney", "lung", "blood",
+                    "siadh", "hypertension", "diabetes", "cancer", "tumor", "mcq", "usmle", "mbbs"],
+    "law":         ["contract", "tort", "negligence", "statute", "legal", "court", "judge",
+                    "plaintiff", "defendant", "liability", "crime", "evidence", "constitution",
+                    "legislation", "irac", "case law", "criminal", "civil", "rights", "duty"],
+    "engineering": ["circuit", "voltage", "current", "resistance", "mechanics", "thermodynamics",
+                    "algorithm", "data structure", "stress", "strain", "fluid", "heat transfer",
+                    "signal", "differential equation", "control system", "transistor", "material"],
+    "computer":    ["code", "programming", "software", "database", "network", "operating system",
+                    "machine learning", "api", "function", "variable", "class", "object", "sql",
+                    "python", "javascript", "typescript", "react", "cloud", "security", "docker"],
+    "pharmacy":    ["pharmacokinetics", "pharmacodynamics", "drug interaction", "bioavailability",
+                    "receptor", "agonist", "antagonist", "formulation", "compounding", "dispensing"],
+    "nursing":     ["nursing", "patient care", "vital signs", "medication administration",
+                    "wound care", "assessment", "nursing process", "nclex"],
+    "dentistry":   ["tooth", "dental", "oral", "caries", "pulp", "extraction", "orthodontic",
+                    "periodontal", "endodontic", "crown", "filling", "gum"],
+    "business":    ["finance", "accounting", "marketing", "management", "economics", "balance sheet",
+                    "revenue", "profit", "investment", "strategy", "supply chain", "hrm"],
+    "science":     ["chemistry", "biology", "physics", "organic", "inorganic", "quantum",
+                    "genetics", "evolution", "cell", "molecule", "atom", "reaction", "enzyme"],
+    "arts":        ["literature", "history", "philosophy", "art", "culture", "sociology",
+                    "psychology", "anthropology", "linguistics", "rhetoric", "ethics"],
+    "education":   ["pedagogy", "curriculum", "learning objective", "assessment", "teaching",
+                    "student engagement", "lesson plan", "bloom"],
+}
+
+_SECONDARY_THRESHOLD = 3  # questions before a field becomes a secondary interest
+
+
+def _detect_field(text: str) -> str | None:
+    """Return the most likely academic field for a message, or None if unclear."""
+    text_lower = text.lower()
+    scores: dict[str, int] = {}
+    for field, keywords in _FIELD_KEYWORDS.items():
+        hit = sum(1 for kw in keywords if kw in text_lower)
+        if hit > 0:
+            scores[field] = hit
+    if not scores:
+        return None
+    return max(scores, key=lambda f: scores[f])
+
+
+def _get_field_memory(student_id: str, db: Session) -> tuple[dict, list[str]]:
+    """
+    Returns (field_question_counts, secondary_fields) from memory.
+    Both stored as JSON strings in StudentMemory.
+    """
+    from app.models.ai_tools import StudentMemory
+    counts_mem = db.query(StudentMemory).filter(
+        StudentMemory.student_id == student_id,
+        StudentMemory.key == "_field_question_counts",
+    ).first()
+    secondary_mem = db.query(StudentMemory).filter(
+        StudentMemory.student_id == student_id,
+        StudentMemory.key == "_secondary_fields",
+    ).first()
+
+    counts: dict = {}
+    secondary: list[str] = []
+    try:
+        if counts_mem:
+            counts = json.loads(counts_mem.value)
+    except Exception:
+        pass
+    try:
+        if secondary_mem:
+            secondary = json.loads(secondary_mem.value)
+    except Exception:
+        pass
+    return counts, secondary
+
+
+def _update_field_interest(
+    student_id: str,
+    message: str,
+    primary_field: str | None,
+    db: Session,
+) -> list[str]:
+    """
+    Detect the field of the message, increment its counter, promote to
+    secondary_fields after _SECONDARY_THRESHOLD questions. Returns updated
+    secondary_fields list.
+    """
+    detected = _detect_field(message)
+    if not detected:
+        return _get_field_memory(student_id, db)[1]
+
+    # Don't track the primary field — it's already at full depth
+    primary_norm = (primary_field or "").lower().strip()
+    if detected == primary_norm:
+        return _get_field_memory(student_id, db)[1]
+
+    counts, secondary = _get_field_memory(student_id, db)
+    counts[detected] = counts.get(detected, 0) + 1
+
+    # Promote to secondary if threshold reached
+    if counts[detected] >= _SECONDARY_THRESHOLD and detected not in secondary:
+        secondary.append(detected)
+
+    # Persist both
+    try:
+        tool_save_memory(
+            student_id, "_field_question_counts",
+            "Field question counts (system)",
+            json.dumps(counts), db,
+            type="context", importance=0.1,
+            reason="Tracks how many questions per field for adaptive depth",
+        )
+        tool_save_memory(
+            student_id, "_secondary_fields",
+            "Secondary interest fields",
+            json.dumps(secondary), db,
+            type="context", importance=0.4,
+            reason="Fields the student repeatedly asks about outside their primary",
+        )
+    except Exception:
+        pass  # never block chat for tracking failure
+
+    return secondary
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -185,6 +317,16 @@ async def send_message(
     if image_data and len(image_data) > _MAX_IMAGE_B64:
         raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
 
+    assert_can_send_coach_message(db, current_user)
+
+    cost = settings.CREDIT_COST_COACH_MESSAGE
+    spent = False
+    if cost > 0:
+        spent = try_spend_credits(db, current_user, cost, commit=True)
+        _premium = spent
+    else:
+        _premium = is_premium(current_user)
+
     # ── Save user message ─────────────────────────────────────────────────────
     user_msg = CoachMessage(
         id=str(uuid4()),
@@ -229,8 +371,14 @@ async def send_message(
     else:
         user_message_for_ai = text
 
+    # ── Track field interest + update secondary fields ────────────────────────
+    primary_field = getattr(current_user, "college", None)  # set at onboarding
+    secondary_fields = _update_field_interest(current_user.id, text, primary_field, db)
+
     # ── Call AI ───────────────────────────────────────────────────────────────
     context = _build_student_context(current_user.id, db)
+    context["primary_field"] = primary_field or ""
+    context["secondary_fields"] = secondary_fields
 
     # Run the Analyzer first so the chat model gets a precise briefing instead
     # of having to re-derive priority from raw numbers itself.
@@ -243,18 +391,31 @@ async def send_message(
     except Exception:
         analyzer_decision = None  # no data yet — chat works fine without it
 
-    if image_data and image_mime:
-        # Vision call also receives the analyzer decision via context extension
-        if analyzer_decision:
-            context = {**context, "_analyzer_decision": analyzer_decision}
-        answer = await _call_ai_vision(context, user_message_for_ai, image_data, image_mime, history)
-    else:
-        answer = await _call_ai_for_chat(
-            context,
-            user_message_for_ai,
-            conversation_history=history,
-            analyzer_decision=analyzer_decision,
-        )
+    try:
+        if image_data and image_mime:
+            # Vision call also receives the analyzer decision via context extension
+            if analyzer_decision:
+                context = {**context, "_analyzer_decision": analyzer_decision}
+            answer = await _call_ai_vision(
+                context,
+                user_message_for_ai,
+                image_data,
+                image_mime,
+                history,
+                premium=_premium,
+            )
+        else:
+            answer = await _call_ai_for_chat(
+                context,
+                user_message_for_ai,
+                conversation_history=history,
+                analyzer_decision=analyzer_decision,
+                premium=_premium,
+            )
+    except Exception:
+        if cost > 0 and spent:
+            refund_credits(db, current_user, cost, commit=True)
+        raise
 
     # ── Attach hard-data enrichments (no AI needed — computed from context) ──────
     if analyzer_decision and analyzer_decision.get("primary_topic"):
@@ -470,11 +631,23 @@ async def generate_practice(
     if not body.topic.strip():
         raise HTTPException(status_code=400, detail="topic is required")
     count = max(1, min(body.count, 15))  # clamp 1-15
-    questions = await _generate_fresh_mcqs(body.topic.strip(), count)
+    cost = settings.CREDIT_COST_COACH_MESSAGE
+    spent = False
+    if cost > 0:
+        spent = try_spend_credits(db, current_user, cost, commit=True)
+        _premium = spent
+    else:
+        _premium = is_premium(current_user)
+    try:
+        questions = await _generate_fresh_mcqs(body.topic.strip(), count, premium=_premium)
+    except Exception:
+        if cost > 0 and spent:
+            refund_credits(db, current_user, cost, commit=True)
+        raise
     return {"topic": body.topic, "questions": questions}
 
 
-async def _generate_fresh_mcqs(topic: str, count: int) -> list[dict]:
+async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list[dict]:
     """
     Call AI to produce `count` unique MCQs on `topic`.
     Returns list of { question, options, answer, explanation, topic }.
@@ -500,8 +673,12 @@ async def _generate_fresh_mcqs(topic: str, count: int) -> list[dict]:
 
     user_prompt = f"Generate exactly {count} high-quality MCQ questions on the topic: {topic}"
 
+    _mcq_model = settings.PREMIUM_CHAT_MODEL if premium else settings.FREE_CHAT_MODEL
+    _timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
+    print(f"[MODEL] coach MCQ generation using: {_mcq_model} (premium={premium})", flush=True)
+
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -509,12 +686,12 @@ async def _generate_fresh_mcqs(topic: str, count: int) -> list[dict]:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": getattr(settings, "CHAT_AI_MODEL", "llama-3.3-70b-versatile"),
+                    "model": _mcq_model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": user_prompt},
                     ],
-                    "temperature": 0.8,   # higher = more variety between runs
+                    "temperature": 0.8,
                     "max_tokens": 3000,
                     "response_format": {"type": "json_object"},
                 },
@@ -553,6 +730,8 @@ async def _call_ai_vision(
     image_data: str,
     image_mime: str,
     history: list[dict],
+    *,
+    premium: bool = False,
 ) -> dict:
     """
     Vision-capable AI call. Falls back to regular chat if vision call fails.
@@ -682,9 +861,10 @@ RESPONSE SCHEMA:
     })
 
     _log = logging.getLogger(__name__)
+    _vision_timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
 
     try:
-        async with httpx.AsyncClient(timeout=40.0) as client:
+        async with httpx.AsyncClient(timeout=_vision_timeout) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -715,7 +895,9 @@ RESPONSE SCHEMA:
         # Preserve analyzer decision through the fallback path
         fallback_decision = context.pop("_analyzer_decision", None)
         return await _call_ai_for_chat(
-            context, fallback_msg,
+            context,
+            fallback_msg,
             conversation_history=history,
             analyzer_decision=fallback_decision,
+            premium=premium,
         )
