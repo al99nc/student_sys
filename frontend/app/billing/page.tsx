@@ -41,9 +41,21 @@ function BillingContent() {
   const [banner, setBanner] = useState<"success" | "canceled" | null>(null);
   const [ent, setEnt] = useState<Entitlements | null>(null);
   const [creditsEnabled, setCreditsEnabled] = useState(true);
-  const [monthlyLimit, setMonthlyLimit] = useState(50);
+  const [monthlyLimit, setMonthlyLimit] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("cortexq_monthly_limit");
+      if (saved) return Math.max(1, parseInt(saved, 10));
+    }
+    return 1000;
+  });
   const [editingLimit, setEditingLimit] = useState(false);
-  const [limitInput, setLimitInput] = useState("50");
+  const [limitInput, setLimitInput] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("cortexq_monthly_limit");
+      if (saved) return saved;
+    }
+    return "1000";
+  });
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -293,6 +305,7 @@ function BillingContent() {
                     const v = Math.max(1, Math.floor(Number(limitInput) || 1));
                     setMonthlyLimit(v);
                     setLimitInput(String(v));
+                    localStorage.setItem("cortexq_monthly_limit", String(v));
                     setEditingLimit(false);
                   }}
                 >

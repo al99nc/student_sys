@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 import os
 import sys
 
@@ -44,24 +44,40 @@ class Settings(BaseSettings):
     AI_API_KEY: str = ""
     AI_API_KEYS: str = ""          # comma-separated extra keys
     CHAT_AI_API_KEY: str = ""
+
+    # ── Gemini (Google AI Studio) ─────────────────────────────────────────────
+    GEMINI_PAID_API_KEY: str = ""
+    GEMINI_PAID_MODEL: str = "gemini-2.5-flash"   # overridable via .env
+    GEMINI_API_BASE: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+    # ── OpenRouter (preferred for premium — no billing region issues) ─────────
+    open_rout_PAID_API_KEY: str = ""
+    open_rout_PAID_MODEL: str = "google/gemini-2.5-flash"
+
     # Legacy default used if code paths omit explicit tier; prefer FREE_* / PREMIUM_* below.
     AI_MODEL: str = "llama-3.3-70b-versatile"
     ANALYZER_MODEL: str = "gpt-oss-120b"
     HUMANIZER_MODEL: str = "llama-3.3-70b-versatile"
     CHAT_AI_MODEL: str = "openai/gpt-oss-120b"
 
-    # Tiered models (credit_balance > 0 ⇒ premium)
+    # Tiered models — free uses Groq, paid uses Gemini (synced from GEMINI_PAID_MODEL)
     FREE_AI_MODEL: str = "llama-3.3-70b-versatile"
-    PREMIUM_AI_MODEL: str = "openai/gpt-oss-120b"
+    PREMIUM_AI_MODEL: str = "gemini-2.5-flash"
     FREE_CHAT_MODEL: str = "llama-3.3-70b-versatile"
-    PREMIUM_CHAT_MODEL: str = "openai/gpt-oss-120b"
+    PREMIUM_CHAT_MODEL: str = "gemini-2.5-flash"
+
+    @model_validator(mode="after")
+    def _sync_gemini_model(self) -> "Settings":
+        self.PREMIUM_AI_MODEL = self.GEMINI_PAID_MODEL
+        self.PREMIUM_CHAT_MODEL = self.GEMINI_PAID_MODEL
+        return self
     FREE_CHAT_TIMEOUT_S: float = 25.0
     PREMIUM_CHAT_TIMEOUT_S: float = 120.0
     FREE_INTER_CHUNK_WAIT_SECONDS: int = 60
     PREMIUM_INTER_CHUNK_WAIT_SECONDS: int = 20
 
-    FREE_PDF_UPLOADS_PER_MONTH: int = 2
-    FREE_COACH_MESSAGES_PER_MONTH: int = 10
+    FREE_PDF_UPLOADS_PER_MONTH: int = 10
+    FREE_COACH_MESSAGES_PER_MONTH: int = 300
     DATABASE_URL: str = "sqlite:///./students.db"
     UPLOAD_DIR: str = "uploads"
     TELEGRAM_BOT_TOKEN: str = ""
@@ -127,6 +143,21 @@ class Settings(BaseSettings):
     # Avoids hardcoding production IPs directly in source code.
     # Example in .env:  CORS_ORIGINS=http://localhost:3000,https://themcq.xyz
     CORS_ORIGINS: str = "http://localhost:3000,https://themcq.xyz,https://www.themcq.xyz"
+
+    def get_gemini_key(self, is_premium: bool) -> str:
+        if is_premium and self.open_rout_PAID_API_KEY:
+            return self.open_rout_PAID_API_KEY
+        return self.GEMINI_PAID_API_KEY if is_premium else ""
+
+    def get_premium_chat_url(self) -> str:
+        if self.open_rout_PAID_API_KEY:
+            return "https://openrouter.ai/api/v1/chat/completions"
+        return f"{self.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
+
+    def get_premium_chat_model(self) -> str:
+        if self.open_rout_PAID_API_KEY:
+            return self.open_rout_PAID_MODEL
+        return self.GEMINI_PAID_MODEL
 
     def get_all_api_keys(self) -> list[str]:
         keys = [self.AI_API_KEY] if self.AI_API_KEY else []

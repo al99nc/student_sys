@@ -1715,22 +1715,37 @@ Return ONLY this JSON — no markdown, no extra text:
     _timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
     print(f"[MODEL] _call_ai_for_chat using: {_chat_model} (premium={premium})", flush=True)
 
+    _is_gemini = _chat_model.startswith("gemini")
+    if _is_gemini:
+        _chat_url = settings.get_premium_chat_url()
+        _chat_key = settings.get_gemini_key(premium)
+        _chat_model = settings.get_premium_chat_model()
+    else:
+        _chat_url = "https://api.groq.com/openai/v1/chat/completions"
+        _chat_key = settings.CHAT_AI_API_KEY
+    _headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_chat_key}"}
+
+    async def _do_request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            _chat_url,
+            headers=_headers,
+            json={
+                "model": _chat_model,
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 1400,
+                "response_format": {"type": "json_object"},
+            },
+        )
+
     try:
+        import asyncio
         async with httpx.AsyncClient(timeout=_timeout) as client:
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _chat_model,
-                    "messages": messages,
-                    "temperature": 0.3,
-                    "max_tokens": 1400,
-                    "response_format": {"type": "json_object"},
-                },
-            )
+            resp = await _do_request(client)
+            # Retry once on 503 (transient overload)
+            if resp.status_code == 503:
+                await asyncio.sleep(2)
+                resp = await _do_request(client)
 
             if resp.status_code == 429:
                 raise httpx.HTTPStatusError("rate_limited", request=resp.request, response=resp)
@@ -1794,7 +1809,7 @@ Return ONLY this JSON — no markdown, no extra text:
     except httpx.HTTPStatusError as e:
         import logging
         logging.getLogger(__name__).error(
-            "Groq HTTP error %s: %s", e.response.status_code, e.response.text
+            "AI HTTP error %s: %s", e.response.status_code, e.response.text
         )
         if e.response.status_code == 429:
             retry_after = None

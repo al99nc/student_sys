@@ -160,6 +160,8 @@ def get_weak_topics(
 
         topics.append({
             "subtopic": wp.topic,
+            "accuracy_rate": wp.accuracy_rate or 0.0,
+            "total_attempts": wp.total_attempts or 0,
             "error_count": wp.total_attempts - (wp.correct_attempts or 0),
             "decay_rate": wp.decay_rate or 1,
             "decay_severity": severity,

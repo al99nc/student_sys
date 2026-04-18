@@ -6,16 +6,17 @@ import { getResults, recordQuizResult, coachGeneratePractice, FreshMCQ } from "@
 import { isAuthenticated } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   ArrowLeft,
   ArrowRight,
   Timer,
-  CheckCircle2,
   XCircle,
   RotateCcw,
   BookOpen,
-  Bot
+  Bot,
+  Check,
 } from "lucide-react";
 
 interface QuizMCQ {
@@ -45,7 +46,7 @@ export default function QuizPage() {
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [score, setScore] = useState(0);
-  const [questionTime, setQuestionTime] = useState(0);
+  const [sessionTime, setSessionTime] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -88,20 +89,14 @@ export default function QuizPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lectureId, router, freshMode, freshTopic]);
 
-  // Per-question timer
+  // Session timer — starts once, never resets between questions
   useEffect(() => {
-    setQuestionTime(0);
-    if (timerRef.current) clearInterval(timerRef.current);
     if (phase !== "quiz") return;
-    timerRef.current = setInterval(() => setQuestionTime((t) => t + 1), 1000);
+    timerRef.current = setInterval(() => setSessionTime((t) => t + 1), 1000);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [currentQ, phase]);
-
-  useEffect(() => {
-    if (revealed && timerRef.current) clearInterval(timerRef.current);
-  }, [revealed]);
+  }, [phase]);
 
   // Auto-redirect to coach
   useEffect(() => {
@@ -139,214 +134,256 @@ export default function QuizPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
 
   if (questions.length === 0) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background">
-        <p className="text-foreground text-xl font-bold">No MCQs found.</p>
-        <Link href={`/results/${lectureId}`} className="text-cyan-400 underline">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-foreground">
+        <p className="text-xl font-bold">No MCQs found.</p>
+        <Link href={`/results/${lectureId}`} className="text-primary underline text-sm">
           Back to Results
         </Link>
       </div>
     );
   }
 
-  // Result screen
+  // ── Result screen ────────────────────────────────────────────────────────────
   if (phase === "result") {
     const pct = Math.round((score / questions.length) * 100);
 
     return (
-      <div
-        className="min-h-screen flex flex-col items-center justify-center px-6 text-center gap-8 bg-background"
-        style={{ backgroundImage: "radial-gradient(at 50% 0%, rgba(123,47,255,0.15) 0px, transparent 60%)" }}
-      >
-        <div className="grain-overlay" />
-        <p className="text-xs font-bold tracking-[0.25em] uppercase text-cyan-400">Assessment Complete</p>
-        <div className="relative">
-          <div className="text-[7rem] font-black text-foreground leading-none">{score}</div>
-          <div className="text-2xl font-bold text-muted-foreground">/ {questions.length}</div>
-        </div>
-        <Card className="glass-panel border-border/50">
-          <CardContent className="px-8 py-4 flex flex-col gap-1 text-sm text-muted-foreground">
-            <span className="text-foreground font-bold text-lg">{pct}% accuracy</span>
-            <span>{pct >= 70 ? "Well done — you're ready." : "Keep reviewing and try again."}</span>
-          </CardContent>
-        </Card>
-        {fromConvId && (
-          <p className="text-xs text-muted-foreground animate-pulse">Returning to coach in 2 seconds...</p>
-        )}
-        <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setCurrentQ(0);
-              setSelectedLetter(null);
-              setRevealed(false);
-              setScore(0);
-              setPhase("quiz");
-            }}
-            className="flex-1 py-6 rounded-2xl"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Retake
-          </Button>
-          <Button asChild className="flex-1 py-6 synapse-gradient text-white rounded-2xl">
-            <Link href={`/results/${lectureId}`}>
-              <BookOpen className="w-4 h-4 mr-2" />
-              Review
+      <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
+        {/* Header */}
+        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
+            <Link href="/dashboard" className="text-xl font-bold text-foreground">
+              cortexQ
             </Link>
-          </Button>
-        </div>
-        {fromConvId && (
-          <Button asChild className="synapse-gradient text-white rounded-2xl">
-            <Link href={`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}`}>
-              <Bot className="w-4 h-4 mr-2" />
-              Back to Coach with Results
+            <Link
+              href={backHref}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              {fromConvId ? "Back to Coach" : "Back to Results"}
             </Link>
-          </Button>
-        )}
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+            <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
+            <span>/</span>
+            <Link href={`/results/${lectureId}`} className="hover:text-foreground transition-colors">Results</Link>
+            <span>/</span>
+            <span className="text-foreground">Quiz Complete</span>
+          </nav>
+
+          {/* Score */}
+          <div className="flex flex-col items-center justify-center py-12 gap-6">
+            <Badge variant="outline" className="text-xs font-medium tracking-wider uppercase">
+              Assessment Complete
+            </Badge>
+
+            <div className="text-center">
+              <div className="text-8xl font-bold text-foreground leading-none">{score}</div>
+              <div className="text-2xl font-medium text-muted-foreground mt-1">/ {questions.length}</div>
+            </div>
+
+            <Card className="w-full max-w-sm">
+              <CardContent className="p-6 text-center space-y-3">
+                <p className="text-2xl font-bold text-foreground">{pct}%</p>
+                <Progress value={pct} className="h-2" />
+                <p className="text-sm text-muted-foreground">
+                  {pct >= 70 ? "Well done — you're ready." : "Keep reviewing and try again."}
+                </p>
+              </CardContent>
+            </Card>
+
+            {fromConvId && (
+              <p className="text-xs text-muted-foreground animate-pulse">Returning to coach in 2 seconds…</p>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCurrentQ(0);
+                  setSelectedLetter(null);
+                  setRevealed(false);
+                  setScore(0);
+                  setPhase("quiz");
+                }}
+                className="flex-1"
+              >
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Retake
+              </Button>
+              <Button asChild className="flex-1">
+                <Link href={`/results/${lectureId}`}>
+                  <BookOpen className="w-4 h-4 mr-2" />
+                  Review
+                </Link>
+              </Button>
+            </div>
+
+            {fromConvId && (
+              <Button variant="outline" asChild>
+                <Link href={`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}`}>
+                  <Bot className="w-4 h-4 mr-2" />
+                  Back to Coach with Results
+                </Link>
+              </Button>
+            )}
+          </div>
+        </main>
       </div>
     );
   }
 
-  // Quiz screen
+  // ── Quiz screen ──────────────────────────────────────────────────────────────
   const q = questions[currentQ];
-  const progress = (currentQ / questions.length) * 100;
+  const progress = ((currentQ + (revealed ? 1 : 0)) / questions.length) * 100;
 
   return (
-    <div className="relative min-h-screen flex flex-col bg-background text-foreground select-none">
-      <div className="grain-overlay" />
-
-      {/* Progress bar */}
-      <div className="fixed top-0 left-0 w-full h-1 bg-muted z-50">
-        <div
-          className="h-full synapse-gradient transition-all duration-500"
-          style={{ width: `${progress}%`, boxShadow: "0 0 8px rgba(0,210,253,0.6)" }}
-        />
-      </div>
-
-      {/* Header */}
-      <header className="fixed top-0 left-0 w-full z-40 pt-1">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <Link
-            href={backHref}
-            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-sm font-bold"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">{fromConvId ? "Back to Coach" : "Exit"}</span>
+    <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
+      {/* Header — same as results page */}
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
+          <Link href="/dashboard" className="text-xl font-bold text-foreground">
+            cortexQ
           </Link>
 
-          {/* Timer pill */}
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 border border-border/50 backdrop-blur">
-            <Timer className="w-4 h-4 text-yellow-400" />
-            <span className="text-foreground font-bold tracking-tight tabular-nums">{fmt(questionTime)}</span>
+          {/* Centered timer */}
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
+            <Timer className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-bold tabular-nums text-foreground">{fmt(sessionTime)}</span>
           </div>
 
-          <span className="text-xs font-bold text-muted-foreground">
-            {currentQ + 1} <span className="text-muted-foreground/50">/ {questions.length}</span>
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {currentQ + 1} / {questions.length}
+            </span>
+            <Link
+              href={backHref}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">{fromConvId ? "Back to Coach" : "Exit"}</span>
+            </Link>
+          </div>
         </div>
-        <p className="text-center text-[10px] font-bold tracking-[0.25em] uppercase text-cyan-400 pb-1">
-          Neural Assessment in Progress
-        </p>
+        {/* Progress bar — sits flush under the header border */}
+        <Progress value={progress} className="h-0.5 rounded-none" />
       </header>
 
-      {/* Main */}
-      <main className="flex-1 flex flex-col pt-24 pb-36 px-5 max-w-2xl mx-auto w-full">
-        <div className="flex-1 flex flex-col justify-center">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-foreground leading-tight tracking-tight text-center mb-10">
-            {q.question}
-          </h1>
+      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-8">
+          <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
+          <span>/</span>
+          <Link href={`/results/${lectureId}`} className="hover:text-foreground transition-colors">Results</Link>
+          <span>/</span>
+          <span className="text-foreground">Quiz</span>
+        </nav>
 
-          {/* Options */}
-          <div className="flex flex-col gap-3">
-            {q.options.map((option, j) => {
-              const letter = option.charAt(0);
-              const isSelected = selectedLetter === letter;
-              const isCorrect = letter === q.answer;
+        {/* Question */}
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground leading-snug tracking-tight mb-8">
+          {q.question}
+        </h1>
 
-              let cls =
-                "bg-muted/50 border border-border/50 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer active:scale-[0.98]";
-              if (revealed) {
-                if (isCorrect)
-                  cls = "bg-emerald-500/20 border-2 border-emerald-400 text-foreground cursor-default";
-                else if (isSelected)
-                  cls = "bg-destructive/20 border-2 border-destructive text-destructive cursor-default";
-                else cls = "bg-muted/30 border border-border/30 text-muted-foreground/40 cursor-default";
-              } else if (isSelected) {
-                cls = "synapse-gradient border-0 text-white shadow-[0_4px_20px_rgba(123,47,255,0.4)] scale-[1.01]";
-              }
+        {/* Options */}
+        <div className="space-y-3 mb-6">
+          {q.options.map((option, j) => {
+            const letter = option.charAt(0);
+            const isSelected = selectedLetter === letter;
+            const isCorrect = letter === q.answer;
 
-              return (
-                <button
-                  key={j}
-                  onClick={() => handleSelect(letter)}
-                  className={`w-full text-left p-4 rounded-2xl border transition-all duration-200 flex items-center gap-4 ${cls}`}
+            let cls = "border text-left transition-all";
+            if (revealed) {
+              if (isCorrect)
+                cls += " bg-emerald-500/10 border-emerald-500/40 text-foreground";
+              else if (isSelected)
+                cls += " bg-destructive/10 border-destructive/40 text-foreground";
+              else
+                cls += " bg-muted/30 border-border text-muted-foreground";
+            } else if (isSelected) {
+              cls += " bg-primary/10 border-primary/60 text-foreground";
+            } else {
+              cls += " bg-card border-border text-foreground hover:bg-accent hover:border-accent-foreground/20 cursor-pointer";
+            }
+
+            return (
+              <button
+                key={j}
+                onClick={() => handleSelect(letter)}
+                className={`w-full p-4 rounded-xl flex items-center gap-4 ${cls}`}
+              >
+                <span
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 font-bold text-sm ${
+                    revealed && isCorrect
+                      ? "bg-emerald-500 text-white"
+                      : revealed && isSelected && !isCorrect
+                      ? "bg-destructive text-white"
+                      : isSelected
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
                 >
-                  <span
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm ${
-                      revealed && isCorrect
-                        ? "bg-emerald-400 text-black"
-                        : revealed && isSelected && !isCorrect
-                        ? "bg-destructive text-white"
-                        : !revealed && isSelected
-                        ? "bg-white/20 text-white"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {letter}
-                  </span>
-                  <span className="font-medium text-base leading-snug">{option.replace(/^[A-D]\.\s*/, "")}</span>
-                  {revealed && isCorrect && <CheckCircle2 className="w-5 h-5 text-emerald-400 ml-auto flex-shrink-0" />}
-                  {revealed && isSelected && !isCorrect && (
-                    <XCircle className="w-5 h-5 text-destructive ml-auto flex-shrink-0" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Explanation */}
-          {revealed && q.explanation && (
-            <div
-              className={`mt-5 p-4 rounded-2xl text-sm leading-relaxed border ${
-                selectedLetter === q.answer
-                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
-                  : "bg-primary/10 border-primary/20 text-primary"
-              }`}
-            >
-              <span className="font-bold">Answer {q.answer}:</span>{" "}
-              {q.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}
-            </div>
-          )}
+                  {letter}
+                </span>
+                <span className="font-medium text-sm leading-snug flex-1">
+                  {option.replace(/^[A-D]\.\s*/, "")}
+                </span>
+                {revealed && isCorrect && <Check className="w-4 h-4 text-emerald-500 shrink-0" />}
+                {revealed && isSelected && !isCorrect && (
+                  <XCircle className="w-4 h-4 text-destructive shrink-0" />
+                )}
+              </button>
+            );
+          })}
         </div>
+
+        {/* Explanation */}
+        {revealed && q.explanation && (
+          <div
+            className={`p-4 rounded-xl text-sm border leading-relaxed ${
+              selectedLetter === q.answer
+                ? "bg-emerald-500/5 border-emerald-500/20 text-foreground"
+                : "bg-primary/5 border-primary/20 text-foreground"
+            }`}
+          >
+            <span className="font-semibold">Answer {q.answer}:</span>{" "}
+            {q.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}
+          </div>
+        )}
       </main>
 
       {/* Bottom bar */}
-      <div className="fixed bottom-0 left-0 w-full z-40 px-5 pb-8 pt-4 bg-gradient-to-t from-background via-background/90 to-transparent flex items-center justify-between gap-4 max-w-2xl mx-auto left-1/2 -translate-x-1/2 w-full">
-        {!revealed ? (
-          <button onClick={advance} className="text-muted-foreground font-bold hover:text-foreground transition-colors text-sm px-4 py-3">
-            Skip for now
-          </button>
-        ) : (
-          <div />
-        )}
-        <Button
-          onClick={revealed ? advance : undefined}
-          disabled={!revealed}
-          className={`flex items-center gap-2 px-8 py-6 rounded-2xl font-bold text-base transition-all shadow-lg ${
-            revealed
-              ? "synapse-gradient text-white hover:-translate-y-0.5 shadow-[0_4px_24px_rgba(0,210,253,0.35)]"
-              : "bg-muted text-muted-foreground/40 cursor-default"
-          }`}
-        >
-          {currentQ === questions.length - 1 ? "Finish" : "Next Question"}
-          <ArrowRight className="w-4 h-4" />
-        </Button>
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 py-3">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+          {!revealed ? (
+            <button
+              onClick={advance}
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Skip
+            </button>
+          ) : (
+            <div />
+          )}
+          <Button
+            onClick={revealed ? advance : undefined}
+            disabled={!revealed}
+            className="flex items-center gap-2 px-6"
+          >
+            {currentQ === questions.length - 1 ? "Finish" : "Next"}
+            <ArrowRight className="w-4 h-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );

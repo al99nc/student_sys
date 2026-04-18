@@ -317,7 +317,9 @@ async def send_message(
     if image_data and len(image_data) > _MAX_IMAGE_B64:
         raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
 
-    assert_can_send_coach_message(db, current_user)
+    # Read model preference early so the guard can reject free-user Gemini requests
+    model_preference = (body.get("model_preference") or "").lower()
+    assert_can_send_coach_message(db, current_user, model_preference)
 
     cost = settings.CREDIT_COST_COACH_MESSAGE
     spent = False
@@ -326,6 +328,12 @@ async def send_message(
         _premium = spent
     else:
         _premium = is_premium(current_user)
+
+    # Apply explicit model override
+    if model_preference == "gemini":
+        _premium = True
+    elif model_preference == "llama":
+        _premium = False
 
     # ── Save user message ─────────────────────────────────────────────────────
     user_msg = CoachMessage(

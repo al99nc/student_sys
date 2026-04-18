@@ -1,341 +1,352 @@
 "use client";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { logout } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import {
+  getAnalyticsOverview,
+  getAnalyticsTimeline,
+  getAnalyticsWeakTopics,
+  getAnalyticsConfidence,
+  getAnalyticsCoFailures,
+} from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
-  LayoutGrid,
-  Upload,
+  ArrowLeft,
   TrendingUp,
-  Rocket,
-  Medal,
-  Flame,
-  GraduationCap,
-  Download,
-  MoreVertical,
-  Home,
-  Bot,
-  LogOut,
+  Target,
   BarChart3,
-  Menu,
-  User
+  Home,
+  Upload,
+  Bot,
 } from "lucide-react";
 
-const subjects = [
-  { name: "Neuroscience: The Synaptic Gap", score: 92, color: "bg-cyan-500", textColor: "text-cyan-400", date: "Oct 24, 2023", time: "1h 12m" },
-  { name: "Intro to Quantum Mechanics", score: 74, color: "bg-yellow-500", textColor: "text-yellow-400", date: "Oct 22, 2023", time: "58m" },
-  { name: "Cognitive Psychology 101", score: 88, color: "bg-cyan-500", textColor: "text-cyan-400", date: "Oct 19, 2023", time: "2h 05m" },
-  { name: "Bioethics in the Digital Age", score: 45, color: "bg-destructive", textColor: "text-destructive", date: "Oct 15, 2023", time: "42m" },
-];
+interface Overview {
+  total_sessions: number;
+  total_questions_answered: number;
+  overall_accuracy: number; // 0–100
+  current_streak: number;
+}
 
-const barHeights = ["40%", "65%", "90%", "55%", "30%", "75%", "20%"];
+interface TimelineDay {
+  date: string;
+  accuracy: number; // 0–100
+  questions_answered: number;
+}
+
+interface WeakTopic {
+  topic: string;
+  accuracy: number; // 0–1 decimal
+  attempts: number;
+}
+
+interface ConfidenceData {
+  confidence_level: string;
+  accuracy: number; // 0–100
+  count: number;
+}
+
+interface CoFailure {
+  topic_a: string;
+  topic_b: string;
+  co_fail_count: number;
+}
 
 export default function AnalyticsPage() {
   const router = useRouter();
-  const handleLogout = () => logout();
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [timeline, setTimeline] = useState<TimelineDay[]>([]);
+  const [weakTopics, setWeakTopics] = useState<WeakTopic[]>([]);
+  const [confidence, setConfidence] = useState<ConfidenceData[]>([]);
+  const [coFailures, setCoFailures] = useState<CoFailure[]>([]);
+  const [days, setDays] = useState(7);
+  const [loading, setLoading] = useState(true);
 
-  const NAV_ITEMS = [
-    { icon: LayoutGrid, label: "Dashboard", href: "/dashboard" },
-    { icon: Upload, label: "Upload", href: "/upload" },
-    { icon: TrendingUp, label: "Analytics", href: "/analytics", active: true },
-  ];
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      router.push("/auth");
+      return;
+    }
+    Promise.all([
+      getAnalyticsOverview(),
+      getAnalyticsTimeline(days),
+      getAnalyticsWeakTopics(10),
+      getAnalyticsConfidence(),
+      getAnalyticsCoFailures(),
+    ])
+      .then(([ov, tl, wt, cf, cofail]) => {
+        const o = ov.data;
+        setOverview({
+          total_sessions: o.sessions_this_week ?? 0,
+          total_questions_answered: o.total_attempted ?? 0,
+          overall_accuracy: o.overall_accuracy ?? 0,
+          current_streak: o.current_streak ?? 0,
+        });
+        const tlArr = Array.isArray(tl.data) ? tl.data : (tl.data?.data ?? []);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setTimeline(tlArr.map((d: any) => ({ date: d.date, accuracy: d.accuracy_percent ?? d.accuracy ?? 0, questions_answered: d.total ?? 0 })));
+        const wtArr: WeakTopic[] = (wt.data?.topics ?? []).map((t: any) => ({
+          topic: t.subtopic ?? t.topic ?? "",
+          accuracy: t.accuracy_rate ?? 0,
+          attempts: t.total_attempts ?? 0,
+        }));
+        setWeakTopics(wtArr);
+        const cfArr = Array.isArray(cf.data) ? cf.data : (cf.data?.data ?? []);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setConfidence(cfArr.map((c: any) => ({ confidence_level: String(c.confidence_level), accuracy: c.accuracy_percent ?? c.accuracy ?? 0, count: c.attempts ?? c.count ?? 0 })));
+        setCoFailures(cofail.data?.topic_pairs ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [router]);
+
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+    getAnalyticsTimeline(days)
+      .then((res) => {
+        const arr = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setTimeline(arr.map((d: any) => ({ date: d.date, accuracy: d.accuracy_percent ?? d.accuracy ?? 0, questions_answered: d.total ?? 0 })));
+      })
+      .catch(() => {});
+  }, [days]);
+
+  const safeTimeline = Array.isArray(timeline) ? timeline : [];
+  const maxAccuracy = Math.max(...safeTimeline.map((d) => d.accuracy || 0), 1);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
 
   return (
-    <div className="relative min-h-screen bg-background text-foreground">
-      <div className="grain-overlay" />
-
-      {/* Top Nav */}
-      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-card/80 backdrop-blur-xl z-50 border-b border-border/50">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" className="lg:hidden">
-            <Menu className="w-5 h-5" />
-          </Button>
-          <Link href="/dashboard" className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">
+    <div className="min-h-screen bg-background text-foreground pb-20 md:pb-0">
+      {/* Header */}
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
+          <Link href="/dashboard" className="text-xl font-bold text-foreground">
             cortexQ
           </Link>
-        </div>
-        <div className="hidden md:flex items-center gap-8">
-          <nav className="flex gap-6">
-            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium">
-              Dashboard
-            </Link>
-            <span className="text-primary font-bold text-sm">Analytics</span>
+          <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
+            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>
+            <Link href="/upload" className="text-muted-foreground hover:text-foreground transition-colors">Upload</Link>
+            <Link href="/coach" className="text-muted-foreground hover:text-foreground transition-colors">Coach</Link>
+            <span className="text-foreground">Analytics</span>
           </nav>
-          <Button asChild className="synapse-gradient text-white rounded-lg">
-            <Link href="/upload">+ Upload</Link>
-          </Button>
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">Dashboard</span>
+          </Link>
         </div>
       </header>
 
-      {/* Sidebar */}
-      <aside className="hidden lg:flex fixed left-0 top-0 h-full w-72 z-[60] flex-col bg-card/95 backdrop-blur-2xl rounded-r-2xl border-r border-border/50 pt-24 pb-8">
-        <div className="px-6 mb-8 flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full synapse-gradient p-[2px]">
-            <div className="w-full h-full rounded-full bg-card flex items-center justify-center">
-              <User className="w-5 h-5 text-primary" />
-            </div>
-          </div>
-          <div>
-            <h3 className="text-foreground font-bold text-sm">Intelligence Explorer</h3>
-            <p className="text-muted-foreground text-xs">Pro Plan</p>
-          </div>
-        </div>
-        <nav className="flex-1 px-4 space-y-1">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                item.active
-                  ? "bg-gradient-to-r from-primary/20 to-cyan-500/10 text-foreground border-l-4 border-cyan-500"
-                  : "text-muted-foreground hover:bg-muted/50 hover:text-primary"
-              }`}
-            >
-              <item.icon className={`w-5 h-5 ${item.active ? "text-cyan-500" : ""}`} />
-              <span className="text-sm font-medium">{item.label}</span>
-            </Link>
-          ))}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+          <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
+          <span>/</span>
+          <span className="text-foreground">Analytics</span>
         </nav>
-        <div className="px-6 mt-auto">
-          <Card className="glass-panel border-border/50">
-            <CardContent className="p-4">
-              <p className="text-xs text-cyan-400 font-bold mb-1">Upgrade to Pro</p>
-              <p className="text-[10px] text-muted-foreground mb-3">Unlock unlimited AI transcription & insights.</p>
-              <Button variant="outline" size="sm" className="w-full rounded-lg">
-                Learn More
-              </Button>
-            </CardContent>
-          </Card>
+
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
+            <p className="text-sm text-muted-foreground mt-1">Your performance across all study sessions</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {[7, 14, 30].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  days === d
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
         </div>
-      </aside>
 
-      <main className="lg:ml-72 pt-20 sm:pt-28 pb-32 px-4 sm:px-6 md:px-12 max-w-7xl mx-auto" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)" }}>
-        {/* Header */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-12">
-          <div className="space-y-2">
-            <h1 className="text-2xl sm:text-4xl md:text-5xl font-black text-foreground tracking-tight">
-              Your Study Analytics
-            </h1>
-            <p className="text-primary text-lg font-medium">Visualizing your cognitive growth.</p>
+        {/* Overview stats */}
+        {overview && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+            {[
+              { label: "Total Sessions", value: overview.total_sessions, icon: BarChart3 },
+              { label: "Questions Answered", value: overview.total_questions_answered, icon: Target },
+              { label: "Overall Accuracy", value: `${Math.round(overview.overall_accuracy)}%`, icon: TrendingUp },
+              { label: "Current Streak", value: `${overview.current_streak}d`, icon: TrendingUp },
+            ].map(({ label, value, icon: Icon }) => (
+              <Card key={label}>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                  </div>
+                  <p className="text-xl font-bold text-foreground">{value}</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
-          <div className="relative inline-block w-full md:w-auto">
-            <select className="appearance-none bg-card border border-border/50 text-foreground py-3 pl-5 pr-12 rounded-xl text-sm font-medium w-full cursor-pointer shadow-lg outline-none focus:ring-2 focus:ring-primary/50">
-              <option>Last 30 Days</option>
-              <option>Last 7 Days</option>
-              <option>This Semester</option>
-              <option>All Time</option>
-            </select>
-            <span className="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">expand_more</span>
-          </div>
-        </header>
+        )}
 
-        {/* Achievements */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
-          {[
-            { icon: Rocket, color: "bg-primary/20", iconColor: "text-primary", glow: "rgba(123,47,255,0.3)", label: "First Upload", status: "Unlocked" },
-            { icon: Medal, color: "bg-yellow-500/20", iconColor: "text-yellow-500", glow: "rgba(255,185,85,0.3)", label: "Perfect Score", status: "Unlocked" },
-            { icon: Flame, color: "bg-cyan-500/20", iconColor: "text-cyan-500", glow: "rgba(0,210,253,0.3)", label: "7-Day Streak", status: "Unlocked" },
-            { icon: GraduationCap, color: "bg-muted", iconColor: "text-muted-foreground", glow: "transparent", label: "10 Lectures", status: "6/10 Completed", locked: true },
-          ].map((b) => (
-            <Card key={b.label} className={`glass-panel border-border/50 hover:-translate-y-1 transition-all duration-300 ${b.locked ? "grayscale opacity-60" : ""}`}>
-              <CardContent className="p-6">
-                <div
-                  className={`w-12 h-12 ${b.color} rounded-full flex items-center justify-center mb-4`}
-                  style={{ boxShadow: `0 0 20px ${b.glow}` }}
-                >
-                  <b.icon className={`w-6 h-6 ${b.iconColor}`} />
-                </div>
-                <h4 className="text-foreground font-bold text-sm mb-1">{b.label}</h4>
-                <p className="text-muted-foreground text-[10px] uppercase tracking-wider font-bold">{b.status}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left column */}
+          <div className="lg:col-span-4 space-y-6">
+            {/* Confidence calibration */}
+            {confidence.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Confidence vs Accuracy</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {confidence.map((c) => (
+                    <div key={c.confidence_level}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-muted-foreground capitalize">Level {c.confidence_level}</span>
+                        <span className="font-medium text-foreground tabular-nums">
+                          {Math.round(c.accuracy)}% ({c.count})
+                        </span>
+                      </div>
+                      <Progress value={c.accuracy} className="h-1.5" />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Co-failures */}
+            {coFailures.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Co-Failing Topics</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {coFailures.slice(0, 5).map((cf, i) => (
+                    <div key={i} className="border rounded-lg p-3 space-y-1">
+                      <div className="flex items-center gap-2 text-xs flex-wrap">
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{cf.topic_a}</Badge>
+                        <span className="text-muted-foreground">+</span>
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{cf.topic_b}</Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Failed together {cf.co_fail_count}×</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Right column */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* Accuracy timeline */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">Accuracy Timeline</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {safeTimeline.length === 0 || safeTimeline.every((d) => d.accuracy === 0) ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">No data for this period.</p>
+                ) : (
+                  <>
+                    <div className="flex items-end gap-1.5 h-40">
+                      {safeTimeline.map((d) => {
+                        const pct = maxAccuracy > 0 ? (d.accuracy / maxAccuracy) * 100 : 0;
+                        return (
+                          <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative">
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-popover border text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                              {Math.round(d.accuracy)}%
+                            </div>
+                            <div
+                              className={`w-full rounded-t transition-colors ${d.accuracy > 0 ? "bg-primary/70 hover:bg-primary" : "bg-muted/30"}`}
+                              style={{ height: `${d.accuracy > 0 ? Math.max(pct, 8) : 2}%` }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
+                      {safeTimeline.map((d) => (
+                        <span key={d.date} className="flex-1 text-center truncate">
+                          {new Date(d.date).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
-          ))}
-        </section>
 
-        {/* Line Chart */}
-        <Card className="glass-panel border-border/50 mb-8">
-          <CardContent className="p-8">
-            <div className="flex justify-between items-center mb-10">
-              <div>
-                <h2 className="text-xl font-bold text-foreground mb-1">MCQ Score Over Time</h2>
-                <p className="text-muted-foreground text-sm">Aggregated performance across all subjects.</p>
-              </div>
-              <div className="flex items-center gap-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-primary" /> Average
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-cyan-500" /> Current
-                </div>
-              </div>
-            </div>
-            <div className="h-64 w-full relative flex items-end justify-between px-4">
-              <div className="absolute inset-0 flex justify-between pointer-events-none opacity-10">
-                {[...Array(6)].map((_, i) => (
-                  <div key={i} className="w-px h-full bg-foreground" />
-                ))}
-              </div>
-              <svg className="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="lineGrad" x1="0%" x2="100%" y1="0%" y2="0%">
-                    <stop offset="0%" style={{ stopColor: "#7B2FFF", stopOpacity: 1 }} />
-                    <stop offset="100%" style={{ stopColor: "#00D2FD", stopOpacity: 1 }} />
-                  </linearGradient>
-                  <filter id="glow">
-                    <feGaussianBlur result="coloredBlur" stdDeviation="4" />
-                    <feMerge>
-                      <feMergeNode in="coloredBlur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-                <path
-                  d="M0,180 Q100,220 200,120 T400,140 T600,60 T800,100 T1000,40"
-                  fill="none"
-                  filter="url(#glow)"
-                  stroke="url(#lineGrad)"
-                  strokeWidth="4"
-                />
-                <circle cx="200" cy="120" fill="#7B2FFF" r="6" />
-                <circle cx="400" cy="140" fill="#7B2FFF" r="6" />
-                <circle cx="600" cy="60" fill="#00D2FD" r="6" />
-                <circle cx="1000" cy="40" fill="#00D2FD" r="8" stroke="white" strokeWidth="3" />
-              </svg>
-            </div>
-            <div className="flex justify-between mt-6 text-xs font-bold text-muted-foreground uppercase px-4">
-              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-                <span key={d}>{d}</span>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Side-by-side Charts */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-          {/* Bar Chart */}
-          <Card className="glass-panel border-border/50">
-            <CardContent className="p-8">
-              <h3 className="text-foreground font-bold mb-6">Lectures Per Week</h3>
-              <div className="flex items-end justify-between gap-2 h-48">
-                {barHeights.map((h, i) => (
-                  <div
-                    key={i}
-                    className={`flex-1 rounded-t-lg transition-colors duration-300 ${
-                      i === 2 ? "bg-cyan-500 shadow-[0_0_15px_rgba(0,210,253,0.3)]" : "bg-muted hover:bg-cyan-500/50"
-                    }`}
-                    style={{ height: h }}
-                  />
-                ))}
-              </div>
-              <div className="flex justify-between mt-4 text-[10px] font-bold text-muted-foreground">
-                {["W1", "W2", "W3", "W4", "W5", "W6", "W7"].map((w) => (
-                  <span key={w}>{w}</span>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Donut Chart */}
-          <Card className="glass-panel border-border/50">
-            <CardContent className="p-8 flex flex-col items-center">
-              <h3 className="text-foreground font-bold self-start mb-6">Score Distribution</h3>
-              <div className="relative w-40 h-40">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" fill="transparent" r="40" stroke="#93000a" strokeDasharray="251.2" strokeDashoffset="200" strokeWidth="12" />
-                  <circle cx="50" cy="50" fill="transparent" r="40" stroke="#ffb955" strokeDasharray="251.2" strokeDashoffset="150" strokeWidth="12" />
-                  <circle cx="50" cy="50" fill="transparent" r="40" stroke="#3cd7ff" strokeDasharray="251.2" strokeDashoffset="80" strokeWidth="12" />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-black text-foreground">84%</span>
-                  <span className="text-[8px] text-muted-foreground uppercase tracking-widest font-bold">Overall</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4 mt-8 w-full">
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold">Mastered</p>
-                  <p className="text-cyan-400 font-bold">62%</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold">Improving</p>
-                  <p className="text-yellow-400 font-bold">28%</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold">Critical</p>
-                  <p className="text-destructive font-bold">10%</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Subject Table */}
-        <Card className="glass-panel border-border/50 overflow-hidden">
-          <CardHeader className="px-8 py-6 border-b border-border/50 flex flex-row items-center justify-between">
-            <CardTitle className="text-base font-bold">Subject Performance Breakdown</CardTitle>
-            <Button variant="ghost" size="sm" className="text-cyan-400 hover:text-cyan-300">
-              <Download className="w-4 h-4 mr-1" /> Export
-            </Button>
-          </CardHeader>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-muted-foreground text-[10px] uppercase tracking-widest font-bold border-b border-border/50">
-                  <th className="px-8 py-4">Lecture Name</th>
-                  <th className="px-8 py-4">Score</th>
-                  <th className="px-8 py-4">Date</th>
-                  <th className="px-8 py-4">Time</th>
-                  <th className="px-8 py-4" />
-                </tr>
-              </thead>
-              <tbody className="text-sm">
-                {subjects.map((s, i) => (
-                  <tr key={s.name} className={`${i % 2 === 1 ? "bg-muted/30" : ""} hover:bg-muted/50 transition-colors`}>
-                    <td className="px-8 py-5 text-foreground font-medium">{s.name}</td>
-                    <td className="px-8 py-5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full ${s.color}`} style={{ width: `${s.score}%` }} />
-                        </div>
-                        <span className={`font-bold ${s.textColor}`}>{s.score}%</span>
+            {/* Weak topics */}
+            {weakTopics.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Weak Topics</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {weakTopics.map((t) => (
+                    <div key={t.topic}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-foreground font-medium line-clamp-1 flex-1 mr-4">{t.topic}</span>
+                        <span className="tabular-nums text-muted-foreground shrink-0">
+                          {Math.round(t.accuracy * 100)}% · {t.attempts} attempts
+                        </span>
                       </div>
-                    </td>
-                    <td className="px-8 py-5 text-muted-foreground">{s.date}</td>
-                    <td className="px-8 py-5 text-muted-foreground">{s.time}</td>
-                    <td className="px-8 py-5">
-                      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <Progress
+                        value={t.accuracy * 100}
+                        className={`h-1.5 ${t.accuracy < 0.5 ? "[&>div]:bg-destructive" : t.accuracy < 0.7 ? "[&>div]:bg-yellow-500" : ""}`}
+                      />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Empty state */}
+            {!overview && weakTopics.length === 0 && timeline.length === 0 && (
+              <Card>
+                <CardContent className="py-16 text-center">
+                  <BarChart3 className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm font-medium text-foreground">No analytics yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Complete some quizzes to see your performance data.</p>
+                </CardContent>
+              </Card>
+            )}
           </div>
-        </Card>
+        </div>
       </main>
 
-      {/* Mobile Bottom Nav */}
-      <footer className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-card/95 backdrop-blur-xl border-t border-border/50">
-        <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors">
-          <Home className="w-[22px] h-[22px]" />
-          <span className="text-[10px] uppercase tracking-widest">Home</span>
-        </Link>
-        <Link href="/upload" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors">
-          <Upload className="w-[22px] h-[22px]" />
-          <span className="text-[10px] uppercase tracking-widest">Upload</span>
-        </Link>
-        <div className="flex flex-col items-center gap-0.5 text-primary">
-          <BarChart3 className="w-[22px] h-[22px]" />
-          <span className="text-[10px] uppercase tracking-widest">Stats</span>
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="flex justify-around items-center py-2 px-4">
+          <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
+            <Home className="w-5 h-5" />
+            <span className="text-[10px]">Home</span>
+          </Link>
+          <Link href="/upload" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
+            <Upload className="w-5 h-5" />
+            <span className="text-[10px]">Upload</span>
+          </Link>
+          <Link href="/coach" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
+            <Bot className="w-5 h-5" />
+            <span className="text-[10px]">Coach</span>
+          </Link>
+          <div className="flex flex-col items-center gap-0.5 text-foreground py-1">
+            <BarChart3 className="w-5 h-5" />
+            <span className="text-[10px]">Analytics</span>
+          </div>
         </div>
-        <button onClick={handleLogout} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors">
-          <LogOut className="w-[22px] h-[22px]" />
-          <span className="text-[10px] uppercase tracking-widest">Logout</span>
-        </button>
-      </footer>
+      </nav>
     </div>
   );
 }

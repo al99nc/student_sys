@@ -78,6 +78,12 @@ async def upload_lecture(
 
     assert_can_upload(db, current_user)
 
+    from app.core.entitlements import upload_limit_for_user, count_uploads_this_month, plan_tier
+    if plan_tier(current_user) == "free":
+        n = count_uploads_this_month(db, current_user.id)
+        if n >= upload_limit_for_user(current_user):
+            try_spend_credits(db, current_user, 1, commit=True)
+
     ensure_upload_dir()
 
     # Sanitize filename to prevent path traversal
@@ -128,6 +134,12 @@ async def upload_text(
         raise HTTPException(status_code=413, detail="Text is too long (max 500,000 characters)")
 
     assert_can_upload(db, current_user)
+
+    from app.core.entitlements import upload_limit_for_user, count_uploads_this_month, plan_tier
+    if plan_tier(current_user) == "free":
+        n = count_uploads_this_month(db, current_user.id)
+        if n >= upload_limit_for_user(current_user):
+            try_spend_credits(db, current_user, 1, commit=True)
 
     ensure_upload_dir()
     safe_title = "".join(c for c in body.title if c.isalnum() or c in " _-")[:60].strip() or "pasted"

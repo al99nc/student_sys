@@ -184,6 +184,12 @@ export const processLecture = (lectureId: number, difficulty: Difficulty = "high
 
 export const getStats = () => api.get("/stats");
 
+export const getAnalyticsOverview = () => api.get("/analytics/overview");
+export const getAnalyticsTimeline = (days = 7) => api.get(`/analytics/accuracy-timeline?days=${days}`);
+export const getAnalyticsWeakTopics = (limit = 10) => api.get(`/analytics/weak-topics?limit=${limit}`);
+export const getAnalyticsConfidence = () => api.get("/analytics/confidence-calibration");
+export const getAnalyticsCoFailures = () => api.get("/analytics/co-failures");
+
 export const getResults = (lectureId: number) =>
   api.get(`/results/${lectureId}`);
 
@@ -246,11 +252,13 @@ export const coachSendMessage = (
   imageData?: string,
   imageMime?: string,
   quizResult?: QuizResult,
+  modelPreference?: "llama" | "gemini",
 ) =>
   api.post(`/api/v1/coach/conversations/${convId}/messages`, {
     message,
     ...(imageData ? { image_data: imageData, image_mime: imageMime } : {}),
     ...(quizResult ? { quiz_result: quizResult } : {}),
+    ...(modelPreference ? { model_preference: modelPreference } : {}),
   });
 
 export interface FreshMCQ {
@@ -301,12 +309,39 @@ export const startPerformanceSession = (documentId: number, mode: string, totalQ
   });
 
 export const submitPerformanceAnswer = (
-sessionId: string, questionId: string, selectedAnswer: string, correctAnswer: string, timeSpentSeconds: number, p0: { pre_answer_confidence: number; time_to_confidence: number; answer_changed: boolean; original_answer: string | null; time_to_first_change: number | null; answer_timeline: { time_on_option_a: number; time_on_option_b: number; time_on_option_c: number; time_on_option_d: number; second_choice: string | null; re_read_question: boolean; re_read_count: number; }; }) =>
+  sessionId: string,
+  questionId: string,
+  selectedAnswer: string,
+  correctAnswer: string,
+  timeSpentSeconds: number,
+  extra: {
+    pre_answer_confidence: number;
+    time_to_confidence: number;
+    answer_changed: boolean;
+    original_answer: string | null;
+    time_to_first_change: number | null;
+    answer_timeline: {
+      time_on_option_a: number;
+      time_on_option_b: number;
+      time_on_option_c: number;
+      time_on_option_d: number;
+      second_choice: string | null;
+      re_read_question: boolean;
+      re_read_count: number;
+    };
+  }
+) =>
   api.post(`/api/v1/performance/sessions/${sessionId}/answer`, {
     question_id: questionId,
     selected_answer: selectedAnswer,
     correct_answer: correctAnswer,
     time_spent_seconds: timeSpentSeconds,
+    pre_answer_confidence: extra.pre_answer_confidence,
+    time_to_confidence: extra.time_to_confidence,
+    answer_changed: extra.answer_changed,
+    original_answer: extra.original_answer,
+    time_to_first_change: extra.time_to_first_change,
+    answer_timeline: extra.answer_timeline,
   });
 
 export const completePerformanceSession = (sessionId: string) =>

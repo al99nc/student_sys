@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────
 # API ENDPOINT
 # ─────────────────────────────────────────────────────────────────
-OPENROUTER_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -208,11 +209,22 @@ async def _call_single_chunk(
 
     cfg = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])
     resolved_model = model or settings.FREE_AI_MODEL
+
+    _is_openrouter = api_key and api_key == settings.open_rout_PAID_API_KEY
+    _is_gemini_direct = resolved_model.startswith("gemini") and not _is_openrouter
+    if _is_openrouter:
+        api_url = OPENROUTER_URL
+    elif _is_gemini_direct:
+        api_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
+    else:
+        api_url = GROQ_URL
+    resolved_key = api_key or settings.AI_API_KEY
+
     headers = {
-        "Authorization": f"Bearer {api_key or settings.AI_API_KEY}",
+        "Authorization": f"Bearer {resolved_key}",
         "Content-Type": "application/json",
     }
-    payload = {
+    payload: dict = {
         "model": resolved_model,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -220,9 +232,10 @@ async def _call_single_chunk(
         ],
         "temperature": cfg["temperature"],
         "max_tokens": cfg["max_tokens"],
-        "presence_penalty": cfg.get("presence_penalty", 0.3),
-        "frequency_penalty": cfg.get("frequency_penalty", 0.3),
     }
+    if not _is_gemini_direct and not _is_openrouter:
+        payload["presence_penalty"] = cfg.get("presence_penalty", 0.3)
+        payload["frequency_penalty"] = cfg.get("frequency_penalty", 0.3)
 
     last_error: Exception | None = None
 
@@ -231,7 +244,7 @@ async def _call_single_chunk(
             t_start = time.monotonic()
 
             async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(OPENROUTER_URL, headers=headers, json=payload)
+                resp = await client.post(api_url, headers=headers, json=payload)
                 if not resp.is_success:
                     logger.error(f"[{mode}] HTTP {resp.status_code}: {resp.text[:300]}")
                 if resp.status_code == 401:
@@ -526,7 +539,20 @@ async def _call_chunk_with_rotation(
 async def generate_study_content(
     text: str, mode: str = "highyield", *, is_premium: bool = False
 ) -> Dict[str, Any]:
-    available_keys = settings.get_all_api_keys()
+    if is_premium:
+        if settings.open_rout_PAID_API_KEY:
+            ai_model = settings.open_rout_PAID_MODEL
+            available_keys = [settings.open_rout_PAID_API_KEY]
+        elif settings.GEMINI_PAID_API_KEY:
+            ai_model = settings.PREMIUM_AI_MODEL
+            available_keys = [settings.GEMINI_PAID_API_KEY]
+        else:
+            ai_model = settings.FREE_AI_MODEL
+            available_keys = settings.get_all_api_keys()
+    else:
+        ai_model = settings.FREE_AI_MODEL
+        available_keys = settings.get_all_api_keys()
+
     if not available_keys:
         logger.warning("No API keys configured — returning mock data")
         return _get_mock_response()
@@ -535,17 +561,18 @@ async def generate_study_content(
     if mode not in SPEED_CONFIG:
         logger.warning(f"Unknown mode '{mode}' — falling back to highyield")
         mode = "highyield"
-
-    ai_model = settings.PREMIUM_AI_MODEL if is_premium else settings.FREE_AI_MODEL
-    inter_wait = (
-        settings.PREMIUM_INTER_CHUNK_WAIT_SECONDS
-        if is_premium
-        else settings.FREE_INTER_CHUNK_WAIT_SECONDS
-    )
+    _using_openrouter = is_premium and bool(settings.open_rout_PAID_API_KEY)
+    if _using_openrouter:
+        inter_wait = 0  # OpenRouter handles rate limits — no delay needed
+    elif is_premium:
+        inter_wait = settings.PREMIUM_INTER_CHUNK_WAIT_SECONDS
+    else:
+        inter_wait = settings.FREE_INTER_CHUNK_WAIT_SECONDS
 
     chunks = _chunk_text(text)
     total_chunks = len(chunks)
-    n_keys = len(available_keys)
+    # For OpenRouter: run all chunks in parallel regardless of key count
+    n_keys = total_chunks if _using_openrouter else len(available_keys)
 
     time_estimate = _estimate_processing_time(
         text, mode, n_keys, inter_chunk_wait=inter_wait

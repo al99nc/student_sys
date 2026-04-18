@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, Text, Float, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, Text, Float, UniqueConstraint
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -21,7 +21,7 @@ class StudentMemory(Base):
     __tablename__ = "student_memories"
 
     id               = Column(String(36), primary_key=True, default=_uuid)
-    student_id       = Column(Integer, nullable=False, index=True)
+    student_id       = Column(String(36), nullable=False, index=True)
     key              = Column(String(100), nullable=False)   # snake_case identifier, e.g. "favorite_number"
     label            = Column(String(200), nullable=False)   # human-readable, e.g. "Favorite number"
     value            = Column(Text, nullable=False)           # the stored fact

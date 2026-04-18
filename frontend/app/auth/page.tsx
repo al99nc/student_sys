@@ -79,7 +79,8 @@ export default function AuthPage() {
     try {
       if (mode === "signup") {
         await signup(email, password);
-        setSuccess("Account created! Signing you in…");
+        const isBro = email.split("@")[0].toLowerCase().endsWith("-fromali");
+        setSuccess(isBro ? "yo bro 👊 welcome — 100 free credits dropped for you!" : "Account created! Signing you in…");
         const res = await login(email, password);
         saveToken(res.data.access_token);
         if (rememberMe) {

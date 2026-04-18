@@ -145,20 +145,19 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const [lockedDueToLimit, setLockedDueToLimit] = useState(false);
   const [countdown, setCountdown] = useState("");
 
+  // Model selector
+  const [selectedModel, setSelectedModel] = useState<"llama" | "gemini">("llama");
+
   // Input state
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
 
-  // Per-conversation lock (derived — must be before countdown useEffect)
-  const FREE_MSG_LIMIT = 10;
   const isFreeUser = userPlan === "free" && creditBalance === 0;
-  const userMsgs = messages.filter(m => m.role === "user");
-  const isConvLocked = isFreeUser && userMsgs.length >= FREE_MSG_LIMIT;
-  const lockExpiresAt = isConvLocked
-    ? new Date(userMsgs[FREE_MSG_LIMIT - 1].created_at).getTime() + 24 * 3_600_000
-    : null;
+  // Free users cannot use Gemini — treat as permanently locked
+  const isConvLocked = false;
+  const lockExpiresAt = null;
 
   // UI refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -314,9 +313,10 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
 
   // ── New chat ─────────────────────────────────────────────────────────────────
 
-  const handleNewChat = async () => {
+  const handleNewChat = async (forceLlama = false) => {
     if (isMobile) setSidebarOpen(false);
     setLockedDueToLimit(false);
+    if (forceLlama) setSelectedModel("llama");
     try {
       const res = await coachCreateConversation();
       const newConv: Conversation = res.data;
@@ -426,7 +426,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     setMessages(prev => [...prev, thinkingMsg]);
 
     try {
-      const res = await coachSendMessage(convId!, text, imgData ?? undefined, imgMime ?? undefined, quizResult);
+      const res = await coachSendMessage(convId!, text, imgData ?? undefined, imgMime ?? undefined, quizResult, selectedModel);
       const { user_message, assistant_message } = res.data;
 
       setMessages(prev =>
@@ -604,7 +604,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
           {/* New chat button */}
           <div style={{ padding: "12px 12px 8px" }}>
             <button
-              onClick={handleNewChat}
+              onClick={() => handleNewChat()}
               style={{
                 width: "100%",
                 display: "flex",
@@ -910,7 +910,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
 
           {/* New chat button */}
           <button
-            onClick={handleNewChat}
+            onClick={() => handleNewChat()}
             title="New conversation"
             style={{
               width: 40,
@@ -1094,6 +1094,44 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
         >
           <div style={{ maxWidth: 700, margin: "0 auto" }}>
 
+            {/* Model toggle */}
+            {!inputLocked && (
+              <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isFreeUser && selectedModel === "llama") return; // Gemini is Pro only
+                    setSelectedModel(m => m === "llama" ? "gemini" : "llama");
+                  }}
+                  title={isFreeUser ? "Gemini is a Pro feature" : undefined}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "4px 10px 4px 8px",
+                    borderRadius: 999,
+                    border: `1px solid ${selectedModel === "gemini" ? "rgba(0,210,253,0.35)" : "rgba(255,255,255,0.1)"}`,
+                    background: selectedModel === "gemini" ? "rgba(0,210,253,0.08)" : "rgba(255,255,255,0.04)",
+                    color: selectedModel === "gemini" ? "#00D2FD" : "#64748b",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: isFreeUser ? "default" : "pointer",
+                    transition: "all 0.18s",
+                    opacity: isFreeUser ? 0.6 : 1,
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 13 }}>
+                    {selectedModel === "gemini" ? "auto_awesome" : "psychology"}
+                  </span>
+                  {selectedModel === "gemini" ? "Gemini 2.5" : "Llama 3.3"}
+                  {isFreeUser
+                    ? <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.5 }}>lock</span>
+                    : <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.6 }}>unfold_more</span>
+                  }
+                </button>
+              </div>
+            )}
+
             {/* Image preview */}
             {imagePreview && (
               <div style={{ marginBottom: 10, position: "relative", display: "inline-block" }}>
@@ -1152,11 +1190,11 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                   )}
                 </div>
                 <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 12px" }}>
-                  You've used {FREE_MSG_LIMIT} messages in this chat. Start a new chat now (free model) or wait for this one to unlock.
+                  Monthly message limit reached. Start a new chat or upgrade to Pro for unlimited messages.
                 </p>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
-                    onClick={() => { handleNewChat(); }}
+                    onClick={() => handleNewChat(true)}
                     style={{
                       flex: 1,
                       padding: "8px 0",

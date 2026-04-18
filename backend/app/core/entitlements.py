@@ -172,49 +172,66 @@ def assert_can_upload(db: Session, user: User) -> None:
     limit = upload_limit_for_user(user)
     n = count_uploads_this_month(db, user.id)
     if n >= limit:
-        from fastapi import HTTPException, status
-
         tier = plan_tier(user)
-        hint = (
-            "Upgrade to Pro for 100 uploads per month."
-            if tier == "free"
-            else "Try again next month or contact support."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "message": f"Monthly upload limit reached ({n}/{limit}).",
-                "hint": hint,
-                "upgrade_required": tier == "free",
-            },
-        )
-
-
-def assert_can_send_coach_message(db: Session, user: User) -> None:
-    limit = coach_limit_for_user(user)
-    n = count_coach_messages_this_month(db, user.id)
-    if n >= limit:
+        # Free users with credits can keep uploading — 1 credit per upload
+        if tier == "free" and (user.credit_balance or 0) > 0:
+            return
         from fastapi import HTTPException, status
-
-        tier = plan_tier(user)
         if tier == "free":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
-                    "message": f"Free limit reached ({n}/{limit} messages this month).",
-                    "hint": "Upgrade to Pro for unlimited messages and a coach that remembers you.",
+                    "message": "You've used your free uploads this month.",
+                    "hint": "Purchase credits to keep uploading — 1 credit per upload.",
                     "upgrade_required": True,
                 },
             )
-        else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": f"Monthly upload limit reached ({n}/{limit}).",
+                "hint": "Try again next month or contact support.",
+                "upgrade_required": False,
+            },
+        )
+
+
+def assert_can_send_coach_message(
+    db: Session, user: User, model_preference: str = ""
+) -> None:
+    tier = plan_tier(user)
+
+    # Paid users: always allowed regardless of model
+    if tier in ("pro", "enterprise"):
+        return
+
+    # Free users: Gemini requires credits
+    if model_preference == "gemini":
+        if (user.credit_balance or 0) <= 0:
+            from fastapi import HTTPException, status
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
-                    "message": f"Monthly limit reached ({n}/{limit}).",
-                    "hint": "Try again next month or contact support.",
-                    "upgrade_required": False,
+                    "message": "Gemini is a Pro feature.",
+                    "hint": "Upgrade to Pro or purchase credits to use Gemini.",
+                    "upgrade_required": True,
                 },
             )
+        return  # has credits — allow through, credits will be spent in the endpoint
+
+    # Free users on Llama: enforce monthly cap
+    limit = coach_limit_for_user(user)
+    n = count_coach_messages_this_month(db, user.id)
+    if n >= limit:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": f"Free limit reached ({n}/{limit} messages this month).",
+                "hint": "Upgrade to Pro for unlimited messages and a coach that remembers you.",
+                "upgrade_required": True,
+            },
+        )
 
 
 def assert_within_daily_token_budget(db: Session, user: User) -> None:
@@ -329,11 +346,18 @@ def refund_credits(db: Session, user: User, amount: int, *, commit: bool = True)
 
 # ── Quality-selection helpers (used before AI calls) ─────────────────────────
 
+def has_premium_access(user: User) -> bool:
+    """True for pro/enterprise OR free users with credits."""
+    if plan_tier(user) in ("pro", "enterprise"):
+        return True
+    return (user.credit_balance or 0) > 0
+
+
 def will_use_premium_for_mcq(user: User) -> bool:
     """True if the next MCQ process will use the premium model."""
-    return plan_tier(user) in ("pro", "enterprise")
+    return has_premium_access(user)
 
 
 def will_use_premium_for_coach(user: User) -> bool:
     """True if the next coach message will use the premium model."""
-    return plan_tier(user) in ("pro", "enterprise")
+    return has_premium_access(user)

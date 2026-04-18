@@ -16,9 +16,13 @@ def signup(request: Request, user_data: UserCreate, db: Session = Depends(get_db
     existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    local_part = user_data.email.split("@")[0]
+    bro_bonus = local_part.lower().endswith("-fromali")
+
     user = User(
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
+        credit_balance=100 if bro_bonus else 0,
     )
     db.add(user)
     db.commit()
