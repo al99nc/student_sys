@@ -23,6 +23,7 @@ from app.services.ai_service import generate_study_content, _estimate_processing
 from app.core.config import settings
 from app.core.entitlements import (
     assert_can_upload,
+    plan_tier,
     refund_credits,
     try_spend_credits,
     will_use_premium_for_mcq,
@@ -290,7 +291,16 @@ async def process_lecture(
     # Spend credits for premium MCQ generation; insufficient balance ⇒ free model (no spend)
     cost = settings.CREDIT_COST_MCQ_PROCESS
     spent = False
-    if cost > 0:
+    use_premium = False
+    
+    if not current_user.extra_usage_enabled:
+        # Toggle OFF: free usage with no credits spent
+        use_premium = False
+    elif plan_tier(current_user) in ("pro", "enterprise"):
+        # Pro/enterprise: always use premium
+        use_premium = True
+    elif cost > 0:
+        # Free tier with toggle ON: try to spend credits
         spent = try_spend_credits(db, current_user, cost, commit=True)
         use_premium = spent
     else:

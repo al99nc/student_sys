@@ -93,8 +93,10 @@ class Settings(BaseSettings):
     CHECKOUT_CURRENCY: str = "usd"
 
     # Credits consumed per action (0 = free for that action). Premium model runs only if spend succeeds.
-    CREDIT_COST_MCQ_PROCESS: int = 1
-    CREDIT_COST_COACH_MESSAGE: int = 1
+    # Note: costs are in internal units where 2 units = 1 credit
+    # So 3 credits = 6 units, 0.5 credits = 1 unit
+    CREDIT_COST_MCQ_PROCESS: int = 6      # 3 credits
+    CREDIT_COST_COACH_MESSAGE: int = 1    # 0.5 credits
 
     # ── Subscription plans ────────────────────────────────────────────
     # Stripe Price IDs for recurring subscriptions (set in .env).

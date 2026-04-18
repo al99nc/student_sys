@@ -2132,6 +2132,7 @@ async def chat_with_coach(
     from app.core.entitlements import (
         assert_can_send_coach_message,
         is_premium,
+        plan_tier,
         refund_credits,
         try_spend_credits,
     )
@@ -2145,7 +2146,16 @@ async def chat_with_coach(
 
     cost = settings.CREDIT_COST_COACH_MESSAGE
     spent = False
-    if cost > 0:
+    _premium = False
+    
+    if not current_user.extra_usage_enabled:
+        # Toggle OFF: free usage with no credits spent
+        _premium = False
+    elif plan_tier(current_user) in ("pro", "enterprise"):
+        # Pro/enterprise: always use premium
+        _premium = True
+    elif cost > 0:
+        # Free tier with toggle ON: try to spend credits
         spent = try_spend_credits(db, current_user, cost, commit=True)
         _premium = spent
     else:

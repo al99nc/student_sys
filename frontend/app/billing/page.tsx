@@ -10,6 +10,7 @@ import {
   syncWaylPayments,
   getBillingConfig,
   getEntitlements,
+  toggleExtraUsage,
   getMe,
   type BillingConfig,
   type Entitlements,
@@ -40,7 +41,7 @@ function BillingContent() {
   const [error, setError] = useState("");
   const [banner, setBanner] = useState<"success" | "canceled" | null>(null);
   const [ent, setEnt] = useState<Entitlements | null>(null);
-  const [creditsEnabled, setCreditsEnabled] = useState(true);
+  const [togglingUsage, setTogglingUsage] = useState(false);
   const [monthlyLimit, setMonthlyLimit] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("cortexq_monthly_limit");
@@ -179,6 +180,19 @@ function BillingContent() {
     }
   };
 
+  const handleToggleExtraUsage = async () => {
+    setTogglingUsage(true);
+    setError("");
+    try {
+      const res = await toggleExtraUsage();
+      setEnt((e) => e ? { ...e, extra_usage_enabled: res.data.extra_usage_enabled } : e);
+    } catch {
+      setError("Could not toggle extra usage setting.");
+    } finally {
+      setTogglingUsage(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -224,15 +238,16 @@ function BillingContent() {
             <button
               type="button"
               role="switch"
-              aria-checked={creditsEnabled}
-              onClick={() => setCreditsEnabled((v) => !v)}
-              className={`relative shrink-0 w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none ${
-                creditsEnabled ? "bg-white" : "bg-muted"
+              aria-checked={ent?.extra_usage_enabled ?? false}
+              onClick={handleToggleExtraUsage}
+              disabled={togglingUsage}
+              className={`relative shrink-0 w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+                ent?.extra_usage_enabled ? "bg-white" : "bg-muted"
               }`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full shadow transition-transform duration-200 ${
-                  creditsEnabled ? "translate-x-6 bg-black" : "translate-x-0 bg-muted-foreground"
+                  ent?.extra_usage_enabled ? "translate-x-6 bg-black" : "translate-x-0 bg-muted-foreground"
                 }`}
               />
             </button>
@@ -389,7 +404,7 @@ function BillingContent() {
           <Button
             className="w-full synapse-gradient text-white font-semibold h-11 rounded-xl"
             onClick={handlePay}
-            disabled={paying || !config || !creditsEnabled}
+            disabled={paying || !config || !(ent?.extra_usage_enabled ?? false)}
           >
             {paying ? (
               <>
@@ -405,7 +420,7 @@ function BillingContent() {
             variant="outline"
             className="w-full font-semibold h-11 rounded-xl border-[#00D2FD]/50 text-[#00D2FD] hover:bg-[#00D2FD]/10"
             onClick={handlePayWayl}
-            disabled={payingWayl || !config || !creditsEnabled}
+            disabled={payingWayl || !config || !(ent?.extra_usage_enabled ?? false)}
           >
             {payingWayl ? (
               <>
@@ -419,7 +434,7 @@ function BillingContent() {
             )}
           </Button>
 
-          {!creditsEnabled && (
+          {!(ent?.extra_usage_enabled ?? false) && (
             <p className="text-xs text-muted-foreground text-center">
               Turn on extra usage above to purchase credits.
             </p>

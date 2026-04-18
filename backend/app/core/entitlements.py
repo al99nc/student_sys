@@ -305,11 +305,16 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
     Pro/Enterprise subscribers always return True without touching the balance —
     their plan covers quota-included actions. Credits on paid plans are overflow
     capacity managed separately.
+    
+    If extra_usage_enabled is False, return True without spending (action allowed free).
     """
     if amount <= 0:
         return True
     if plan_tier(user) in ("pro", "enterprise"):
         return True  # plan covers this action — no credit charge
+    # If extra usage is disabled, allow action without spending credits
+    if not user.extra_usage_enabled:
+        return True
     res = db.execute(
         text(
             "UPDATE users SET credit_balance = credit_balance - :amt "
@@ -333,6 +338,9 @@ def refund_credits(db: Session, user: User, amount: int, *, commit: bool = True)
         return
     if plan_tier(user) in ("pro", "enterprise"):
         return  # nothing was charged
+    # If extra usage is disabled, nothing was charged so don't refund
+    if not user.extra_usage_enabled:
+        return
     db.execute(
         text("UPDATE users SET credit_balance = credit_balance + :amt WHERE id = :id"),
         {"amt": amount, "id": user.id},

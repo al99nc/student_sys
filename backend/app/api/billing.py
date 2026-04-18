@@ -74,8 +74,9 @@ class EntitlementsOut(BaseModel):
     daily_token_budget: int
     free_ai_model: str
     premium_ai_model: str
-    credit_cost_mcq_process: int
-    credit_cost_coach_message: int
+    credit_cost_mcq_process: float       # actual credits (3.0)
+    credit_cost_coach_message: float      # actual credits (0.5)
+    extra_usage_enabled: bool
     # Capability flags — false for free, true for pro/enterprise
     has_coach_memory: bool
     has_analytics: bool
@@ -179,8 +180,10 @@ def get_entitlements(
         daily_token_budget=ent.daily_token_budget,
         free_ai_model=settings.FREE_AI_MODEL,
         premium_ai_model=settings.PREMIUM_AI_MODEL,
-        credit_cost_mcq_process=settings.CREDIT_COST_MCQ_PROCESS,
-        credit_cost_coach_message=settings.CREDIT_COST_COACH_MESSAGE,
+        # Convert internal units to actual credits (1 unit = 0.5 credits)
+        credit_cost_mcq_process=settings.CREDIT_COST_MCQ_PROCESS / 2.0,
+        credit_cost_coach_message=settings.CREDIT_COST_COACH_MESSAGE / 2.0,
+        extra_usage_enabled=bool(current_user.extra_usage_enabled),
         has_coach_memory=ent.has_coach_memory,
         has_analytics=ent.has_analytics,
         has_exam_simulator=ent.has_exam_simulator,
@@ -201,6 +204,17 @@ def billing_config():
         pro_yearly_price_id=settings.STRIPE_PRICE_PRO_YEARLY,
         credit_price_iqd=settings.CREDIT_PRICE_IQD,
     )
+
+
+@router.post("/extra-usage/toggle")
+def toggle_extra_usage(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle extra usage setting (allow spending credits when limit is hit)."""
+    current_user.extra_usage_enabled = 1 - current_user.extra_usage_enabled
+    db.commit()
+    return {"extra_usage_enabled": bool(current_user.extra_usage_enabled)}
 
 
 @router.post("/checkout-session", response_model=CheckoutSessionOut)

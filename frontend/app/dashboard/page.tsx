@@ -49,8 +49,10 @@ function getUsernameFromToken(): string {
   if (!token) return "Student";
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.sub || payload.username || payload.name || "Student";
-  } catch {
+    console.log("JWT Payload:", payload); // Log the payload for inspection
+    return payload.id?.name || payload.given_name || payload.preferred_username || payload.sub || payload.username || payload.name || "Student";
+  } catch (e) {
+    console.error("Failed to decode token or parse payload:", e);
     return "Student";
   }
 }
@@ -422,25 +424,33 @@ export default function DashboardPage() {
                         </button>
                       ))}
                     </div>
-                    {lectures.slice(0, 8).map((lecture) => (
-                      <div
-                        key={lecture.id}
-                        className="flex items-center justify-between px-4 py-3 rounded-xl border"
-                      >
-                        <div className="min-w-0 flex-1 mr-3">
-                          <p className="text-sm font-semibold text-foreground truncate">{lecture.title}</p>
-                          <p className="text-xs mt-0.5 text-muted-foreground">
-                            {new Date(lecture.created_at).toLocaleDateString()}
-                          </p>
+                    <div className="space-y-2 mb-4">
+                      {lectures.slice(0, 5).map((lecture) => (
+                        <div
+                          key={lecture.id}
+                          className="flex items-center justify-between px-4 py-3 rounded-xl border"
+                        >
+                          <div className="min-w-0 flex-1 mr-3">
+                            <p className="text-sm font-semibold text-foreground truncate">{lecture.title}</p>
+                            <p className="text-xs mt-0.5 text-muted-foreground">
+                              {new Date(lecture.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <Button size="sm" variant="outline" asChild>
+                            <Link href={`/results/${lecture.id}`}>
+                              View
+                              <ChevronRight className="h-3 w-3 ml-1" />
+                            </Link>
+                          </Button>
                         </div>
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href={`/results/${lecture.id}`}>
-                            View
-                            <ChevronRight className="h-3 w-3 ml-1" />
-                          </Link>
-                        </Button>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    <Button variant="outline" className="w-full" asChild>
+                      <Link href="/lectures">
+                        <BookOpen className="w-4 h-4 mr-2" />
+                        View All MCQs
+                      </Link>
+                    </Button>
                   </div>
                 )}
               </CardContent>

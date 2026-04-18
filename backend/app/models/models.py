@@ -33,6 +33,8 @@ class User(Base):
     plan = Column(String(20), default="free", server_default="free", nullable=False)
     # Stripe customer ID — set on first subscription checkout, reused for future payments
     stripe_customer_id = Column(String(255), nullable=True)
+    # Allow spending credits to keep using AI features when limits are hit
+    extra_usage_enabled = Column(Integer, default=1, server_default="1", nullable=False)
 
     lectures = relationship("Lecture", back_populates="owner")
 

@@ -275,6 +275,10 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     const pathConvId = pathSegments[2] || null;
     const targetConvId = returnConvId || pathConvId;
 
+    // Check if coming from MCQ library
+    const mcqContext = typeof window !== "undefined" ? sessionStorage.getItem("mcqContext") : null;
+    const fromMcq = typeof window !== "undefined" ? sessionStorage.getItem("fromMcq") === "true" : false;
+
     if (quizScore || quizTotal) {
       console.log(`[Coach] Quiz params: score=${quizScore}/${quizTotal} (${quizPct}%)`);
     }
@@ -292,6 +296,14 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
           }
         } else if (autoQ) {
           setPendingAutoMsg(autoQ);
+        } else if (mcqContext) {
+          // Prepopulate input with MCQ context
+          setInput(`Help me understand this question:\n\n${mcqContext}`);
+          // Clear from session storage
+          if (typeof window !== "undefined") {
+            sessionStorage.removeItem("mcqContext");
+            sessionStorage.removeItem("fromMcq");
+          }
         }
       })
       .catch((err) => console.error("[Coach] Failed to load conversations:", err));
@@ -489,7 +501,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   return (
     <div
       className="chat-root"
-      style={{ backgroundColor: "#0d0f1c", color: "#e2e8f0" }}
+      style={{ backgroundColor: "var(--background)", color: "#e2e8f0" }}
     >
 
       {/* ── MOBILE BACKDROP ─────────────────────────────────────────────────── */}
@@ -522,8 +534,8 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 transition: "transform 0.3s cubic-bezier(0.4,0,0.2,1)",
                 display: "flex",
                 flexDirection: "column",
-                backgroundColor: "#080a14",
-                borderRight: "1px solid rgba(255,255,255,0.07)",
+                backgroundColor: "var(--card)",
+                borderRight: "1px solid var(--border)",
                 boxShadow: sidebarOpen ? "8px 0 40px rgba(0,0,0,0.6)" : "none",
               }
             : {
@@ -534,8 +546,8 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 minWidth: sidebarOpen ? 260 : 0,
                 overflow: "hidden",
                 transition: "width 0.22s ease, min-width 0.22s ease",
-                backgroundColor: "#080a14",
-                borderRight: "1px solid rgba(255,255,255,0.06)",
+                backgroundColor: "var(--card)",
+                borderRight: "1px solid var(--border)",
               }
         }
       >
@@ -557,7 +569,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
               alignItems: "center",
               justifyContent: "space-between",
               padding: "16px 16px 8px",
-              borderBottom: "1px solid rgba(255,255,255,0.05)",
+              borderBottom: "1px solid var(--border)",
             }}
           >
             <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
@@ -612,18 +624,18 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 gap: 8,
                 padding: "10px 14px",
                 borderRadius: 12,
-                background: "linear-gradient(135deg, rgba(123,47,255,0.18), rgba(0,210,253,0.09))",
-                border: "1px solid rgba(123,47,255,0.28)",
-                color: "#c4b5fd",
+                background: "var(--primary)",
+                border: "none",
+                color: "white",
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: "pointer",
                 transition: "opacity 0.15s",
               }}
-              onMouseEnter={e => (e.currentTarget.style.opacity = "0.8")}
+              onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
               onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 17, color: "#a78bfa" }}>add</span>
+              <span className="material-symbols-outlined" style={{ fontSize: 17, color: "white" }}>add</span>
               New conversation
             </button>
           </div>
@@ -638,7 +650,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 padding: "9px 12px",
                 borderRadius: 10,
                 background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                border: "1px solid var(--border)",
               }}
             >
               <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#3a3f60", flexShrink: 0 }}>search</span>
@@ -788,7 +800,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
           <div
             style={{
               padding: "12px",
-              borderTop: "1px solid rgba(255,255,255,0.05)",
+              borderTop: "1px solid var(--border)",
               paddingBottom: "max(12px, env(safe-area-inset-bottom))",
             }}
           >
@@ -828,8 +840,8 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
             padding: "0 12px",
             height: 56,
             paddingTop: "env(safe-area-inset-top)",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            background: "#0d0f1c",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--background)",
             zIndex: 10,
           }}
         >
@@ -1088,8 +1100,8 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
             flexShrink: 0,
             padding: "10px 16px",
             paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            background: "#0d0f1c",
+            borderTop: "1px solid var(--border)",
+            background: "var(--background)",
           }}
         >
           <div style={{ maxWidth: 700, margin: "0 auto" }}>
@@ -1238,7 +1250,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 padding: "8px 8px 8px 14px",
                 borderRadius: 26,
                 background: inputLocked ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.05)",
-                border: `1px solid ${inputLocked ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.1)"}`,
+                border: `1px solid ${inputLocked ? "rgba(255,255,255,0.04)" : "var(--border)"}`,
                 transition: "border-color 0.18s",
                 opacity: inputLocked ? 0.5 : 1,
                 pointerEvents: inputLocked ? "none" : "auto",

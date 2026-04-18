@@ -144,9 +144,13 @@ export interface Entitlements {
   premium_ai_model: string;
   credit_cost_mcq_process: number;
   credit_cost_coach_message: number;
+  extra_usage_enabled: boolean;
 }
 
 export const getEntitlements = () => api.get<Entitlements>("/billing/entitlements");
+
+export const toggleExtraUsage = () =>
+  api.post<{ extra_usage_enabled: boolean }>("/billing/extra-usage/toggle");
 
 export const createCheckoutSession = (credits: number) =>
   api.post<{ checkout_url: string }>("/billing/checkout-session", { credits });
