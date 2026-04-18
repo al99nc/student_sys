@@ -15,11 +15,12 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from datetime import datetime, timezone
 from app.models.models import Lecture, Result, QuizSession
-from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave
+from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave, SolvedLectureOut, SolvedEssayOut, SolvedEssayQuestion, SolvedOut, SolvedMCQ
 from app.api.deps import get_current_user
 from app.models.models import User
 from app.services.pdf_service import extract_text_from_pdf
 from app.services.ai_service import generate_study_content, _estimate_processing_time
+from app.services.generator import generate_essay_content, grade_essay_answer
 from app.core.config import settings
 from app.core.entitlements import (
     assert_can_upload,
@@ -36,6 +37,14 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 class UploadTextRequest(BaseModel):
     text: str
     title: str = "Pasted content"
+
+class CustomContext(BaseModel):
+    exam_type: str = "final"       # final|midterm|quiz|certification|entrance|oral|revision
+    time_to_exam: str = "1week"    # today|3days|1week|1month
+    prior_knowledge: str = "know_basics"  # first_time|know_basics|deep_review
+    difficulty: str = "medium"     # easy|medium|hard|brutal
+    mcq_count: int = 20            # 10–40
+    weak_topics: str = ""
 
 router = APIRouter(tags=["lectures"])
 
@@ -238,14 +247,55 @@ def get_lectures(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(Lecture).filter(Lecture.user_id == current_user.id).order_by(Lecture.created_at.desc()).all()
+    lectures = db.query(Lecture).filter(Lecture.user_id == current_user.id).order_by(Lecture.created_at.desc()).all()
+    results_map = {
+        r.lecture_id: r
+        for r in db.query(Result).filter(Result.lecture_id.in_([l.id for l in lectures])).all()
+    }
+    out = []
+    for lec in lectures:
+        result = results_map.get(lec.id)
+        d = LectureOut.model_validate(lec)
+        d.is_processed = result is not None
+        d.has_essays = bool(result and result.essays)
+        out.append(d)
+    return out
+
+@router.get("/lectures/solved", response_model=List[SolvedLectureOut])
+def get_solved_lectures(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lectures = db.query(Lecture).filter(Lecture.user_id == current_user.id).order_by(Lecture.created_at.desc()).all()
+    results_map = {
+        r.lecture_id: r
+        for r in db.query(Result).filter(Result.lecture_id.in_([l.id for l in lectures])).all()
+    }
+    out = []
+    for lec in lectures:
+        result = results_map.get(lec.id)
+        if not result:
+            continue
+        mcqs = json.loads(result.mcqs) if result.mcqs else []
+        mcqs = mcqs or []
+        has_essays = bool(result.essays)
+        if not mcqs and not has_essays:
+            continue
+        out.append(SolvedLectureOut(
+            id=lec.id,
+            title=lec.title,
+            created_at=lec.created_at,
+            mcq_count=len(mcqs),
+            has_essays=has_essays,
+        ))
+    return out
 
 @router.get("/estimate/{lecture_id}")
 async def estimate_lecture_processing(
     lecture_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    mode: str = Query("highyield", pattern="^(highyield|exam|harder)$"),
+    mode: str = Query("highyield", pattern="^(highyield|exam|harder|essay)$"),
 ):
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id
@@ -274,7 +324,8 @@ async def process_lecture(
     lecture_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    mode: str = Query("highyield", pattern="^(highyield|exam|harder)$"),
+    mode: str = Query("highyield", pattern="^(highyield|exam|harder|custom|essay|essay_custom)$"),
+    custom_context: Optional[CustomContext] = None,
 ):
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id
@@ -306,8 +357,24 @@ async def process_lecture(
     else:
         use_premium = is_premium(current_user)
 
+    context_dict: dict | None = None
+    if custom_context is not None:
+        context_dict = custom_context.model_dump()
+        context_dict["field_of_study"] = " ".join(filter(None, [
+            current_user.college, current_user.subject,
+        ])) or "General Studies"
+
+    is_essay_mode = mode in ("essay", "essay_custom")
+
     try:
-        ai_data = await generate_study_content(text, mode=mode, is_premium=use_premium)
+        if is_essay_mode:
+            ai_data = await generate_essay_content(
+                text, is_premium=use_premium, custom_context=context_dict,
+            )
+        else:
+            ai_data = await generate_study_content(
+                text, mode=mode, is_premium=use_premium, custom_context=context_dict,
+            )
     except Exception as e:
         if spent and cost > 0:
             refund_credits(db, current_user, cost, commit=True)
@@ -320,18 +387,25 @@ async def process_lecture(
         raise HTTPException(status_code=503, detail=f"AI processing failed: {err_str}")
 
     # Save or update result
+    saved_context = json.dumps(context_dict) if context_dict else None
     existing = db.query(Result).filter(Result.lecture_id == lecture_id).first()
     if existing:
         existing.summary = ai_data.get("summary", "")
         existing.key_concepts = json.dumps(ai_data.get("key_concepts", []))
-        existing.mcqs = json.dumps(ai_data.get("mcqs", []))
+        if is_essay_mode:
+            existing.essays = json.dumps(ai_data.get("questions", []))
+        else:
+            existing.mcqs = json.dumps(ai_data.get("mcqs", []))
+        existing.custom_context = saved_context
         db.commit()
     else:
         result = Result(
             lecture_id=lecture_id,
             summary=ai_data.get("summary", ""),
             key_concepts=json.dumps(ai_data.get("key_concepts", [])),
-            mcqs=json.dumps(ai_data.get("mcqs", [])),
+            mcqs=json.dumps(ai_data.get("mcqs", [])) if not is_essay_mode else "[]",
+            essays=json.dumps(ai_data.get("questions", [])) if is_essay_mode else None,
+            custom_context=saved_context,
         )
         db.add(result)
         db.commit()
@@ -364,6 +438,7 @@ def get_results(
         summary=result.summary,
         key_concepts=json.loads(result.key_concepts) if result.key_concepts else [],
         mcqs=json.loads(result.mcqs) if result.mcqs else [],
+        has_essays=bool(result.essays),
         created_at=result.created_at,
         share_token=result.share_token,
         view_count=result.view_count or 0,
@@ -582,6 +657,109 @@ def get_user_stats(
         "total_mcqs_answered": total_answered,
         "avg_score": avg_score,
     }
+
+
+class EssayGradeRequest(BaseModel):
+    lecture_id: int
+    question_index: int
+    student_answer: str
+    ideal_answer: str
+
+
+@router.get("/essay-results/{lecture_id}")
+def get_essay_results(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id, Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    result = db.query(Result).filter(Result.lecture_id == lecture_id).first()
+    if not result or not result.essays:
+        raise HTTPException(status_code=404, detail="Essay results not found. Process the lecture in Essay Mode first.")
+
+    questions = json.loads(result.essays)
+    return {
+        "id": result.id,
+        "lecture_id": lecture_id,
+        "questions": questions,
+        "created_at": result.created_at,
+    }
+
+
+@router.get("/solved/{lecture_id}", response_model=SolvedOut)
+def get_solved(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id, Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    result = db.query(Result).filter(Result.lecture_id == lecture_id).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="No study materials found. Process the lecture first.")
+
+    mcqs = []
+    raw_mcqs = json.loads(result.mcqs) if result.mcqs else []
+    for q in (raw_mcqs or []):
+        mcqs.append(SolvedMCQ(
+            question=q.get("question", ""),
+            options=q.get("options", []),
+            answer=q.get("answer", ""),
+            explanation=q.get("explanation"),
+            topic=q.get("topic"),
+        ))
+
+    essays = []
+    raw_essays = json.loads(result.essays) if result.essays else []
+    for q in (raw_essays or []):
+        essays.append(SolvedEssayQuestion(
+            question=q.get("question", ""),
+            ideal_answer=q.get("ideal_answer", ""),
+            topic=q.get("topic"),
+            max_score=q.get("max_score", 100),
+        ))
+
+    if not mcqs and not essays:
+        raise HTTPException(status_code=404, detail="No study materials found for this lecture.")
+
+    return SolvedOut(
+        lecture_id=lecture_id,
+        lecture_title=lecture.title,
+        created_at=result.created_at,
+        mcqs=mcqs,
+        essays=essays,
+    )
+
+
+@router.post("/essay/grade")
+async def grade_essay(
+    body: EssayGradeRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not body.student_answer.strip():
+        raise HTTPException(status_code=400, detail="Student answer cannot be empty")
+    if len(body.student_answer) > 10_000:
+        raise HTTPException(status_code=400, detail="Answer too long (max 10,000 characters)")
+
+    try:
+        result = await grade_essay_answer(
+            question=f"Question index {body.question_index}",
+            ideal_answer=body.ideal_answer,
+            student_answer=body.student_answer,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Grading failed: {str(e)}")
+
+    return result
 
 
 @router.get("/my-shared-sessions")

@@ -295,6 +295,10 @@ export default function ResultsPage() {
   const fetchResults = async () => {
     try {
       const res = await getResults(lectureId);
+      if (res.data.has_essays && !(res.data.mcqs?.length)) {
+        router.replace(`/quiz/solved/${lectureId}`);
+        return;
+      }
       setResults(res.data);
       if (res.data.share_token) {
         setShareToken(res.data.share_token);

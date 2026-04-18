@@ -10,7 +10,7 @@ import {
   coachDeleteConversation,
   coachSendMessage,
   coachSearch,
-  getMe,
+  getEntitlements,
   QuizResult,
 } from "@/lib/api";
 
@@ -142,6 +142,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   // User plan
   const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">("free");
   const [creditBalance, setCreditBalance] = useState(0);
+  const [extraUsageEnabled, setExtraUsageEnabled] = useState(true);
   const [lockedDueToLimit, setLockedDueToLimit] = useState(false);
   const [countdown, setCountdown] = useState("");
 
@@ -170,11 +171,12 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch user plan/credits
+  // Fetch user plan/credits/toggle
   useEffect(() => {
-    getMe().then(res => {
+    getEntitlements().then(res => {
       setUserPlan(res.data.plan ?? "free");
       setCreditBalance(res.data.credit_balance ?? 0);
+      setExtraUsageEnabled(res.data.extra_usage_enabled ?? true);
     }).catch(() => {});
   }, []);
 
@@ -1112,10 +1114,11 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 <button
                   type="button"
                   onClick={() => {
+                    if (!extraUsageEnabled) return; // toggle off — locked to llama
                     if (isFreeUser && selectedModel === "llama") return; // Gemini is Pro only
                     setSelectedModel(m => m === "llama" ? "gemini" : "llama");
                   }}
-                  title={isFreeUser ? "Gemini is a Pro feature" : undefined}
+                  title={!extraUsageEnabled ? "Extra usage is off — using Llama 3.3" : isFreeUser ? "Gemini is a Pro feature" : undefined}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -1127,20 +1130,27 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                     color: selectedModel === "gemini" ? "#00D2FD" : "#64748b",
                     fontSize: 11,
                     fontWeight: 600,
-                    cursor: isFreeUser ? "default" : "pointer",
+                    cursor: (!extraUsageEnabled || isFreeUser) ? "default" : "pointer",
                     transition: "all 0.18s",
-                    opacity: isFreeUser ? 0.6 : 1,
+                    opacity: (!extraUsageEnabled || isFreeUser) ? 0.6 : 1,
                   }}
                 >
                   <span className="material-symbols-outlined" style={{ fontSize: 13 }}>
-                    {selectedModel === "gemini" ? "auto_awesome" : "psychology"}
+                    {!extraUsageEnabled ? "psychology" : selectedModel === "gemini" ? "auto_awesome" : "psychology"}
                   </span>
-                  {selectedModel === "gemini" ? "Gemini 2.5" : "Llama 3.3"}
-                  {isFreeUser
+                  {!extraUsageEnabled ? "Llama 3.3" : selectedModel === "gemini" ? "Gemini 2.5" : "Llama 3.3"}
+                  {!extraUsageEnabled
+                    ? <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.5 }}>toggle_off</span>
+                    : isFreeUser
                     ? <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.5 }}>lock</span>
                     : <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.6 }}>unfold_more</span>
                   }
                 </button>
+                {!extraUsageEnabled && (
+                  <span style={{ fontSize: 10, color: "#64748b", marginLeft: 6 }}>
+                    Extra usage off — Llama only
+                  </span>
+                )}
               </div>
             )}
 

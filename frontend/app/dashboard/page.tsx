@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getLectures, getStats, getMySharedSessions, getNextBestAction } from "@/lib/api";
-import { isAuthenticated, logout, getToken } from "@/lib/auth";
+import { getLectures, getStats, getMySharedSessions, getNextBestAction, getMe } from "@/lib/api";
+import { isAuthenticated, logout } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,8 @@ interface Lecture {
   title: string;
   file_path: string;
   created_at: string;
+  is_processed: boolean;
+  has_essays: boolean;
 }
 
 interface SharedSession {
@@ -42,20 +44,8 @@ interface SharedSession {
   updated_at: string | null;
 }
 
-type Filter = "all" | "processed" | "processing" | "unprocessed";
+type Filter = "all" | "processed" | "unprocessed";
 
-function getUsernameFromToken(): string {
-  const token = getToken();
-  if (!token) return "Student";
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    console.log("JWT Payload:", payload); // Log the payload for inspection
-    return payload.id?.name || payload.given_name || payload.preferred_username || payload.sub || payload.username || payload.name || "Student";
-  } catch (e) {
-    console.error("Failed to decode token or parse payload:", e);
-    return "Student";
-  }
-}
 
 function isValid(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -89,22 +79,23 @@ export default function DashboardPage() {
       router.push("/auth");
       return;
     }
-    setUserName(getUsernameFromToken());
     fetchData();
   }, [router]);
 
   const fetchData = async () => {
     try {
-      const [lecturesRes, statsRes, sharedRes, nextActionRes] = await Promise.all([
+      const [lecturesRes, statsRes, sharedRes, nextActionRes, meRes] = await Promise.all([
         getLectures(),
         getStats(),
         getMySharedSessions(),
         getNextBestAction(),
+        getMe(),
       ]);
       setLectures(lecturesRes.data);
       setStats(statsRes.data);
       setSharedSessions(sharedRes.data);
       setNextAction(nextActionRes.data);
+      if (meRes.data.name) setUserName(meRes.data.name);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       if (axiosErr?.response?.status !== 404) {
@@ -410,7 +401,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="space-y-3">
                     <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                      {(["all", "processed", "processing", "unprocessed"] as Filter[]).map((f) => (
+                      {(["all", "processed", "unprocessed"] as Filter[]).map((f) => (
                         <button
                           key={f}
                           onClick={() => setFilter(f)}
@@ -420,30 +411,36 @@ export default function DashboardPage() {
                               : "bg-muted/50 text-muted-foreground border border-border hover:text-foreground"
                           }`}
                         >
-                          {f === "all" ? "All" : f === "processed" ? "Processed" : f === "processing" ? "In Progress" : "Unprocessed"}
+                          {f === "all" ? "All" : f === "processed" ? "Processed" : "Unprocessed"}
                         </button>
                       ))}
                     </div>
                     <div className="space-y-2 mb-4">
-                      {lectures.slice(0, 5).map((lecture) => (
-                        <div
-                          key={lecture.id}
-                          className="flex items-center justify-between px-4 py-3 rounded-xl border"
-                        >
-                          <div className="min-w-0 flex-1 mr-3">
-                            <p className="text-sm font-semibold text-foreground truncate">{lecture.title}</p>
-                            <p className="text-xs mt-0.5 text-muted-foreground">
-                              {new Date(lecture.created_at).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <Button size="sm" variant="outline" asChild>
-                            <Link href={`/results/${lecture.id}`}>
-                              View
-                              <ChevronRight className="h-3 w-3 ml-1" />
+                      {lectures
+                        .filter((l) =>
+                          filter === "all" ? true :
+                          filter === "processed" ? l.is_processed :
+                          !l.is_processed
+                        )
+                        .slice(0, 5)
+                        .map((lecture) => {
+                          const href = lecture.is_processed ? `/results/${lecture.id}` : `/upload`;
+                          return (
+                            <Link
+                              key={lecture.id}
+                              href={href}
+                              className="flex items-center justify-between px-4 py-3 rounded-xl border hover:border-primary/40 hover:bg-muted/20 transition-all duration-150"
+                            >
+                              <div className="min-w-0 flex-1 mr-3">
+                                <p className="text-sm font-semibold text-foreground truncate">{lecture.title}</p>
+                                <p className="text-xs mt-0.5 text-muted-foreground">
+                                  {new Date(lecture.created_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                             </Link>
-                          </Button>
-                        </div>
-                      ))}
+                          );
+                        })}
                     </div>
                     <Button variant="outline" className="w-full" asChild>
                       <Link href="/lectures">

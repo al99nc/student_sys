@@ -339,11 +339,12 @@ async def send_message(
     else:
         _premium = is_premium(current_user)
 
-    # Apply explicit model override
-    if model_preference == "gemini":
-        _premium = True
-    elif model_preference == "llama":
-        _premium = False
+    # Apply explicit model override only when toggle is ON
+    if current_user.extra_usage_enabled:
+        if model_preference == "gemini":
+            _premium = True
+        elif model_preference == "llama":
+            _premium = False
 
     # ── Save user message ─────────────────────────────────────────────────────
     user_msg = CoachMessage(

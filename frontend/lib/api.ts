@@ -38,7 +38,16 @@ api.interceptors.response.use(
   }
 );
 
-export type Difficulty = "highyield" | "exam" | "harder";
+export type Difficulty = "highyield" | "exam" | "harder" | "essay";
+
+export interface CustomContext {
+  exam_type: string;
+  time_to_exam: string;
+  prior_knowledge: string;
+  difficulty: string;
+  mcq_count: number;
+  weak_topics: string;
+}
 
 // ── Response types ────────────────────────────────────────────────────────────
 
@@ -134,6 +143,7 @@ export const syncWaylPayments = () =>
   api.post<{ payments_found: number; credits_added: number; credit_balance: number }>("/billing/wayl-sync");
 
 export interface Entitlements {
+  plan: "free" | "pro" | "enterprise";
   premium: boolean;
   credit_balance: number;
   uploads_this_month: number;
@@ -179,12 +189,25 @@ export const extractImageText = (imageFile: File) => {
 };
 
 export const getLectures = () => api.get("/lectures");
+export const getSolvedLectures = () => api.get("/lectures/solved");
 
 export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "highyield") =>
   api.get(`/estimate/${lectureId}?mode=${difficulty}`);
 
-export const processLecture = (lectureId: number, difficulty: Difficulty = "highyield") =>
-  api.post(`/process/${lectureId}?mode=${difficulty}`, null, { timeout: 600_000 });
+export const processLecture = (
+  lectureId: number,
+  difficulty: Difficulty = "highyield",
+  customContext?: CustomContext,
+) =>
+  api.post(
+    `/process/${lectureId}?mode=${
+      difficulty === "essay"
+        ? customContext ? "essay_custom" : "essay"
+        : customContext ? "custom" : difficulty
+    }`,
+    customContext ?? null,
+    { timeout: 600_000 },
+  );
 
 export const getStats = () => api.get("/stats");
 
@@ -362,3 +385,44 @@ export const recordQuizResult = (documentId: number, correct: number, total: num
     mode: "quiz_mode",
     started_from: startedFrom,
   });
+
+// ── Essay Q types ─────────────────────────────────────────────────────────────
+
+export interface EssayQuestion {
+  question: string;
+  ideal_answer: string;
+  topic?: string;
+  max_score: number;
+}
+
+export interface EssayResultOut {
+  id: number;
+  lecture_id: number;
+  questions: EssayQuestion[];
+  created_at: string;
+}
+
+export interface EssayGradeResult {
+  score: number;
+  feedback: string;
+  key_points_covered: string[];
+  key_points_missed: string[];
+}
+
+export const getEssayResults = (lectureId: number) =>
+  api.get<EssayResultOut>(`/essay-results/${lectureId}`);
+
+export const getSolved = (lectureId: number) =>
+  api.get(`/solved/${lectureId}`);
+
+export const gradeEssayAnswer = (
+  lectureId: number,
+  questionIndex: number,
+  studentAnswer: string,
+  idealAnswer: string,
+) =>
+  api.post<EssayGradeResult>(
+    `/essay/grade`,
+    { lecture_id: lectureId, question_index: questionIndex, student_answer: studentAnswer, ideal_answer: idealAnswer },
+    { timeout: 60_000 },
+  );

@@ -389,6 +389,428 @@ Lecture text:
 
 
 # ─────────────────────────────────────────────────────────────────
+# CONTEXTUAL PROMPT BUILDER  (paid feature — all majors)
+# ─────────────────────────────────────────────────────────────────
+
+_EXAM_TYPE_LABELS = {
+    "final":         "Final Examination",
+    "midterm":       "Midterm Examination",
+    "quiz":          "Quiz / Weekly Assessment",
+    "certification": "Professional Certification / Licensing Exam",
+    "entrance":      "Entrance / Competitive Exam",
+    "oral":          "Oral Examination / Viva Voce",
+    "revision":      "General Revision / Self-Study",
+}
+
+_TIME_URGENCY = {
+    "today":  (
+        "THE EXAM IS TODAY.",
+        "Prioritize the single highest-frequency testable fact per concept. "
+        "Skip rare exceptions and deep edge cases entirely. "
+        "Every question must test something that commonly appears on exams. "
+        "Speed and certainty over depth."
+    ),
+    "3days":  (
+        "Exam is in 3 days.",
+        "Balance breadth (hit every major topic at least once) with targeted depth "
+        "(include the application questions that distinguish passing from failing students). "
+        "One or two edge-case questions are acceptable but not the focus."
+    ),
+    "1week":  (
+        "Exam is in 1 week.",
+        "Full topic coverage expected. Include application, mechanism, and exception questions. "
+        "The student has time to work through harder questions and learn from explanations."
+    ),
+    "1month": (
+        "Exam is in 1+ month.",
+        "Comprehensive deep coverage. Include rare exceptions, advanced multi-step reasoning, "
+        "and nuanced distinctions that only well-prepared students will catch."
+    ),
+}
+
+_KNOWLEDGE_PROFILE = {
+    "first_time": (
+        "seeing this material for the FIRST TIME",
+        "Include foundational recall questions (up to 50%) to build mental models before "
+        "adding application. Avoid unexplained jargon. Explanations must define key terms."
+    ),
+    "know_basics": (
+        "familiar with the fundamentals",
+        "Skip basic definitions — the student knows them. Shift weight toward APPLICATION "
+        "and concept interaction. ~30% recall, ~50% application, ~20% analysis."
+    ),
+    "deep_review": (
+        "already well-prepared and doing a final deep review",
+        "Avoid recall questions entirely. Target EDGE CASES, EXCEPTIONS, and multi-step "
+        "analysis. Test the fine details that trip up even prepared students. "
+        "~5% recall, ~40% application, ~55% analysis."
+    ),
+}
+
+_DIFFICULTY_PROFILE = {
+    "easy": (
+        "EASY",
+        "Clear, unambiguous stems. Distractors are obviously wrong to anyone who studied the material. "
+        "Single-step reasoning. No traps.",
+        "60% recall, 35% application, 5% analysis."
+    ),
+    "medium": (
+        "MEDIUM",
+        "Plausible distractors that require understanding — not just recognition. "
+        "Mix of direct recall and application scenarios. Some two-step reasoning.",
+        "30% recall, 50% application, 20% analysis."
+    ),
+    "hard": (
+        "HARD",
+        "Distractors are correct in a different context — student must rule them out precisely. "
+        "Application and analysis dominate. Scenario questions require 2-3 reasoning steps.",
+        "10% recall, 50% application, 40% analysis."
+    ),
+    "brutal": (
+        "BRUTAL",
+        "No recall questions at all. Every distractor is plausible and would be chosen by "
+        "a student who half-knows the material. Questions require precise knowledge and "
+        "multi-step reasoning. The most common student error MUST appear as a wrong option.",
+        "0% recall, 40% application, 60% analysis."
+    ),
+}
+
+_FIELD_QUESTION_STYLE = {
+    # Medicine / Health Sciences
+    "medicine":     "Use clinical vignettes (patient age, sex, symptoms, labs) for application questions. "
+                    "Mechanism questions test specific receptors, enzymes, or transporters. "
+                    "Case scenarios for management decisions.",
+    "nursing":      "Use patient-care scenarios. Focus on nursing interventions, assessment priorities, "
+                    "and safe medication administration. Avoid physician-only decision making.",
+    "pharmacy":     "Include drug mechanism, pharmacokinetics, drug interactions, and dosing scenarios. "
+                    "Application questions use patient cases requiring drug selection or dose adjustment.",
+    "dentistry":    "Use clinical dental scenarios. Include anatomy, pathology, and treatment planning.",
+
+    # Engineering & Technology
+    "engineering":  "Use problem-solving scenarios with realistic numerical values where relevant. "
+                    "Application questions present a system or constraint and ask for the correct approach.",
+    "computer science": "Include code-based scenarios, algorithm trace-throughs, and system design questions. "
+                    "Application questions use realistic programming problems or debugging situations.",
+    "it":           "Use realistic IT infrastructure, networking, or security scenarios for application questions.",
+
+    # Law
+    "law":          "Use case-based scenarios (brief factual pattern → legal question). "
+                    "Application questions test statute interpretation, element analysis, or jurisdiction rules. "
+                    "Never ask 'who wrote X law' — test application, not history.",
+
+    # Business & Economics
+    "business":     "Use business scenario questions: a company situation → decision or calculation. "
+                    "Application questions may involve financial figures, ratios, or strategic choices.",
+    "economics":    "Use scenario-based questions with economic data (price, quantity, elasticity). "
+                    "Application questions derive conclusions from graphs or numerical inputs.",
+    "accounting":   "Include journal entry logic, financial statement interpretation, and ratio analysis scenarios.",
+
+    # Sciences
+    "biology":      "Use experimental scenario questions: given a result, identify the mechanism or conclusion. "
+                    "Include molecular, cellular, and systems-level questions.",
+    "chemistry":    "Use reaction-based scenarios and calculation questions. Application questions "
+                    "present a reaction condition and ask for the product, mechanism, or yield factor.",
+    "physics":      "Use numerical problem scenarios. Application questions present a physical system "
+                    "and ask for the correct law, formula, or derived value.",
+    "mathematics":  "Include proof-reasoning questions and applied calculation scenarios. "
+                    "Application questions present a real-world context requiring the correct mathematical model.",
+
+    # Humanities & Social Sciences
+    "history":      "Use source-analysis or context questions. Application questions ask the student "
+                    "to evaluate a cause, consequence, or historical argument — not just name a date.",
+    "psychology":   "Use case vignettes (brief behavioral description) for application questions. "
+                    "Test theory application, research interpretation, and ethical reasoning.",
+    "sociology":    "Use social scenario questions. Application questions require applying a theory "
+                    "or concept to a described situation.",
+    "education":    "Use classroom scenario questions. Application questions test pedagogical decisions, "
+                    "assessment design, or learning theory application.",
+    "architecture": "Use design scenario questions. Application questions present a constraint "
+                    "(site, function, structure) and ask for the correct design principle or material choice.",
+}
+
+_DEFAULT_QUESTION_STYLE = (
+    "Use scenario-based application questions where possible: present a realistic situation "
+    "from the field and ask the student to apply the concept. Avoid pure naming or trivia questions."
+)
+
+
+def _detect_field_style(field_of_study: str) -> str:
+    """Map a user's field_of_study string to a question-style guideline."""
+    if not field_of_study:
+        return _DEFAULT_QUESTION_STYLE
+    normalized = field_of_study.lower().strip()
+    for key, style in _FIELD_QUESTION_STYLE.items():
+        if key in normalized:
+            return style
+    return _DEFAULT_QUESTION_STYLE
+
+
+def build_contextual_prompt(
+    field_of_study: str,
+    exam_type: str,       # "final" | "midterm" | "quiz" | "certification" | "entrance" | "oral" | "revision"
+    time_to_exam: str,    # "today" | "3days" | "1week" | "1month"
+    prior_knowledge: str, # "first_time" | "know_basics" | "deep_review"
+    difficulty: str,      # "easy" | "medium" | "hard" | "brutal"
+    mcq_count: int,       # 10–40
+    weak_topics: str = "",
+) -> tuple[str, str]:
+    """
+    Build a tailored (system_prompt, user_prompt) pair from the student's context.
+    Works for any college major — medical-specific prompts are a separate path.
+    """
+    exam_label   = _EXAM_TYPE_LABELS.get(exam_type, "Examination")
+    urgency_head, urgency_body = _TIME_URGENCY.get(time_to_exam, _TIME_URGENCY["1week"])
+    know_label, know_body      = _KNOWLEDGE_PROFILE.get(prior_knowledge, _KNOWLEDGE_PROFILE["know_basics"])
+    diff_label, diff_body, diff_dist = _DIFFICULTY_PROFILE.get(difficulty, _DIFFICULTY_PROFILE["medium"])
+    field_style  = _detect_field_style(field_of_study)
+    field_label  = field_of_study.strip().title() if field_of_study else "their field"
+
+    weak_block = ""
+    if weak_topics and weak_topics.strip():
+        weak_block = (
+            f"\n=== STUDENT'S WEAK AREAS — PRIORITIZE THESE ===\n"
+            f"The student specifically struggles with: {weak_topics.strip()}\n"
+            f"At least 30% of questions MUST target these weak areas directly. "
+            f"Design distractors that exploit the exact misconceptions a student weak in these areas would have.\n"
+        )
+
+    system_prompt = (
+        f"⚠️ ABSOLUTE CONSTRAINT — READ FIRST:\n"
+        f"You MUST output EXACTLY {mcq_count} MCQs. Not {mcq_count + 1}. Not {mcq_count - 1}. "
+        f"Exactly {mcq_count}. Before writing a single question, plan {mcq_count} distinct "
+        f"objectives and allocate them across topics. MAX 2 questions per topic/subsection — "
+        f"if a topic is large, pick its 2 most important concepts only and move on. "
+        f"After generating, count your mcqs array. If it exceeds {mcq_count}, DELETE the excess "
+        f"starting from the last topic. Never output more than {mcq_count} items in mcqs.\n\n"
+
+        f"You are a professor-level {field_label} exam writer preparing questions for a {exam_label}.\n\n"
+
+        f"=== STUDENT CONTEXT ===\n"
+        f"  {urgency_head} {urgency_body}\n"
+        f"  The student is {know_label}. {know_body}\n\n"
+
+        f"=== DIFFICULTY LEVEL: {diff_label} ===\n"
+        f"  {diff_body}\n"
+        f"  Distribution: {diff_dist}\n\n"
+
+        f"=== QUESTION STYLE FOR {field_label.upper()} ===\n"
+        f"  {field_style}\n\n"
+
+        f"{weak_block}"
+
+        "=== UNIVERSAL QUESTION CRAFTING RULES ===\n"
+        "- OPTION PARALLELISM: All 4 options must be at the same conceptual level.\n"
+        "  Never mix a root cause with a downstream effect in the same option list.\n"
+        "- DISTRACTOR QUALITY: Each wrong option must be correct in a DIFFERENT context\n"
+        "  or represent a real and common student misconception — never random noise.\n"
+        "- SCENARIO UNIQUENESS: No two application questions test the same concept.\n"
+        "  Different scenarios, different reasoning paths.\n"
+        "- SPECIFICITY: Use the most precise technical term available — never vague paraphrases.\n"
+        "- All facts EXCLUSIVELY from the provided lecture text. Do not invent.\n"
+        "- Explanations must be internally consistent — never contradict themselves.\n\n"
+
+        "=== ABSOLUTELY FORBIDDEN QUESTION TYPES ===\n"
+        "These have zero educational value and must NEVER appear:\n"
+        "  ✗ Historical trivia: 'Who first discovered X?' / 'When was X first described?'\n"
+        "  ✗ Pure naming: 'X is also known as?' / 'What does the word X mean?'\n"
+        "  ✗ Embedded answers: any question where the correct answer is a name or term\n"
+        "    already implied or stated in the stem.\n"
+        "  ✗ Bullet-point conversions: if the lecture states 'X = Y', do NOT make\n"
+        "    'What is X?' with answer Y. Use that fact as a distractor instead.\n"
+        "  ✗ Obvious distractors: options that no student who read the material would choose.\n\n"
+
+        "=== OPTION RULES ===\n"
+        "FORBIDDEN in any option: 'All of the above', 'None of the above', 'Both A and B',\n"
+        "'Neither A nor B', 'Both of the above', 'None of these', any 'Both X and Y' phrasing.\n"
+        "Never recycle the same 4-option set across two questions.\n\n"
+
+        "=== ANTI-REPETITION ===\n"
+        "- Plan all distinct educational objectives BEFORE generating — no overlapping objectives.\n"
+        "- If a concept has already been tested, do not test it again with only surface changes.\n"
+        "- Limited content → fewer but deeper questions. Never pad with filler.\n\n"
+
+        "=== OUTPUT FORMAT ===\n"
+        "Return ONLY valid JSON — no markdown, no code fences, no text outside the object:\n"
+        "  summary: 3-5 sentences | key_concepts: 8-12 phrases\n"
+        "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation}]\n\n"
+
+        "=== INTERNAL VERIFICATION (do not output) ===\n"
+        f"0. COUNT mcqs array. Must equal exactly {mcq_count}. Delete excess. Stop if short and pad only with high-quality questions.\n"
+        "1. All objectives distinct — zero naming/trivia/historical questions.\n"
+        "2. Zero forbidden phrases including 'Both X and Y'.\n"
+        "3. No two questions test the same concept.\n"
+        "4. No identical option sets across questions.\n"
+        "5. Every fact traceable to the lecture text.\n"
+        "6. Explanations consistent and non-contradictory.\n"
+        "7. A/B/C/D each between 15%-35% of total answers. Fix distribution before output.\n"
+        f"8. Difficulty matches {diff_label}: verify distribution is {diff_dist}\n"
+        "9. Distractors are plausible and field-appropriate — not random.\n"
+        f"10. No single topic has more than 2 questions. If any does, delete the excess.\n"
+        "Regenerate any failing question before output."
+    )
+
+    weak_user_block = ""
+    if weak_topics and weak_topics.strip():
+        weak_user_block = (
+            f"\nWEAK AREAS TO EMPHASIZE: {weak_topics.strip()}\n"
+            "At least 30% of questions must directly target these. Use distractors that exploit\n"
+            "the exact misconceptions someone weak in these areas would have.\n"
+        )
+
+    user_prompt = f"""TARGET: Exactly {mcq_count} MCQs. This is a hard limit — not a suggestion.
+
+=== STEP 1: PLAN (internal — do not output) ===
+Before writing any question:
+a) Read the lecture and identify ALL major topics/subsections.
+b) Allocate questions across topics so the TOTAL equals exactly {mcq_count}.
+   - MAX 2 questions per topic. No exceptions.
+   - Distribute proportionally to topic importance, not topic length.
+   - If the lecture has fewer than {mcq_count // 2} meaningful topics, use 2 per topic and add application/comparison questions across topics.
+c) Write down your allocation (e.g. "Cell wall: 2, Hyphae: 2, Dimorphism: 2, ...").
+   The allocations MUST sum to exactly {mcq_count}. Adjust until they do.
+
+=== STEP 2: GENERATE ===
+Generate one MCQ per planned objective. Follow your allocation strictly.
+STOP immediately once you have {mcq_count} questions. Do NOT add more.
+
+STUDENT CONTEXT: {urgency_head} Student is {know_label}.
+DIFFICULTY: {diff_label} — {diff_body}
+DISTRIBUTION: {diff_dist}
+{weak_user_block}
+=== HARD RULES — violation = rejected ===
+1. EXACTLY {mcq_count} questions. Count before outputting. Delete any extras.
+2. MAX 2 questions per topic — even if a topic has 10 pages of content.
+3. All of the above / None of the above / Both A and B / Neither A nor B — FORBIDDEN.
+4. "Both X and Y" phrasing in any option — FORBIDDEN.
+5. No two questions test the same concept.
+6. No identical 4-option sets.
+7. Facts from lecture text only — do not invent.
+8. FORBIDDEN question types: 'Who discovered X', 'X is also known as', 'What does X mean',
+   any question whose answer is stated in the stem, bullet-point conversions.
+
+=== QUESTION STYLE ===
+{field_style}
+
+=== COVERAGE ===
+Cover the lecture BREADTH-FIRST — every major topic gets at least 1 question before any topic gets a 2nd.
+Topics with more content do NOT get more questions — they get HARDER questions.
+
+=== STEP 3: FINAL CHECK (internal — do not output) ===
+1. len(mcqs) == {mcq_count}? If not, fix it NOW before outputting.
+2. Any topic with more than 2 questions? Delete the extra ones.
+3. Zero forbidden phrases. Zero duplicate concepts. Zero trivial questions.
+4. A/B/C/D each 15-35% of answers.
+5. Difficulty matches {diff_label}: distribution is {diff_dist}
+
+Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation"}}],"summary":"string","key_concepts":["string"]}}
+
+Lecture text:
+{{text}}"""
+
+    return system_prompt, user_prompt
+
+
+# ─────────────────────────────────────────────────────────────────
+# ESSAY MODE PROMPTS
+# ─────────────────────────────────────────────────────────────────
+
+ESSAY_SYSTEM_PROMPT = (
+    "You are an expert academic examiner generating open-ended essay questions from lecture content. "
+    "For each question you MUST provide a comprehensive ideal answer that would earn 100/100 marks. "
+    "The ideal answer must cover every key point, mechanism, and nuance a student needs to achieve full marks.\n\n"
+
+    "=== ESSAY QUESTION RULES ===\n"
+    "- Questions must be open-ended — no yes/no or multiple-choice answers.\n"
+    "- Questions must require understanding and synthesis, not just recall.\n"
+    "- Each question should test a distinct concept or topic area from the lecture.\n"
+    "- Questions can ask to 'explain', 'describe', 'compare', 'discuss', 'analyze', or 'evaluate'.\n\n"
+
+    "=== IDEAL ANSWER RULES ===\n"
+    "- The ideal answer is the gold-standard 100/100 response.\n"
+    "- Cover ALL key points a student must mention to get full marks.\n"
+    "- Include relevant mechanisms, examples, clinical correlations, or applications as appropriate.\n"
+    "- Write 3-8 sentences per ideal answer — comprehensive but focused.\n"
+    "- Do NOT include phrases like 'a good answer would...' — write the actual ideal answer directly.\n\n"
+
+    "=== OUTPUT FORMAT ===\n"
+    "Return ONLY valid JSON — no markdown, no code fences:\n"
+    '{"questions":[{"topic":"string","question":"string","ideal_answer":"string","max_score":100}],'
+    '"summary":"string","key_concepts":["string"]}\n\n'
+
+    "=== VERIFICATION ===\n"
+    "1. Every question is distinct — no overlapping topics.\n"
+    "2. Every ideal_answer covers ALL scorable points.\n"
+    "3. No yes/no questions. No MCQ-style questions.\n"
+    "4. Ideal answers are 3-8 complete sentences.\n"
+    "5. All facts from the lecture text only."
+)
+
+ESSAY_USER_PROMPT = """Generate open-ended essay questions with ideal 100/100 answers from the lecture below.
+
+QUANTITY: Rich lecture → 8-12 questions. Short lecture → 4-6. Never pad. Stop at distinct topics.
+
+=== RULES ===
+1. Each question tests a DISTINCT concept — no overlapping questions.
+2. Questions must be open-ended (explain, describe, compare, discuss, analyze, evaluate).
+3. Ideal answer = comprehensive gold-standard response covering ALL key points.
+4. Ideal answer length: 3-8 sentences. Must be specific, not vague.
+5. max_score is always 100.
+6. Facts from lecture text only — do not invent.
+
+=== FORBIDDEN ===
+- Yes/no questions
+- Single-word answer questions
+- Questions whose answer is obvious from the question itself
+- Vague or generic ideal answers ("A good answer would mention...")
+
+=== VERIFY BEFORE OUTPUT ===
+1. Each ideal_answer covers all scorable key points.
+2. No two questions test the same concept.
+3. Ideal answers are 3-8 complete, specific sentences.
+
+Return ONLY this JSON (questions FIRST so truncation never loses content):
+{{"questions":[{{"topic":"string","question":"string","ideal_answer":"string","max_score":100}}],"summary":"string","key_concepts":["string"]}}
+
+Lecture text:
+{text}"""
+
+ESSAY_GRADE_SYSTEM_PROMPT = (
+    "You are a strict but fair academic grader. "
+    "You compare a student's answer to an ideal 100/100 answer and assign a score from 0 to 100. "
+    "Be precise and constructive in your feedback.\n\n"
+
+    "=== GRADING RUBRIC ===\n"
+    "- 90-100: Covers ALL key points with precision. Minor phrasing differences acceptable.\n"
+    "- 75-89: Covers most key points. One or two minor points missing.\n"
+    "- 55-74: Covers the main idea but misses several important points.\n"
+    "- 30-54: Partially correct. Shows some understanding but major gaps.\n"
+    "- 0-29: Mostly incorrect, off-topic, or extremely incomplete.\n\n"
+
+    "=== OUTPUT FORMAT ===\n"
+    "Return ONLY valid JSON:\n"
+    '{"score":75,"feedback":"string","key_points_covered":["string"],"key_points_missed":["string"]}'
+)
+
+ESSAY_GRADE_USER_PROMPT = """Grade this student answer against the ideal answer.
+
+QUESTION: {question}
+
+IDEAL ANSWER (100/100):
+{ideal_answer}
+
+STUDENT ANSWER:
+{student_answer}
+
+Identify which key points from the ideal answer the student covered and which they missed.
+Assign a score 0-100 based on coverage and accuracy.
+Feedback must be 1-3 sentences: specific, constructive, and actionable.
+
+Return ONLY this JSON:
+{{"score":75,"feedback":"string","key_points_covered":["point covered"],"key_points_missed":["point missed"]}}"""
+
+
+# ─────────────────────────────────────────────────────────────────
 # PROMPT SELECTOR
 # ─────────────────────────────────────────────────────────────────
 
@@ -401,4 +823,6 @@ def _get_prompts(mode: str) -> tuple[str, str]:
         return HARDER_SYSTEM_PROMPT, HARDER_USER_PROMPT
     if mode == "revision":
         return REVISION_SYSTEM_PROMPT, REVISION_USER_PROMPT
+    if mode in ("essay", "essay_custom"):
+        return ESSAY_SYSTEM_PROMPT, ESSAY_USER_PROMPT
     return HIGHYIELD_SYSTEM_PROMPT, HIGHYIELD_USER_PROMPT

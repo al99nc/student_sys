@@ -7,7 +7,7 @@ import logging
 import httpx
 from typing import Dict, Any
 from app.core.config import settings
-from app.services.prompts import _get_prompts
+from app.services.prompts import _get_prompts, build_contextual_prompt, ESSAY_GRADE_SYSTEM_PROMPT, ESSAY_GRADE_USER_PROMPT
 from app.services.validators import (
     _deduplicate_by_question,
     _validate_and_filter_mcqs,
@@ -89,6 +89,25 @@ SPEED_CONFIG = {
     "revision": {
         "max_tokens": 3_000,
         "temperature": 0.25,
+        "presence_penalty": 0.2,
+        "frequency_penalty": 0.2,
+    },
+    # custom context mode — student-tailored prompts (paid feature)
+    "custom": {
+        "max_tokens": 4_500,
+        "temperature": 0.30,
+        "presence_penalty": 0.3,
+        "frequency_penalty": 0.3,
+    },
+    "essay": {
+        "max_tokens": 5_000,
+        "temperature": 0.30,
+        "presence_penalty": 0.2,
+        "frequency_penalty": 0.2,
+    },
+    "essay_custom": {
+        "max_tokens": 5_000,
+        "temperature": 0.30,
         "presence_penalty": 0.2,
         "frequency_penalty": 0.2,
     },
@@ -196,9 +215,14 @@ async def _call_single_chunk(
     max_retries: int = 3,
     *,
     model: str | None = None,
+    custom_prompts: tuple[str, str] | None = None,
 ) -> tuple[dict, float]:
-    system_prompt, user_prompt_template = _get_prompts(mode)
-    user_prompt = user_prompt_template.format(text=text)
+    if custom_prompts is not None:
+        system_prompt, user_prompt_template = custom_prompts
+        user_prompt = user_prompt_template.replace("{text}", text)
+    else:
+        system_prompt, user_prompt_template = _get_prompts(mode)
+        user_prompt = user_prompt_template.format(text=text)
 
     if total_chunks > 1:
         user_prompt += (
@@ -448,6 +472,7 @@ async def _call_chunk_with_rotation(
     total_chunks: int,
     *,
     model: str,
+    custom_prompts: tuple[str, str] | None = None,
 ) -> tuple[dict, float]:
     """Call a single chunk, rotating keys on TPM, daily-limit, and invalid-key errors.
 
@@ -471,7 +496,8 @@ async def _call_chunk_with_rotation(
             continue  # another concurrent chunk already removed this key
         try:
             return await _call_single_chunk(
-                text, mode, chunk_index, total_chunks, api_key=key, model=model
+                text, mode, chunk_index, total_chunks, api_key=key, model=model,
+                custom_prompts=custom_prompts,
             )
         except RuntimeError as e:
             err_str = str(e)
@@ -515,7 +541,8 @@ async def _call_chunk_with_rotation(
         for key in list(available_keys):
             try:
                 return await _call_single_chunk(
-                    text, mode, chunk_index, total_chunks, api_key=key, model=model
+                    text, mode, chunk_index, total_chunks, api_key=key, model=model,
+                    custom_prompts=custom_prompts,
                 )
             except RuntimeError as e:
                 last_error = e
@@ -537,15 +564,16 @@ async def _call_chunk_with_rotation(
 
 
 async def generate_study_content(
-    text: str, mode: str = "highyield", *, is_premium: bool = False
+    text: str,
+    mode: str = "highyield",
+    *,
+    is_premium: bool = False,
+    custom_context: dict | None = None,
 ) -> Dict[str, Any]:
     if is_premium:
         if settings.open_rout_PAID_API_KEY:
             ai_model = settings.open_rout_PAID_MODEL
             available_keys = [settings.open_rout_PAID_API_KEY]
-        elif settings.GEMINI_PAID_API_KEY:
-            ai_model = settings.PREMIUM_AI_MODEL
-            available_keys = [settings.GEMINI_PAID_API_KEY]
         else:
             ai_model = settings.FREE_AI_MODEL
             available_keys = settings.get_all_api_keys()
@@ -556,6 +584,20 @@ async def generate_study_content(
     if not available_keys:
         logger.warning("No API keys configured — returning mock data")
         return _get_mock_response()
+
+    # Build custom prompts once if context is provided, then use mode="custom"
+    _custom_prompts: tuple[str, str] | None = None
+    if custom_context:
+        mode = "custom"
+        _custom_prompts = build_contextual_prompt(
+            field_of_study=custom_context.get("field_of_study", ""),
+            exam_type=custom_context.get("exam_type", "final"),
+            time_to_exam=custom_context.get("time_to_exam", "1week"),
+            prior_knowledge=custom_context.get("prior_knowledge", "know_basics"),
+            difficulty=custom_context.get("difficulty", "medium"),
+            mcq_count=int(custom_context.get("mcq_count", 20)),
+            weak_topics=custom_context.get("weak_topics", ""),
+        )
 
     # Normalise unknown modes to highyield
     if mode not in SPEED_CONFIG:
@@ -607,7 +649,8 @@ async def generate_study_content(
             )
             tasks = [
                 _call_chunk_with_rotation(
-                    available_keys, chunks[i], mode, i, total_chunks, model=ai_model
+                    available_keys, chunks[i], mode, i, total_chunks,
+                    model=ai_model, custom_prompts=_custom_prompts,
                 )
                 for i in batch_indices
             ]
@@ -667,6 +710,336 @@ async def generate_study_content(
     except Exception as e:
         logger.error(f"AI error: {e}")
         raise RuntimeError(str(e))
+
+
+def _salvage_essay_json(text: str, chunk_index: int = 0) -> dict:
+    """Recover essay questions from truncated JSON responses."""
+    questions: list[dict] = []
+    seen: set[str] = set()
+    n = len(text)
+
+    for start in range(n):
+        if text[start] != "{":
+            continue
+        depth = 0
+        for end in range(start, n):
+            c = text[end]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start: end + 1]
+                    try:
+                        obj = json.loads(candidate)
+                        if (
+                            isinstance(obj, dict)
+                            and "question" in obj
+                            and "ideal_answer" in obj
+                        ):
+                            key = obj["question"][:60]
+                            if key not in seen:
+                                seen.add(key)
+                                obj.setdefault("max_score", 100)
+                                questions.append(obj)
+                    except json.JSONDecodeError:
+                        pass
+                    break
+
+    summary = ""
+    summary_match = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+    if summary_match:
+        try:
+            summary = json.loads(f'"{summary_match.group(1)}"')
+        except json.JSONDecodeError:
+            summary = summary_match.group(1)
+
+    key_concepts: list[str] = []
+    kc_match = re.search(r'"key_concepts"\s*:\s*(\[.*?\])', text, re.DOTALL)
+    if kc_match:
+        try:
+            key_concepts = json.loads(kc_match.group(1))
+        except json.JSONDecodeError:
+            key_concepts = re.findall(r'"((?:[^"\\]|\\.)+)"', kc_match.group(1))
+
+    if not questions and not summary:
+        raise ValueError(f"Could not salvage any essay content from chunk {chunk_index + 1}")
+
+    logger.warning(f"Essay chunk {chunk_index + 1}: salvaged {len(questions)} question(s)")
+    return {"questions": questions, "summary": summary, "key_concepts": key_concepts}
+
+
+def _build_essay_context_override(custom_context: dict) -> str:
+    """Build extra instructions injected into the essay prompt when Smart Context is active."""
+    parts = []
+    q_count = int(custom_context.get("mcq_count", 8))
+    parts.append(f"TARGET: Generate exactly {q_count} essay questions.")
+
+    diff = custom_context.get("difficulty", "medium")
+    diff_map = {
+        "easy":   "Keep questions straightforward — recall + basic application.",
+        "medium": "Mix understanding and application questions.",
+        "hard":   "Require deep analysis, comparison, and synthesis.",
+        "brutal": "Only advanced analysis and synthesis. No recall questions.",
+    }
+    parts.append(diff_map.get(diff, diff_map["medium"]))
+
+    time_map = {
+        "today":  "Focus on the single highest-yield concept per topic.",
+        "3days":  "Cover all major topics; include key mechanisms.",
+        "1week":  "Full coverage including edge cases.",
+        "1month": "Comprehensive depth — rare exceptions welcome.",
+    }
+    t = custom_context.get("time_to_exam", "1week")
+    parts.append(time_map.get(t, time_map["1week"]))
+
+    weak = custom_context.get("weak_topics", "").strip()
+    if weak:
+        parts.append(f"PRIORITIZE these weak areas (at least 40% of questions): {weak}")
+
+    prior = custom_context.get("prior_knowledge", "know_basics")
+    if prior == "first_time":
+        parts.append("Ideal answers must define all technical terms — student sees this for the first time.")
+    elif prior == "deep_review":
+        parts.append("Ideal answers should include nuanced edge cases — student is well-prepared.")
+
+    return "\n".join(parts)
+
+
+async def _call_essay_chunk(
+    text: str,
+    chunk_index: int,
+    total_chunks: int,
+    api_key: str | None = None,
+    model: str | None = None,
+    custom_context: dict | None = None,
+) -> dict:
+    """Call AI for a single essay chunk and return parsed essay JSON."""
+    from app.services.prompts import ESSAY_SYSTEM_PROMPT, ESSAY_USER_PROMPT
+
+    user_prompt = ESSAY_USER_PROMPT.format(text=text)
+
+    if custom_context:
+        ctx_block = _build_essay_context_override(custom_context)
+        user_prompt = f"=== SMART CONTEXT OVERRIDES ===\n{ctx_block}\n\n" + user_prompt
+
+    if total_chunks > 1:
+        user_prompt += (
+            f"\n\n[NOTE: Chunk {chunk_index + 1} of {total_chunks}. "
+            "Generate 3-5 questions from THIS content only.]"
+        )
+
+    cfg = SPEED_CONFIG["essay"]
+    resolved_model = model or settings.FREE_AI_MODEL
+    resolved_key = api_key or settings.AI_API_KEY
+
+    _is_openrouter = resolved_key == settings.open_rout_PAID_API_KEY
+    _is_gemini_direct = resolved_model.startswith("gemini") and not _is_openrouter
+    if _is_openrouter:
+        api_url = OPENROUTER_URL
+    elif _is_gemini_direct:
+        api_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
+    else:
+        api_url = GROQ_URL
+
+    headers = {
+        "Authorization": f"Bearer {resolved_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": resolved_model,
+        "messages": [
+            {"role": "system", "content": ESSAY_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": cfg["temperature"],
+        "max_tokens": cfg["max_tokens"],
+        "presence_penalty": cfg["presence_penalty"],
+        "frequency_penalty": cfg["frequency_penalty"],
+    }
+
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(api_url, headers=headers, json=payload)
+                if resp.status_code == 401:
+                    raise RuntimeError("INVALID_KEY: API key rejected (401 Unauthorized)")
+                if resp.status_code == 429:
+                    retry_in = _parse_groq_retry_after(resp.text)
+                    await asyncio.sleep(retry_in + 1 if retry_in > 0 else 65)
+                    continue
+                resp.raise_for_status()
+
+            raw = resp.json()["choices"][0]["message"].get("content") or ""
+            cleaned = _THINKING_TAG_PATTERN.sub("", raw).strip()
+            cleaned = re.sub(r"```(?:json)?", "", cleaned).strip().rstrip("```").strip()
+
+            try:
+                data = json.loads(cleaned)
+            except json.JSONDecodeError:
+                data = _salvage_essay_json(cleaned, chunk_index)
+
+            if not data.get("questions"):
+                raise ValueError("No essay questions in response")
+
+            for q in data["questions"]:
+                q.setdefault("max_score", 100)
+
+            return data
+
+        except RuntimeError as e:
+            raise  # propagate INVALID_KEY / TPM_LIMIT immediately for caller rotation
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise RuntimeError(f"Essay chunk {chunk_index + 1} failed: {e}")
+
+    raise RuntimeError(f"Essay chunk {chunk_index + 1} failed after 3 attempts")
+
+
+async def generate_essay_content(
+    text: str,
+    *,
+    is_premium: bool = False,
+    custom_context: dict | None = None,
+) -> Dict[str, Any]:
+    """Generate open-ended essay questions with ideal answers from lecture text."""
+    if is_premium and settings.open_rout_PAID_API_KEY:
+        ai_model = settings.open_rout_PAID_MODEL
+        api_key = settings.open_rout_PAID_API_KEY
+    else:
+        ai_model = settings.FREE_AI_MODEL
+        api_key = None  # use rotation below
+
+    available_keys = settings.get_all_api_keys() if not is_premium else None
+
+    chunks = _chunk_text(text)
+    total_chunks = len(chunks)
+    all_questions: list[dict] = []
+    summary = ""
+    key_concepts: list[str] = []
+
+    for i, chunk in enumerate(chunks):
+        if i > 0:
+            await asyncio.sleep(settings.FREE_INTER_CHUNK_WAIT_SECONDS if not is_premium else 5)
+        # For free tier, rotate through all keys just like MCQ generation does
+        if available_keys:
+            start = i % len(available_keys)
+            rotated = available_keys[start:] + available_keys[:start]
+            last_err: Exception | None = None
+            for key in rotated:
+                try:
+                    data = await _call_essay_chunk(chunk, i, total_chunks, api_key=key, model=ai_model, custom_context=custom_context)
+                    break
+                except RuntimeError as e:
+                    if "INVALID_KEY" in str(e) or "DAILY_LIMIT" in str(e):
+                        if key in available_keys:
+                            available_keys.remove(key)
+                        last_err = e
+                        continue
+                    raise
+            else:
+                raise last_err or RuntimeError(f"Essay chunk {i + 1} failed: all keys exhausted")
+        else:
+            data = await _call_essay_chunk(chunk, i, total_chunks, api_key=api_key, model=ai_model, custom_context=custom_context)
+        all_questions.extend(data.get("questions", []))
+        if not summary:
+            summary = data.get("summary", "")
+        key_concepts.extend(data.get("key_concepts", []))
+
+    # Deduplicate by question text
+    seen: set[str] = set()
+    unique_questions = []
+    for q in all_questions:
+        key = q.get("question", "")[:80]
+        if key not in seen:
+            seen.add(key)
+            unique_questions.append(q)
+
+    seen_kc: set[str] = set()
+    unique_kc = []
+    for kc in key_concepts:
+        norm = kc.lower().strip()
+        if norm not in seen_kc:
+            seen_kc.add(norm)
+            unique_kc.append(kc)
+
+    return {
+        "questions": unique_questions,
+        "summary": summary,
+        "key_concepts": unique_kc[:12],
+    }
+
+
+async def grade_essay_answer(
+    question: str,
+    ideal_answer: str,
+    student_answer: str,
+) -> Dict[str, Any]:
+    """Use AI to grade a student essay answer against the ideal answer."""
+    user_prompt = ESSAY_GRADE_USER_PROMPT.format(
+        question=question,
+        ideal_answer=ideal_answer,
+        student_answer=student_answer,
+    )
+
+    api_key = settings.AI_API_KEY
+    model = settings.FREE_AI_MODEL
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": ESSAY_GRADE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1_000,
+    }
+
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(GROQ_URL, headers=headers, json=payload)
+                if resp.status_code == 401:
+                    raise RuntimeError("INVALID_KEY: API key rejected (401 Unauthorized)")
+                if resp.status_code == 429:
+                    retry_in = _parse_groq_retry_after(resp.text)
+                    await asyncio.sleep(retry_in + 1 if retry_in > 0 else 65)
+                    continue
+                resp.raise_for_status()
+
+            raw = resp.json()["choices"][0]["message"].get("content") or ""
+            cleaned = _THINKING_TAG_PATTERN.sub("", raw).strip()
+            cleaned = re.sub(r"```(?:json)?", "", cleaned).strip().rstrip("```").strip()
+            data = json.loads(cleaned)
+
+            return {
+                "score": max(0, min(100, int(data.get("score", 0)))),
+                "feedback": data.get("feedback", ""),
+                "key_points_covered": data.get("key_points_covered", []),
+                "key_points_missed": data.get("key_points_missed", []),
+            }
+        except json.JSONDecodeError:
+            # Try to extract score manually
+            score_match = re.search(r'"score"\s*:\s*(\d+)', raw if "raw" in dir() else "")
+            return {
+                "score": int(score_match.group(1)) if score_match else 50,
+                "feedback": "Grading completed.",
+                "key_points_covered": [],
+                "key_points_missed": [],
+            }
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise RuntimeError(f"Grading failed: {e}")
+
+    raise RuntimeError("Grading failed after 3 attempts")
 
 
 def _get_mock_response() -> Dict[str, Any]:

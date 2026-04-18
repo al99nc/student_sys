@@ -171,7 +171,7 @@ def get_entitlements(
     return EntitlementsOut(
         plan=ent.tier,
         premium=is_premium(current_user),
-        credit_balance=ent.overflow_credits,
+        credit_balance=current_user.credit_balance or 0,
         uploads_this_month=count_uploads_this_month(db, uid),
         uploads_limit=ent.uploads_limit,
         coach_messages_this_month=count_coach_messages_this_month(db, uid),

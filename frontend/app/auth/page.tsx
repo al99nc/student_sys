@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { signup, login, saveOnboarding } from "@/lib/api";
 import { saveToken } from "@/lib/auth";
+import { useTelegram } from "@/lib/useTelegram";
 
 const REMEMBERED_EMAIL_KEY = "studyai_remembered_email";
 const REMEMBER_ME_KEY = "studyai_remember_me";
@@ -100,6 +101,7 @@ function PrimaryBtn({ onClick, disabled, loading, children }: { onClick?: () => 
 
 export default function AuthPage() {
   const router = useRouter();
+  const { isInTelegram } = useTelegram();
   const [mode, setMode]               = useState<"login" | "signup">("login");
   const [email, setEmail]             = useState("");
   const [password, setPassword]       = useState("");
@@ -117,6 +119,15 @@ export default function AuthPage() {
   const [university, setUniversity]   = useState("");
   const [college, setCollege]         = useState("");
   const [yearOfStudy, setYearOfStudy] = useState<number | null>(null);
+
+  // In Telegram Mini App, auth is handled automatically by TelegramProvider.
+  // If a token is already present, skip this page entirely.
+  useEffect(() => {
+    if (isInTelegram) {
+      const token = localStorage.getItem("token");
+      if (token) router.replace("/dashboard");
+    }
+  }, [isInTelegram, router]);
 
   useEffect(() => {
     const saved = localStorage.getItem(REMEMBER_ME_KEY) === "true";

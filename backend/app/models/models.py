@@ -102,6 +102,8 @@ class Result(Base):
     created_at = Column(DateTime, default=_utcnow)
     share_token = Column(String, unique=True, index=True, nullable=True)
     view_count = Column(Integer, default=0, server_default="0")
+    custom_context = Column(Text, nullable=True)
+    essays = Column(Text, nullable=True)
 
     lecture = relationship("Lecture", back_populates="result")
 

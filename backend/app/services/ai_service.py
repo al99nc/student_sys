@@ -4,6 +4,7 @@ from app.services.prompts import (
     HARDER_SYSTEM_PROMPT, HARDER_USER_PROMPT,
     REVISION_SYSTEM_PROMPT, REVISION_USER_PROMPT,
     _get_prompts,
+    build_contextual_prompt,
 )
 from app.services.validators import (
     FORBIDDEN_OPTION_PATTERNS, SEMANTIC_COMBINED_PATTERNS, EXAM_CATCHALL_PATTERNS,
@@ -20,4 +21,4 @@ from app.services.generator import (
     generate_study_content, _get_mock_response,
 )
 
-__all__ = ["generate_study_content"]
+__all__ = ["generate_study_content", "build_contextual_prompt"]

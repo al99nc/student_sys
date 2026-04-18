@@ -76,6 +76,7 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN credit_balance INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN plan VARCHAR(20) NOT NULL DEFAULT 'free'",
         "ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(255)",
+        "ALTER TABLE results ADD COLUMN essays TEXT",
     ]:
         try:
             _conn.execute(text(_stmt))

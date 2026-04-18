@@ -8,8 +8,11 @@ import {
   extractImageText,
   processLecture,
   estimateProcessing,
+  getEntitlements,
   Difficulty,
+  CustomContext,
 } from "@/lib/api";
+import CustomizeBar from "@/components/customize-bar";
 import { isAuthenticated } from "@/lib/auth";
 import { useTelegram } from "@/lib/useTelegram";
 import { Card, CardContent } from "@/components/ui/card";
@@ -106,6 +109,15 @@ function UploadContent() {
 
   const { isInTelegram, mainButton } = useTelegram();
 
+  // ── User entitlements (for Smart Context gate) ───────────────────────────
+  const [userPlan, setUserPlan]             = useState<"free" | "pro" | "enterprise">("free");
+  const [extraUsageEnabled, setExtraUsage]  = useState(false);
+  const [creditBalance, setCreditBalance]   = useState(0);
+  const [customContext, setCustomContext]    = useState<CustomContext | null>(null);
+
+  // ── Essay mode toggle ────────────────────────────────────────────────────
+  const [essayMode, setEssayMode]       = useState(false);
+
   // ── Core state ───────────────────────────────────────────────────────────
   const [inputMode, setInputMode]       = useState<InputMode>("file");
   const [file, setFile]                 = useState<File | null>(null);
@@ -149,7 +161,8 @@ function UploadContent() {
     if (!isInTelegram || !mainButton) return;
     const ready = isReady;
     if (ready && step === "upload" && !uploading) {
-      const label = mode === "harder" ? "Generate Harder Questions"
+      const label = essayMode ? "Generate Essay Questions"
+        : mode === "harder" ? "Generate Harder Questions"
         : mode === "exam" ? "Generate Exam Questions"
         : "Generate High Yield MCQs";
       mainButton.setText(label).show().enable();
@@ -169,6 +182,11 @@ function UploadContent() {
   // ── Auth + shared files ───────────────────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
+    getEntitlements().then((res) => {
+      setUserPlan(res.data.plan as "free" | "pro" | "enterprise");
+      setExtraUsage(res.data.extra_usage_enabled);
+      setCreditBalance(res.data.credit_balance);
+    }).catch(() => {});
     if (processId) { handleProcess(parseInt(processId)); return; }
 
     const isShared = searchParams.get("shared") === "1";
@@ -272,9 +290,9 @@ function UploadContent() {
     } catch { /* non-fatal */ }
     elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
     try {
-      await processLecture(id, mode as Difficulty);
+      await processLecture(id, essayMode ? "essay" : mode as Difficulty, customContext ?? undefined);
       setStep("done");
-      setTimeout(() => router.push(`/results/${id}`), 1500);
+      setTimeout(() => router.push(essayMode ? `/essay-quiz/${id}` : `/results/${id}`), 1500);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
       const d = axiosErr.response?.data?.detail;
@@ -475,6 +493,7 @@ function UploadContent() {
 
   const submitLabel = extractingText ? "Extracting text from image…"
     : uploading ? "Uploading…"
+    : essayMode ? "Generate Essay Questions"
     : mode === "harder" ? "Generate Harder Questions"
     : mode === "exam"   ? "Generate Exam Questions"
     : "Generate High Yield MCQs";
@@ -517,7 +536,10 @@ function UploadContent() {
                 </div>
                 <h2 className="text-2xl font-bold text-foreground mb-2">Processing your content…</h2>
                 <p className="text-muted-foreground mb-6">
-                  AI is generating MCQs in <span className="text-cyan-400 font-bold">{modeLabel}</span>
+                  {essayMode
+                    ? <>AI is generating <span className="text-cyan-400 font-bold">Essay Questions</span> with ideal answers</>
+                    : <>AI is generating MCQs in <span className="text-cyan-400 font-bold">{modeLabel}</span></>
+                  }
                 </p>
                 {timeEstimate && (
                   <div className="mb-4 px-5 py-3 rounded-xl bg-muted text-left space-y-1">
@@ -596,8 +618,13 @@ function UploadContent() {
             </p>
           </div>
 
-          {/* Mode Selector */}
-          <div className="w-full max-w-3xl mx-auto">
+          {/* Mode Selector — dimmed when Smart Context overrides it */}
+          <div className={`w-full max-w-3xl mx-auto transition-opacity duration-300 ${customContext ? "opacity-40 pointer-events-none select-none" : ""}`}>
+            {customContext && (
+              <p className="text-center text-xs text-primary font-medium mb-2">
+                Smart Context is active — mode is overridden
+              </p>
+            )}
             <Tabs value={tab} onValueChange={(v) => handleTabChange(v as Tab)} className="mb-4">
               <TabsList className="grid w-full grid-cols-2 max-w-xs mx-auto bg-muted/50">
                 <TabsTrigger value="study" className="flex items-center gap-2">
@@ -636,6 +663,55 @@ function UploadContent() {
               </div>
             )}
           </div>
+
+          {/* Essay Mode Toggle */}
+          <div className="w-full max-w-3xl mx-auto">
+            <div className={`flex items-center justify-between px-5 py-4 rounded-xl border transition-all duration-300 ${
+              essayMode
+                ? "bg-violet-500/10 border-violet-500/40"
+                : "bg-muted/30 border-border/40 hover:border-border/70"
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  essayMode ? "bg-violet-500/20" : "bg-muted"
+                }`}>
+                  <Brain className={`w-5 h-5 ${essayMode ? "text-violet-400" : "text-muted-foreground"}`} />
+                </div>
+                <div className="text-left">
+                  <p className={`text-sm font-bold ${essayMode ? "text-foreground" : "text-muted-foreground"}`}>
+                    Essay Mode
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-snug">
+                    AI generates open-ended questions with ideal 100/100 answers — your answer is graded by AI
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEssayMode((v) => !v)}
+                className={`relative w-11 h-6 rounded-full transition-colors duration-300 flex-shrink-0 focus:outline-none ${
+                  essayMode ? "bg-violet-500" : "bg-muted-foreground/30"
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${
+                  essayMode ? "translate-x-5" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+            {essayMode && (
+              <p className="text-center text-xs text-violet-400 font-medium mt-2">
+                Essay Mode is active — AI will create essay questions with ideal answers for grading
+              </p>
+            )}
+          </div>
+
+          {/* Smart Context Bar */}
+          <CustomizeBar
+            plan={userPlan}
+            extraUsageEnabled={extraUsageEnabled}
+            creditBalance={creditBalance}
+            value={customContext}
+            onChange={setCustomContext}
+          />
 
           {/* Input Mode Tabs */}
           <div className="w-full max-w-3xl mx-auto">

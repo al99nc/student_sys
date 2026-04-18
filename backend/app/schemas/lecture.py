@@ -12,6 +12,8 @@ class LectureOut(BaseModel):
     year_of_study: Optional[int] = None
     subject: Optional[str] = None
     topic_area: Optional[str] = None
+    is_processed: bool = False
+    has_essays: bool = False
 
     class Config:
         from_attributes = True
@@ -29,6 +31,7 @@ class ResultOut(BaseModel):
     summary: Optional[str] = None
     key_concepts: Optional[List[str]] = None
     mcqs: Optional[List[MCQ]] = None
+    has_essays: bool = False
     created_at: datetime
     share_token: Optional[str] = None
     view_count: int = 0
@@ -56,6 +59,39 @@ class SharedResultOut(BaseModel):
     key_concepts: Optional[List[str]] = None
     mcqs: Optional[List[MCQ]] = None
     view_count: int
+
+class SolvedEssayQuestion(BaseModel):
+    question: str
+    ideal_answer: str
+    topic: Optional[str] = None
+    max_score: int = 100
+
+class SolvedMCQ(BaseModel):
+    question: str
+    options: List[str]
+    answer: str
+    explanation: Optional[str] = None
+    topic: Optional[str] = None
+
+class SolvedOut(BaseModel):
+    lecture_id: int
+    lecture_title: str
+    created_at: datetime
+    mcqs: List[SolvedMCQ]
+    essays: List[SolvedEssayQuestion]
+
+class SolvedEssayOut(BaseModel):
+    lecture_id: int
+    lecture_title: str
+    questions: List[SolvedEssayQuestion]
+    created_at: datetime
+
+class SolvedLectureOut(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    mcq_count: int
+    has_essays: bool
 
 class QuizSessionOut(BaseModel):
     answers: dict = {}

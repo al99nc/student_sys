@@ -37,6 +37,14 @@ export interface TelegramMainButton {
   }): TelegramMainButton;
 }
 
+export interface TelegramBackButton {
+  isVisible: boolean;
+  onClick(fn: () => void): TelegramBackButton;
+  offClick(fn: () => void): TelegramBackButton;
+  show(): TelegramBackButton;
+  hide(): TelegramBackButton;
+}
+
 export interface TelegramWebApp {
   initData: string;
   initDataUnsafe: {
@@ -60,6 +68,7 @@ export interface TelegramWebApp {
   viewportHeight: number;
   viewportStableHeight: number;
   MainButton: TelegramMainButton;
+  BackButton: TelegramBackButton;
   ready(): void;
   expand(): void;
   close(): void;
@@ -80,6 +89,7 @@ export interface TelegramContextValue {
   webApp: TelegramWebApp | null;
   user: TelegramUser | null;
   mainButton: TelegramMainButton | null;
+  backButton: TelegramBackButton | null;
   isInTelegram: boolean;
   startParam: string | null;
 }
@@ -88,6 +98,7 @@ export const TelegramContext = createContext<TelegramContextValue>({
   webApp: null,
   user: null,
   mainButton: null,
+  backButton: null,
   isInTelegram: false,
   startParam: null,
 });
@@ -122,10 +133,18 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     tg.expand();  // expand to full height
     setWebApp(tg);
 
-    // Auto-authenticate: exchange Telegram identity for a cortexQ JWT
-    loginWithTelegram(tg.initData).catch((err) =>
-      console.error("[TelegramProvider] auth error:", err)
-    );
+    // Auto-authenticate: exchange Telegram identity for a cortexQ JWT,
+    // then navigate to dashboard if user is on the landing or auth page.
+    loginWithTelegram(tg.initData)
+      .then(() => {
+        const path = window.location.pathname;
+        if (path === "/" || path === "/auth") {
+          window.location.href = "/dashboard";
+        }
+      })
+      .catch((err) =>
+        console.error("[TelegramProvider] auth error:", err)
+      );
   }, []);
 
   return (
@@ -134,6 +153,7 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
         webApp,
         user: webApp?.initDataUnsafe?.user ?? null,
         mainButton: webApp?.MainButton ?? null,
+        backButton: webApp?.BackButton ?? null,
         isInTelegram: !!webApp?.initData,
         startParam: webApp?.initDataUnsafe?.start_param ?? null,
       }}
