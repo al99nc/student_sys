@@ -1573,41 +1573,76 @@ function MessageBubble({
               <CalibrationPulse text={meta.calibration_pulse!} />
             )}
 
-            {/* 6. Practice CTA */}
+            {/* 6. Practice CTA - MCQ/Essay choice */}
             {(meta?.practice_topic || meta?.practice_document_id) && (() => {
               const topic  = meta.practice_topic ?? meta.topic_focus ?? "";
               const docId  = meta.practice_document_id ?? 0;
               const count  = meta.question_count ?? 5;
               const fromStr = convId ? `&from=${convId}` : "";
-              const href = topic
-                ? `/quiz/${docId || 1}?count=${count}${fromStr}&fresh=true&topic=${encodeURIComponent(topic)}`
+              
+              const mcqHref = topic
+                ? `/coach/practice/mcqs/${convId}?count=${count}&topic=${encodeURIComponent(topic)}`
                 : `/quiz/${docId}?count=${count}${fromStr}`;
+              const essayHref = topic
+                ? `/coach/practice/essay/${convId}?count=3&topic=${encodeURIComponent(topic)}`
+                : `/quiz/${docId}?count=${count}${fromStr}`;
+              
               return (
-                <Link
-                  href={href}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 10,
-                    width: "100%",
-                    padding: "13px 20px",
-                    borderRadius: 14,
-                    background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                    color: "white",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    textDecoration: "none",
-                    boxShadow: "0 4px 20px rgba(123,47,255,0.35)",
-                    transition: "opacity 0.15s, transform 0.15s",
-                    letterSpacing: "0.01em",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.opacity = "0.85"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "none"; }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 19, fontVariationSettings: "'FILL' 1" }}>play_circle</span>
-                  Practice {isValid(topic) ? `"${topic}"` : "now"} →
-                </Link>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Practice →
+                    </span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <Link
+                      href={mcqHref}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "12px 16px",
+                        borderRadius: 14,
+                        background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
+                        color: "white",
+                        fontWeight: 700,
+                        fontSize: 13,
+                        textDecoration: "none",
+                        boxShadow: "0 4px 20px rgba(123,47,255,0.35)",
+                        transition: "opacity 0.15s, transform 0.15s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.opacity = "0.85"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "none"; }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 17 }}>quiz</span>
+                      MCQs
+                    </Link>
+                    <Link
+                      href={essayHref}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "12px 16px",
+                        borderRadius: 14,
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: "#cbd5e1",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        textDecoration: "none",
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.25)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 17 }}>edit_note</span>
+                      Essays
+                    </Link>
+                  </div>
+                </div>
               );
             })()}
 

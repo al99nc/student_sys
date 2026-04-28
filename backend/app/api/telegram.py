@@ -125,7 +125,7 @@ def telegram_auth(request: Request, body: TelegramInitDataRequest, db: Session =
         db.commit()
         db.refresh(user)
 
-    token = create_access_token({"sub": str(user.id)})
+    token = create_access_token({"sub": str(user.id), "is_admin": bool(user.is_admin)})
     return {
         "access_token": token,
         "token_type": "bearer",

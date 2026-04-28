@@ -35,6 +35,8 @@ class User(Base):
     stripe_customer_id = Column(String(255), nullable=True)
     # Allow spending credits to keep using AI features when limits are hit
     extra_usage_enabled = Column(Integer, default=1, server_default="1", nullable=False)
+    # Admin flag — only set via direct DB update, never via API
+    is_admin = Column(Integer, default=0, server_default="0", nullable=False)
 
     lectures = relationship("Lecture", back_populates="owner")
 

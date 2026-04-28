@@ -675,6 +675,180 @@ async def generate_practice(
     return {"topic": body.topic, "questions": questions}
 
 
+# ── POST /practice/mcqs/{conversation_id} ─────────────────────────────────────────
+class PracticeMCQRequest(BaseModel):
+    topic: str
+    count: int = 5
+
+
+@router.post("/practice/mcqs/{conversation_id}")
+async def generate_practice_mcqs(
+    conversation_id: str,
+    body: PracticeMCQRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate fresh MCQ questions for a topic.
+    Returns questions with a session_id for the practice page.
+    """
+    if not body.topic.strip():
+        raise HTTPException(status_code=400, detail="topic is required")
+    count = max(1, min(body.count, 15))
+    cost = settings.CREDIT_COST_COACH_MESSAGE
+    spent = False
+    _premium = False
+    
+    if not current_user.extra_usage_enabled:
+        _premium = False
+    elif plan_tier(current_user) in ("pro", "enterprise"):
+        _premium = True
+    elif cost > 0:
+        spent = try_spend_credits(db, current_user, cost, commit=True)
+        _premium = spent
+    else:
+        _premium = is_premium(current_user)
+    
+    try:
+        questions = await _generate_fresh_mcqs(body.topic.strip(), count, premium=_premium)
+    except Exception:
+        if cost > 0 and spent:
+            refund_credits(db, current_user, cost, commit=True)
+        raise
+    
+    session_id = str(uuid4())
+    return {
+        "session_id": session_id,
+        "topic": body.topic,
+        "questions": questions,
+    }
+
+
+# ── POST /practice/essay/{conversation_id} ─────────────────────────────────────
+class PracticeEssayRequest(BaseModel):
+    topic: str
+    count: int = 3
+
+
+@router.post("/practice/essay/{conversation_id}")
+async def generate_practice_essay(
+    conversation_id: str,
+    body: PracticeEssayRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate essay questions for a topic.
+    Returns questions with a session_id for the practice page.
+    """
+    if not body.topic.strip():
+        raise HTTPException(status_code=400, detail="topic is required")
+    count = max(1, min(body.count, 10))
+    cost = settings.CREDIT_COST_MCQ_PROCESS
+    spent = False
+    _premium = False
+    
+    if not current_user.extra_usage_enabled:
+        _premium = False
+    elif plan_tier(current_user) in ("pro", "enterprise"):
+        _premium = True
+    elif cost > 0:
+        spent = try_spend_credits(db, current_user, cost, commit=True)
+        _premium = spent
+    else:
+        _premium = is_premium(current_user)
+    
+    try:
+        questions = await _generate_fresh_essays(body.topic.strip(), count, premium=_premium)
+    except Exception:
+        if cost > 0 and spent:
+            refund_credits(db, current_user, cost, commit=True)
+        raise
+    
+    session_id = str(uuid4())
+    return {
+        "session_id": session_id,
+        "topic": body.topic,
+        "questions": questions,
+        "summary": f"Practice questions on {body.topic}",
+        "key_concepts": [body.topic],
+    }
+
+
+async def _generate_fresh_essays(topic: str, count: int, *, premium: bool) -> list[dict]:
+    """
+    Call AI to produce `count` unique essay questions on `topic`.
+    Returns list of { question, ideal_answer, key_points }.
+    """
+    _log = logging.getLogger(__name__)
+
+    system_prompt = (
+        "You are a medical exam question writer. Generate fresh, unique essay-type questions "
+        f"on the given topic: {topic}.\n\n"
+        "RULES:\n"
+        "- Each question should require 2-4 sentences to answer.\n"
+        "- Focus on clinical application, patient scenarios, or mechanism explanations.\n"
+        "- Include ideal answer outlines and key points students should cover.\n"
+        "- NEVER repeat the same question stem.\n\n"
+        "Return ONLY valid JSON in this exact shape — no markdown, no extra text:\n"
+        '{"questions": [{"question": "...", "ideal_answer": "...", "key_points": ["point 1", "point 2", "point 3"]}, ...]}'
+    )
+
+    user_prompt = f"Generate exactly {count} essay questions on: {topic}"
+
+    _mcq_model = settings.PREMIUM_CHAT_MODEL if premium else settings.FREE_CHAT_MODEL
+    _timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
+    _chat_url = "https://api.groq.com/openai/v1/chat/completions"
+    _chat_key = settings.CHAT_AI_API_KEY
+    if premium and settings.open_rout_PAID_API_KEY:
+        _chat_url = "https://openrouter.ai/api/v1/chat/completions"
+        _chat_key = settings.open_rout_PAID_API_KEY
+        _mcq_model = settings.open_rout_PAID_MODEL
+    elif premium and settings.GEMINI_PAID_API_KEY:
+        _chat_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
+        _chat_key = settings.GEMINI_PAID_API_KEY
+        _mcq_model = settings.GEMINI_PAID_MODEL
+    print(f"[MODEL] coach essay generation using: {_mcq_model} (premium={premium})", flush=True)
+
+    try:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
+            resp = await client.post(
+                _chat_url,
+                headers={
+                    "Authorization": f"Bearer {_chat_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _mcq_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.8,
+                    "max_tokens": 2500,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"]
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+            parsed = json.loads(raw)
+            questions = parsed.get("questions", [])
+            
+            valid = []
+            for q in questions:
+                if isinstance(q, dict) and q.get("question") and q.get("ideal_answer"):
+                    q.setdefault("key_points", [])
+                    valid.append(q)
+            if not valid:
+                raise ValueError("AI returned no valid essay questions")
+            return valid
+    except Exception as exc:
+        _log.error("_generate_fresh_essays failed for topic=%r: %s", topic, exc)
+        raise HTTPException(status_code=502, detail=f"Failed to generate essays: {exc}")
+
+
 async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list[dict]:
     """
     Call AI to produce `count` unique MCQs on `topic`.
@@ -703,14 +877,24 @@ async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list
 
     _mcq_model = settings.PREMIUM_CHAT_MODEL if premium else settings.FREE_CHAT_MODEL
     _timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
+    _chat_url = "https://api.groq.com/openai/v1/chat/completions"
+    _chat_key = settings.CHAT_AI_API_KEY
+    if premium and settings.open_rout_PAID_API_KEY:
+        _chat_url = "https://openrouter.ai/api/v1/chat/completions"
+        _chat_key = settings.open_rout_PAID_API_KEY
+        _mcq_model = settings.open_rout_PAID_MODEL
+    elif premium and settings.GEMINI_PAID_API_KEY:
+        _chat_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
+        _chat_key = settings.GEMINI_PAID_API_KEY
+        _mcq_model = settings.GEMINI_PAID_MODEL
     print(f"[MODEL] coach MCQ generation using: {_mcq_model} (premium={premium})", flush=True)
 
     try:
         async with httpx.AsyncClient(timeout=_timeout) as client:
             resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                _chat_url,
                 headers={
-                    "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                    "Authorization": f"Bearer {_chat_key}",
                     "Content-Type": "application/json",
                 },
                 json={

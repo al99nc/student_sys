@@ -23,6 +23,8 @@ class UserOut(BaseModel):
     subject: Optional[str] = None
     topic_area: Optional[str] = None
     credit_balance: int = 0
+    plan: str = "free"
+    is_admin: bool = False
     created_at: datetime
 
     class Config:
@@ -37,6 +39,13 @@ class UserOut(BaseModel):
     @classmethod
     def credit_balance_none(cls, v: Optional[int]) -> int:
         return 0 if v is None else v
+
+    @field_validator("is_admin", mode="before")
+    @classmethod
+    def coerce_is_admin(cls, v) -> bool:
+        if v is None or v == 0 or v == "0" or v == "false":
+            return False
+        return True
 
 
 class OnboardingUpdate(BaseModel):

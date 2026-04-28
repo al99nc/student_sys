@@ -10,6 +10,7 @@ from sqlalchemy import exc as sa_exc, text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from app.api import admin as admin_api
 from app.api import ai_tools, analytics, billing
 from app.api import auth, lectures, telegram
 from app.api import coach as coach_api
@@ -77,6 +78,7 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN plan VARCHAR(20) NOT NULL DEFAULT 'free'",
         "ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(255)",
         "ALTER TABLE results ADD COLUMN essays TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             _conn.execute(text(_stmt))
@@ -141,6 +143,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+app.include_router(admin_api.router)
 app.include_router(auth.router)
 app.include_router(lectures.router)
 app.include_router(telegram.router)

@@ -63,6 +63,7 @@ export interface UserOut {
   topic_area: string | null;
   credit_balance: number;
   plan: "free" | "pro" | "enterprise";
+  is_admin: boolean;
   created_at: string;
 }
 
@@ -375,6 +376,24 @@ export const coachGeneratePractice = (topic: string, count: number) =>
     count,
   });
 
+export const coachGeneratePracticeMCQs = (conversationId: string, topic: string, count: number) =>
+  api.post<{ session_id: string; topic: string; questions: FreshMCQ[] }>(`/api/v1/coach/practice/mcqs/${conversationId}`, {
+    topic,
+    count,
+  });
+
+export const coachGeneratePracticeEssays = (conversationId: string, topic: string, count: number) =>
+  api.post<{ session_id: string; topic: string; questions: EssayQuestion[]; summary: string; key_concepts: string[] }>(
+    `/api/v1/coach/practice/essay/${conversationId}`,
+    { topic, count },
+  );
+
+export const coachGenerateEssay = (topic: string, count: number) =>
+  api.post<{ session_id: string; topic: string; questions: EssayQuestion[]; summary: string; key_concepts: string[] }>(
+    `/api/v1/coach/practice/essay/temp`,
+    { topic, count },
+  );
+
 export const coachSearch = (q: string) =>
   api.get("/api/v1/coach/search", { params: { q } });
 
@@ -466,6 +485,7 @@ export interface EssayQuestion {
   ideal_answer: string;
   topic?: string;
   max_score: number;
+  key_points?: string[];
 }
 
 export interface EssayResultOut {
@@ -499,3 +519,25 @@ export const gradeEssayAnswer = (
     { lecture_id: lectureId, question_index: questionIndex, student_answer: studentAnswer, ideal_answer: idealAnswer },
     { timeout: 60_000 },
   );
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export interface AdminStats {
+  total_users: number;
+  free_users: number;
+  pro_users: number;
+  enterprise_users: number;
+  total_credits: number;
+  new_users_today: number;
+  new_users_this_week: number;
+}
+
+export interface SetCreditsResponse {
+  email: string;
+  credit_balance: number;
+}
+
+export const getAdminStats = () => api.get<AdminStats>("/admin/stats");
+
+export const adminSetCredits = (email: string, credits: number) =>
+  api.post<SetCreditsResponse>("/admin/set-credits", { email, credits });

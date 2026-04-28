@@ -235,7 +235,7 @@ async def _call_single_chunk(
     resolved_model = model or settings.FREE_AI_MODEL
 
     _is_openrouter = api_key and api_key == settings.open_rout_PAID_API_KEY
-    _is_gemini_direct = resolved_model.startswith("gemini") and not _is_openrouter
+    _is_gemini_direct = (resolved_model.startswith("gemini") or resolved_model.startswith("google/")) and not _is_openrouter
     if _is_openrouter:
         api_url = OPENROUTER_URL
     elif _is_gemini_direct:
@@ -834,7 +834,7 @@ async def _call_essay_chunk(
     resolved_key = api_key or settings.AI_API_KEY
 
     _is_openrouter = resolved_key == settings.open_rout_PAID_API_KEY
-    _is_gemini_direct = resolved_model.startswith("gemini") and not _is_openrouter
+    _is_gemini_direct = (resolved_model.startswith("gemini") or resolved_model.startswith("google/")) and not _is_openrouter
     if _is_openrouter:
         api_url = OPENROUTER_URL
     elif _is_gemini_direct:
