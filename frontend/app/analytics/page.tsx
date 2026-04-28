@@ -1,15 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
-import {
-  getAnalyticsOverview,
-  getAnalyticsTimeline,
-  getAnalyticsWeakTopics,
-  getAnalyticsConfidence,
-  getAnalyticsCoFailures,
-} from "@/lib/api";
+import { getDashboard, getAnalyticsTimeline } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -26,25 +20,25 @@ import {
 interface Overview {
   total_sessions: number;
   total_questions_answered: number;
-  overall_accuracy: number; // 0–100
+  overall_accuracy: number;
   current_streak: number;
 }
 
 interface TimelineDay {
   date: string;
-  accuracy: number; // 0–100
+  accuracy: number;
   questions_answered: number;
 }
 
 interface WeakTopic {
   topic: string;
-  accuracy: number; // 0–1 decimal
+  accuracy: number;
   attempts: number;
 }
 
 interface ConfidenceData {
   confidence_level: string;
-  accuracy: number; // 0–100
+  accuracy: number;
   count: number;
 }
 
@@ -63,52 +57,69 @@ export default function AnalyticsPage() {
   const [coFailures, setCoFailures] = useState<CoFailure[]>([]);
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(true);
+  // Tracks whether initial load has run so the days-change effect skips mount.
+  const isInitialLoad = useRef(true);
 
+  // Single call on mount — replaces 5 separate analytics endpoint calls.
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/auth");
       return;
     }
-    Promise.all([
-      getAnalyticsOverview(),
-      getAnalyticsTimeline(days),
-      getAnalyticsWeakTopics(10),
-      getAnalyticsConfidence(),
-      getAnalyticsCoFailures(),
-    ])
-      .then(([ov, tl, wt, cf, cofail]) => {
-        const o = ov.data;
+    getDashboard(days)
+      .then(({ data }) => {
+        const o = data.overview;
         setOverview({
           total_sessions: o.sessions_this_week ?? 0,
           total_questions_answered: o.total_attempted ?? 0,
           overall_accuracy: o.overall_accuracy ?? 0,
           current_streak: o.current_streak ?? 0,
         });
-        const tlArr = Array.isArray(tl.data) ? tl.data : (tl.data?.data ?? []);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setTimeline(tlArr.map((d: any) => ({ date: d.date, accuracy: d.accuracy_percent ?? d.accuracy ?? 0, questions_answered: d.total ?? 0 })));
-        const wtArr: WeakTopic[] = (wt.data?.topics ?? []).map((t: any) => ({
-          topic: t.subtopic ?? t.topic ?? "",
-          accuracy: t.accuracy_rate ?? 0,
-          attempts: t.total_attempts ?? 0,
-        }));
-        setWeakTopics(wtArr);
-        const cfArr = Array.isArray(cf.data) ? cf.data : (cf.data?.data ?? []);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setConfidence(cfArr.map((c: any) => ({ confidence_level: String(c.confidence_level), accuracy: c.accuracy_percent ?? c.accuracy ?? 0, count: c.attempts ?? c.count ?? 0 })));
-        setCoFailures(cofail.data?.topic_pairs ?? []);
+        setTimeline(
+          (data.accuracy_timeline.data ?? []).map((d) => ({
+            date: d.date,
+            accuracy: d.accuracy_percent ?? 0,
+            questions_answered: d.total ?? 0,
+          }))
+        );
+        setWeakTopics(
+          (data.weak_topics.topics ?? []).map((t) => ({
+            topic: t.subtopic ?? "",
+            accuracy: t.accuracy_rate ?? 0,
+            attempts: t.total_attempts ?? 0,
+          }))
+        );
+        setConfidence(
+          (data.confidence_calibration.data ?? []).map((c) => ({
+            confidence_level: String(c.confidence_level),
+            accuracy: c.accuracy_percent ?? 0,
+            count: c.attempts ?? 0,
+          }))
+        );
+        setCoFailures(data.co_failures.topic_pairs ?? []);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        isInitialLoad.current = false;
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
+  // Re-fetch only the timeline when the user changes the day range.
+  // Skips on mount because the initial load already fetched it.
   useEffect(() => {
+    if (isInitialLoad.current) return;
     if (!isAuthenticated()) return;
     getAnalyticsTimeline(days)
       .then((res) => {
         const arr = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setTimeline(arr.map((d: any) => ({ date: d.date, accuracy: d.accuracy_percent ?? d.accuracy ?? 0, questions_answered: d.total ?? 0 })));
+        setTimeline(arr.map((d: any) => ({
+          date: d.date,
+          accuracy: d.accuracy_percent ?? d.accuracy ?? 0,
+          questions_answered: d.total ?? 0,
+        })));
       })
       .catch(() => {});
   }, [days]);
@@ -129,17 +140,18 @@ export default function AnalyticsPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" className="text-xl font-bold text-foreground">
+          <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
             cortexQ
           </Link>
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
-            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>
-            <Link href="/upload" className="text-muted-foreground hover:text-foreground transition-colors">Upload</Link>
-            <Link href="/coach" className="text-muted-foreground hover:text-foreground transition-colors">Coach</Link>
+            <Link href="/dashboard" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>
+            <Link href="/upload" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">Upload</Link>
+            <Link href="/coach" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">Coach</Link>
             <span className="text-foreground">Analytics</span>
           </nav>
           <Link
             href="/dashboard"
+            prefetch={false}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -151,7 +163,7 @@ export default function AnalyticsPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
+          <Link href="/dashboard" prefetch={false} className="hover:text-foreground transition-colors">Dashboard</Link>
           <span>/</span>
           <span className="text-foreground">Analytics</span>
         </nav>
@@ -329,15 +341,15 @@ export default function AnalyticsPage() {
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex justify-around items-center py-2 px-4">
-          <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
+          <Link href="/dashboard" prefetch={false} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
             <Home className="w-5 h-5" />
             <span className="text-[10px]">Home</span>
           </Link>
-          <Link href="/upload" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
+          <Link href="/upload" prefetch={false} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
             <Upload className="w-5 h-5" />
             <span className="text-[10px]">Upload</span>
           </Link>
-          <Link href="/coach" className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
+          <Link href="/coach" prefetch={false} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
             <Bot className="w-5 h-5" />
             <span className="text-[10px]">Coach</span>
           </Link>

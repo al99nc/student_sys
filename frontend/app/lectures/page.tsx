@@ -71,28 +71,32 @@ export default function LecturesPage() {
       const [meRes, lecturesRes, solvedRes] = await Promise.all([getMe(), getLectures(), getSolvedLectures()]);
       setUserName(meRes.data.name || "Lecturer");
 
-      const lectureDataPromises = lecturesRes.data.map((lecture: any) =>
-        Promise.all([
-          getResults(lecture.id).catch(() => null),
-          getQuizSession(lecture.id).catch(() => null),
-        ]).then(([resResult, sessionResult]) => {
-          const mcqs = resResult?.data?.mcqs || [];
-          const rawAnswers: Record<string, any> = sessionResult?.data?.answers || {};
-          const answeredIndices = new Set<number>(
-            Object.keys(rawAnswers).map(Number).filter((i) => rawAnswers[String(i)] != null)
-          );
-          return {
-            id: lecture.id,
-            title: lecture.title,
-            mcqs,
-            answeredIndices,
-            sessionAnswers: rawAnswers,
-            has_essays: resResult?.data?.has_essays || false,
-            source: "uploaded" as const,
-            createdAt: lecture.created_at,
-          };
-        })
-      );
+      // Only fetch results/sessions for processed lectures — unprocessed ones
+      // will never have either, so calling those endpoints just generates 404s.
+      const lectureDataPromises = lecturesRes.data
+        .filter((lecture: any) => lecture.is_processed)
+        .map((lecture: any) =>
+          Promise.all([
+            getResults(lecture.id).catch(() => null),
+            getQuizSession(lecture.id).catch(() => null),
+          ]).then(([resResult, sessionResult]) => {
+            const mcqs = resResult?.data?.mcqs || [];
+            const rawAnswers: Record<string, any> = sessionResult?.data?.answers || {};
+            const answeredIndices = new Set<number>(
+              Object.keys(rawAnswers).map(Number).filter((i) => rawAnswers[String(i)] != null)
+            );
+            return {
+              id: lecture.id,
+              title: lecture.title,
+              mcqs,
+              answeredIndices,
+              sessionAnswers: rawAnswers,
+              has_essays: resResult?.data?.has_essays || false,
+              source: "uploaded" as const,
+              createdAt: lecture.created_at,
+            };
+          })
+        );
 
       const lectureData = await Promise.all(lectureDataPromises);
       setLectures(lectureData.filter((l) => l.mcqs.length > 0 || l.has_essays));
@@ -149,7 +153,7 @@ export default function LecturesPage() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Link href="/dashboard">
+              <Link href="/dashboard" prefetch={false}>
                 <Button variant="outline" size="sm" className="h-9 md:h-10 text-xs md:text-sm">
                   Back
                 </Button>
@@ -251,7 +255,7 @@ export default function LecturesPage() {
                   <p className="text-sm text-muted-foreground mb-5">
                     Take a quiz first — only solved questions appear here
                   </p>
-                  <Link href="/upload">
+                  <Link href="/upload" prefetch={false}>
                     <Button size="sm">
                       <Sparkles className="w-4 h-4 mr-2" />
                       Create MCQs
@@ -318,7 +322,7 @@ export default function LecturesPage() {
                   <p className="text-sm text-muted-foreground mb-5">
                     Upload a lecture and generate study materials to see it here
                   </p>
-                  <Link href="/upload">
+                  <Link href="/upload" prefetch={false}>
                     <Button size="sm">
                       <Sparkles className="w-4 h-4 mr-2" />
                       Upload Lecture

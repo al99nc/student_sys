@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getLectures, getStats, getMySharedSessions, getNextBestAction, getMe } from "@/lib/api";
+import { getDashboard, getLectures, getMySharedSessions, getNextBestAction } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -84,18 +84,19 @@ export default function DashboardPage() {
 
   const fetchData = async () => {
     try {
-      const [lecturesRes, statsRes, sharedRes, nextActionRes, meRes] = await Promise.all([
+      // getDashboard() replaces the previous separate getStats() + getMe() calls.
+      // getLectures, getMySharedSessions, getNextBestAction still run in parallel.
+      const [dashRes, lecturesRes, sharedRes, nextActionRes] = await Promise.all([
+        getDashboard(),
         getLectures(),
-        getStats(),
         getMySharedSessions(),
         getNextBestAction(),
-        getMe(),
       ]);
+      if (dashRes.data.user.name) setUserName(dashRes.data.user.name);
+      setStats(dashRes.data.lecture_stats);
       setLectures(lecturesRes.data);
-      setStats(statsRes.data);
       setSharedSessions(sharedRes.data);
       setNextAction(nextActionRes.data);
-      if (meRes.data.name) setUserName(meRes.data.name);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       if (axiosErr?.response?.status !== 404) {
@@ -110,10 +111,10 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
-      {/* Header — identical structure to results page */}
+      {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" className="text-xl font-bold text-foreground">
+          <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
             cortexQ
           </Link>
 
@@ -128,6 +129,7 @@ export default function DashboardPage() {
               <Link
                 key={item.label}
                 href={item.href}
+                prefetch={false}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   item.active
                     ? "bg-muted text-foreground"
@@ -141,12 +143,12 @@ export default function DashboardPage() {
 
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
-              <Link href="/upload">
+              <Link href="/upload" prefetch={false}>
                 <Upload className="h-4 w-4 mr-1.5" />
                 Upload
               </Link>
             </Button>
-            <Link href="/account" className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm hover:opacity-80 transition-opacity">
+            <Link href="/account" prefetch={false} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm hover:opacity-80 transition-opacity">
               {userInitial}
             </Link>
           </div>
@@ -223,7 +225,7 @@ export default function DashboardPage() {
                     <p className="text-xs text-muted-foreground">Powered by Gemini</p>
                   </div>
                   <Button size="sm" variant="outline" asChild className="ml-auto">
-                    <Link href="/coach">
+                    <Link href="/coach" prefetch={false}>
                       <ExternalLink className="w-3 h-3 mr-1.5" />
                       Open
                     </Link>
@@ -258,7 +260,8 @@ export default function DashboardPage() {
                   <Progress value={nextAction?.predicted_readiness_24h ?? 0} className="h-2" />
                 </div>
 
-                {/* Quick chips */}
+                {/* Quick chips — prefetch=false: these link to coach with query params,
+                    prefetching them would fire 3 redundant RSC requests */}
                 <div className="flex flex-wrap gap-2">
                   {[
                     { label: "Plan session", q: "Plan my next study session based on my weak points" },
@@ -268,6 +271,7 @@ export default function DashboardPage() {
                     <Link
                       key={label}
                       href={`/coach?q=${encodeURIComponent(q)}`}
+                      prefetch={false}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-muted/50 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
                     >
                       <ArrowRight className="w-3 h-3" />
@@ -305,6 +309,7 @@ export default function DashboardPage() {
                         <Link
                           key={label}
                           href={`/coach?q=${encodeURIComponent(label)}`}
+                          prefetch={false}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-muted/50 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
                         >
                           <span className="material-symbols-outlined text-[13px]">{icon}</span>
@@ -314,13 +319,13 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <Button asChild>
-                        <Link href="/coach">
+                        <Link href="/coach" prefetch={false}>
                           <Bot className="w-4 h-4 mr-2" />
                           Open Coach
                         </Link>
                       </Button>
                       <Button variant="outline" asChild>
-                        <Link href="/upload">+ Upload Lecture</Link>
+                        <Link href="/upload" prefetch={false}>+ Upload Lecture</Link>
                       </Button>
                     </div>
                   </div>
@@ -352,7 +357,7 @@ export default function DashboardPage() {
                       const pct = s.total > 0 ? Math.round((s.answered / s.total) * 100) : 0;
                       const score = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
                       return (
-                        <Link key={s.share_token} href={`/shared/${s.share_token}`}>
+                        <Link key={s.share_token} href={`/shared/${s.share_token}`} prefetch={false}>
                           <div className="rounded-xl border p-4 hover:-translate-y-0.5 transition-transform">
                             <Badge variant="outline" className="mb-2 text-xs">Shared</Badge>
                             <h4 className="text-sm font-semibold text-foreground mb-3 line-clamp-2">{s.lecture_title}</h4>
@@ -379,7 +384,7 @@ export default function DashboardPage() {
               <CardHeader className="flex flex-row items-center justify-between pb-4 border-b">
                 <CardTitle className="text-base font-bold">Your Lectures</CardTitle>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="/upload">+ New</Link>
+                  <Link href="/upload" prefetch={false}>+ New</Link>
                 </Button>
               </CardHeader>
               <CardContent className="p-6">
@@ -395,7 +400,7 @@ export default function DashboardPage() {
                       Upload your first PDF and CortexQ will generate questions within seconds.
                     </p>
                     <Button variant="outline" asChild>
-                      <Link href="/upload">+ Upload New Lecture</Link>
+                      <Link href="/upload" prefetch={false}>+ Upload New Lecture</Link>
                     </Button>
                   </div>
                 ) : (
@@ -429,6 +434,7 @@ export default function DashboardPage() {
                             <Link
                               key={lecture.id}
                               href={href}
+                              prefetch={false}
                               className="flex items-center justify-between px-4 py-3 rounded-xl border hover:border-primary/40 hover:bg-muted/20 transition-all duration-150"
                             >
                               <div className="min-w-0 flex-1 mr-3">
@@ -443,7 +449,7 @@ export default function DashboardPage() {
                         })}
                     </div>
                     <Button variant="outline" className="w-full" asChild>
-                      <Link href="/lectures">
+                      <Link href="/lectures" prefetch={false}>
                         <BookOpen className="w-4 h-4 mr-2" />
                         View All MCQs
                       </Link>
@@ -458,19 +464,19 @@ export default function DashboardPage() {
 
       {/* Mobile Bottom Nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-2 bg-background/95 backdrop-blur border-t border-border" style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))" }}>
-        <Link href="/dashboard" className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-primary">
+        <Link href="/dashboard" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-primary">
           <BarChart3 className="w-[22px] h-[22px]" />
           <span className="text-[10px] font-semibold">Home</span>
         </Link>
-        <Link href="/upload" className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
+        <Link href="/upload" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
           <Upload className="w-[22px] h-[22px]" />
           <span className="text-[10px] font-semibold">Upload</span>
         </Link>
-        <Link href="/coach" className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
+        <Link href="/coach" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
           <Bot className="w-[22px] h-[22px]" />
           <span className="text-[10px] font-semibold">Coach</span>
         </Link>
-        <Link href="/analytics" className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
+        <Link href="/analytics" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
           <TrendingUp className="w-[22px] h-[22px]" />
           <span className="text-[10px] font-semibold">Analytics</span>
         </Link>

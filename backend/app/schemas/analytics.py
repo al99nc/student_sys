@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from pydantic import field_validator
 
 
 # Response models for analytics endpoints
@@ -139,3 +140,63 @@ class CoFailureData(BaseModel):
 class CoFailuresResponse(BaseModel):
     """Response for Co-failures endpoint"""
     topic_pairs: list[CoFailureData]
+
+
+class UserProfile(BaseModel):
+    id: str
+    email: str
+    name: Optional[str] = None
+    university: Optional[str] = None
+    college: Optional[str] = None
+    year_of_study: Optional[int] = None
+    credit_balance: int = 0
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id(cls, v) -> str:
+        return str(v)
+
+    @field_validator("credit_balance", mode="before")
+    @classmethod
+    def credit_balance_none(cls, v) -> int:
+        return 0 if v is None else v
+
+
+class EntitlementsSummary(BaseModel):
+    plan: str
+    premium: bool
+    credit_balance: int
+    uploads_this_month: int
+    uploads_limit: int
+    coach_messages_this_month: int
+    coach_messages_limit: int
+    tokens_used_today: int
+    daily_token_budget: int
+    extra_usage_enabled: bool
+    has_coach_memory: bool
+    has_analytics: bool
+    has_exam_simulator: bool
+    has_cross_doc_query: bool
+    has_spaced_repetition: bool
+    has_export: bool
+    has_priority_queue: bool
+
+
+class LectureStats(BaseModel):
+    total_lectures: int
+    processed_lectures: int
+    total_mcqs_answered: int
+    avg_score: int
+
+
+class DashboardResponse(BaseModel):
+    user: UserProfile
+    entitlements: EntitlementsSummary
+    lecture_stats: LectureStats
+    overview: OverviewResponse
+    accuracy_timeline: AccuracyTimelineResponse
+    weak_topics: WeakTopicsResponse
+    confidence_calibration: ConfidenceCalibrationResponse
+    time_of_day: TimeOfDayResponse
+    co_failures: CoFailuresResponse
+    ai_insight: AIInsightResponse

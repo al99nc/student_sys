@@ -2,11 +2,12 @@
 Analytics service — real database queries for all analytics endpoints.
 All functions receive a SQLAlchemy Session and the authenticated User ORM object.
 """
+import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.models import User
+from app.models.models import User, Lecture, Result, QuizSession
 from app.models.performance import (
     QuestionAttempt,
     PerformanceSession,
@@ -14,6 +15,50 @@ from app.models.performance import (
     TopicCoFailure,
     StudentAiInsight,
 )
+
+
+# ── Lecture stats ─────────────────────────────────────────────────────────────
+
+def get_lecture_stats(user: User, db: Session) -> dict:
+    """Total lectures, processed lectures, and avg quiz score from quiz sessions."""
+    total_lectures = db.query(Lecture).filter(Lecture.user_id == user.id).count()
+
+    processed_lectures = (
+        db.query(Result)
+        .join(Lecture, Result.lecture_id == Lecture.id)
+        .filter(Lecture.user_id == user.id)
+        .count()
+    )
+
+    sessions = (
+        db.query(QuizSession, Result)
+        .join(Lecture, QuizSession.lecture_id == Lecture.id)
+        .join(Result, Result.lecture_id == Lecture.id)
+        .filter(QuizSession.user_id == user.id)
+        .all()
+    )
+
+    total_answered = 0
+    total_correct = 0
+    for session, result in sessions:
+        answers = json.loads(session.answers) if session.answers else {}
+        mcqs = json.loads(result.mcqs) if result.mcqs else []
+        total = len(mcqs)
+        correct = sum(
+            1 for idx_str, letter in answers.items()
+            if (i := int(idx_str)) < total and mcqs[i].get("answer") == letter
+        )
+        total_answered += len(answers)
+        total_correct += correct
+
+    avg_score = round(total_correct / total_answered * 100) if total_answered > 0 else 0
+
+    return {
+        "total_lectures": total_lectures,
+        "processed_lectures": processed_lectures,
+        "total_mcqs_answered": total_answered,
+        "avg_score": avg_score,
+    }
 
 
 # ── Overview ──────────────────────────────────────────────────────────────────

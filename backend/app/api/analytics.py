@@ -14,6 +14,10 @@ from app.schemas.analytics import (
     TimeOfDayResponse,
     AIInsightResponse,
     CoFailuresResponse,
+    DashboardResponse,
+    UserProfile,
+    EntitlementsSummary,
+    LectureStats,
 )
 from app.models.models import User
 from app.services.analytics_service import (
@@ -24,6 +28,14 @@ from app.services.analytics_service import (
     get_time_of_day_stats,
     generate_ai_insight,
     get_cofailures,
+    get_lecture_stats,
+)
+from app.core.entitlements import (
+    resolve_entitlements,
+    count_uploads_this_month,
+    count_coach_messages_this_month,
+    count_tokens_today,
+    is_premium,
 )
 from app.api.deps import get_current_user
 
@@ -131,3 +143,67 @@ async def get_cofailures_endpoint(
     limit: int = Query(default=10, ge=1, le=50, description="Maximum number of co-failure pairs to return"),
 ) -> CoFailuresResponse:
     return get_cofailures(user, db, limit=limit)
+
+
+@router.get(
+    "/dashboard",
+    response_model=DashboardResponse,
+    summary="Get full dashboard data in one request",
+    description=(
+        "Aggregates user profile, entitlements, lecture stats, and all analytics "
+        "sections into a single response. Replaces separate calls to /auth/me, "
+        "/billing/entitlements, /stats, and all /analytics/* endpoints."
+    ),
+)
+async def get_dashboard(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    timeline_days: int = Query(default=7, ge=1, le=90, description="Days of accuracy history to include"),
+    weak_topics_limit: int = Query(default=10, ge=1, le=50, description="Max weak topics to return"),
+    co_failures_limit: int = Query(default=10, ge=1, le=50, description="Max co-failure pairs to return"),
+) -> DashboardResponse:
+    uid = str(user.id)
+    ent = resolve_entitlements(user)
+
+    user_profile = UserProfile(
+        id=uid,
+        email=user.email,
+        name=user.name,
+        university=user.university,
+        college=user.college,
+        year_of_study=user.year_of_study,
+        credit_balance=user.credit_balance or 0,
+    )
+
+    entitlements = EntitlementsSummary(
+        plan=ent.tier,
+        premium=is_premium(user),
+        credit_balance=user.credit_balance or 0,
+        uploads_this_month=count_uploads_this_month(db, uid),
+        uploads_limit=ent.uploads_limit,
+        coach_messages_this_month=count_coach_messages_this_month(db, uid),
+        coach_messages_limit=ent.coach_limit,
+        tokens_used_today=count_tokens_today(db, uid),
+        daily_token_budget=ent.daily_token_budget,
+        extra_usage_enabled=bool(user.extra_usage_enabled),
+        has_coach_memory=ent.has_coach_memory,
+        has_analytics=ent.has_analytics,
+        has_exam_simulator=ent.has_exam_simulator,
+        has_cross_doc_query=ent.has_cross_doc_query,
+        has_spaced_repetition=ent.has_spaced_repetition,
+        has_export=ent.has_export,
+        has_priority_queue=ent.has_priority_queue,
+    )
+
+    return DashboardResponse(
+        user=user_profile,
+        entitlements=entitlements,
+        lecture_stats=get_lecture_stats(user, db),
+        overview=get_overview_stats(user, db),
+        accuracy_timeline=get_accuracy_timeline(user, db, days=timeline_days),
+        weak_topics=get_weak_topics(user, db, limit=weak_topics_limit),
+        confidence_calibration=get_confidence_calibration(user, db),
+        time_of_day=get_time_of_day_stats(user, db),
+        co_failures=get_cofailures(user, db, limit=co_failures_limit),
+        ai_insight=generate_ai_insight(user, db),
+    )

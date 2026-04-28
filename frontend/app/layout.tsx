@@ -38,7 +38,7 @@ export default function RootLayout({
         {/* Must load before React so window.Telegram.WebApp is available on mount */}
         <Script
           src="https://telegram.org/js/telegram-web-app.js"
-          strategy="beforeInteractive"
+          strategy="afterInteractive"
         />
         <link
           rel="stylesheet"

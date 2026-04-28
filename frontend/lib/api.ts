@@ -18,20 +18,21 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Redirect to /auth on any 401 (expired or invalid token)
-let isLoggingOut = false;
+// Redirect to /auth on any 401 (expired or invalid token).
+// Uses replace() instead of href assignment so the auth page doesn't stack in history.
+// Flag resets after redirect so re-authentication after token refresh works.
+let _redirectingTo401 = false;
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (typeof window !== "undefined" && error?.response?.status === 401) {
-      // Prevent multiple logout attempts
-      if (!isLoggingOut) {
-        isLoggingOut = true;
-        console.warn("Received 401 - logging out");
+      if (!_redirectingTo401) {
+        _redirectingTo401 = true;
+        console.warn("Received 401 — clearing token and redirecting to /auth");
         removeToken();
-        setTimeout(() => {
-          window.location.href = "/auth";
-        }, 100);
+        window.location.replace("/auth");
+        // Reset after navigation completes so re-auth doesn't leave the flag stuck.
+        setTimeout(() => { _redirectingTo401 = false; }, 5000);
       }
     }
     return Promise.reject(error);
@@ -210,6 +211,78 @@ export const processLecture = (
   );
 
 export const getStats = () => api.get("/stats");
+
+// Single aggregated dashboard endpoint — replaces separate calls to /auth/me,
+// /billing/entitlements, /stats, and all /analytics/* on initial page load.
+export interface DashboardData {
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    university: string | null;
+    college: string | null;
+    year_of_study: number | null;
+    credit_balance: number;
+  };
+  entitlements: {
+    plan: string;
+    premium: boolean;
+    credit_balance: number;
+    uploads_this_month: number;
+    uploads_limit: number;
+    coach_messages_this_month: number;
+    coach_messages_limit: number;
+    tokens_used_today: number;
+    daily_token_budget: number;
+    extra_usage_enabled: boolean;
+    has_coach_memory: boolean;
+    has_analytics: boolean;
+    has_exam_simulator: boolean;
+    has_cross_doc_query: boolean;
+    has_spaced_repetition: boolean;
+    has_export: boolean;
+    has_priority_queue: boolean;
+  };
+  lecture_stats: {
+    total_lectures: number;
+    processed_lectures: number;
+    total_mcqs_answered: number;
+    avg_score: number;
+  };
+  overview: {
+    overall_accuracy: number;
+    total_correct: number;
+    total_attempted: number;
+    sessions_this_week: number;
+    current_streak: number;
+    weakest_topic: { topic: string; accuracy_rate: number } | null;
+  };
+  accuracy_timeline: {
+    days: number;
+    data: { date: string; correct: number; total: number; accuracy_percent: number }[];
+  };
+  weak_topics: {
+    topics: { subtopic: string; error_count: number; decay_rate: number; decay_severity: string; accuracy_rate: number; total_attempts: number }[];
+  };
+  confidence_calibration: {
+    data: { confidence_level: number; attempts: number; correct: number; accuracy_percent: number }[];
+    danger_zone_points: number;
+  };
+  time_of_day: {
+    data: { time_of_day: string; accuracy_rate: number; is_peak: boolean }[];
+    best_time: string;
+  };
+  co_failures: {
+    topic_pairs: { topic_a: string; topic_b: string; co_fail_count: number }[];
+  };
+  ai_insight: {
+    data: { insight_text: string; generated_at: string; minutes_ago: number } | null;
+    message: string | null;
+  };
+}
+
+export const getDashboard = (timelineDays = 7) =>
+  api.get<DashboardData>(`/analytics/dashboard?timeline_days=${timelineDays}`);
 
 export const getAnalyticsOverview = () => api.get("/analytics/overview");
 export const getAnalyticsTimeline = (days = 7) => api.get(`/analytics/accuracy-timeline?days=${days}`);
