@@ -1,5 +1,5 @@
 """
-Semantic router for CortexQ Coach.
+Keyword-based intent classifier for CortexQ Coach.
 
 Classifies incoming messages into intents before hitting the LLM so we can:
   - Return canned responses for off_topic  (no LLM cost / latency)
@@ -8,116 +8,88 @@ Classifies incoming messages into intents before hitting the LLM so we can:
   - Use the full priority prompt for study_advice
 """
 
-from semantic_router import Route
-from semantic_router.routers import SemanticRouter
-from semantic_router.encoders import FastEmbedEncoder
+import re
 
-# ── Route definitions ─────────────────────────────────────────────────────────
+# ── Intent keyword patterns ───────────────────────────────────────────────────
 
-_profile_route = Route(
-    name="profile_query",
-    utterances=[
-        "what data do you have on me",
-        "what do you know about me",
-        "show me my profile",
-        "what are my stats",
-        "what are my scores",
-        "tell me about my performance",
-        "what topics have I done",
-        "how many questions have I answered",
-        "what's my overconfidence rate",
-        "what are my weak topics",
-        "what does my profile look like",
-        "what information do you have about me",
-        "what's my accuracy",
-        "how am I doing overall",
-        "summarize my progress",
-    ],
+_PROFILE_PATTERNS = re.compile(
+    r"\b("
+    r"my (profile|stats|scores?|accuracy|performance|progress|data|information|topics?|questions?|overconfidence|weak)"
+    r"|what (do you know|have you|data).{0,20}\bme\b"
+    r"|show me my"
+    r"|how (am i|many questions)"
+    r"|summarize my"
+    r")\b",
+    re.IGNORECASE,
 )
 
-_study_route = Route(
-    name="study_advice",
-    utterances=[
-        "what should I study",
-        "where should I focus",
-        "what topic should I do next",
-        "give me a study plan",
-        "help me prioritize",
-        "what's the most important topic",
-        "what do I need to work on",
-        "what should I practice",
-        "where am I losing marks",
-        "what should I tackle first",
-        "what's my biggest weakness",
-        "help me improve",
-        "where should I start today",
-        "what topic is most urgent",
-    ],
+_STUDY_PATTERNS = re.compile(
+    r"\b("
+    r"what should i (study|practice|do|tackle|start|focus)"
+    r"|where should i (focus|start|study|concentrate)"
+    r"|study plan"
+    r"|help me (prioritize|improve)"
+    r"|most important topic"
+    r"|what (do i|topics?) (need to work on|should i work on)"
+    r"|where (am i losing|should i)"
+    r"|most urgent"
+    r"|biggest weakness"
+    r"|what('s| is) (my biggest|the most)"
+    r"|what topic"
+    r")\b",
+    re.IGNORECASE,
 )
 
-_concept_route = Route(
-    name="concept_question",
-    utterances=[
-        "explain to me how this works",
-        "what is the mechanism of action",
-        "teach me about this topic",
-        "I don't understand this concept",
-        "can you explain beta blockers",
-        "what's the difference between",
-        "how do I remember this",
-        "why does this happen in the body",
-        "describe the pathophysiology",
-        "define this medical term",
-        "how does the heart work",
-        "what is pharmacokinetics",
-    ],
+_CONCEPT_PATTERNS = re.compile(
+    r"\b("
+    r"explain (to me|how|what|why|this|the)"
+    r"|what is (the mechanism|pharmacokinetics|a |an )"
+    r"|mechanism of action"
+    r"|teach me"
+    r"|i don'?t understand"
+    r"|can you explain"
+    r"|what'?s the difference between"
+    r"|how do i remember"
+    r"|why does this"
+    r"|pathophysiology"
+    r"|define (this|the)"
+    r"|how does the"
+    r")\b",
+    re.IGNORECASE,
 )
 
-_off_topic_route = Route(
-    name="off_topic",
-    utterances=[
-        "I love you",
-        "what's the weather like today",
-        "tell me a joke",
-        "are you a real person",
-        "who created you",
-        "I'm so bored right now",
-        "I'm really hungry",
-        "what is your name",
-        "do you have feelings",
-        "are you conscious",
-        "I hate studying so much",
-        "this is impossible I give up",
-        "can we just talk",
-        "how are you doing today",
-        "what do you think about life",
-    ],
+_OFF_TOPIC_PATTERNS = re.compile(
+    r"\b("
+    r"i love you"
+    r"|weather"
+    r"|tell me a joke"
+    r"|are you (a real|conscious)"
+    r"|who created you"
+    r"|i'?m (so bored|really hungry|hungry)"
+    r"|what is your name"
+    r"|do you have feelings"
+    r"|i hate studying"
+    r"|i give up"
+    r"|can we just talk"
+    r"|how are you (doing|today)"
+    r"|what do you think about life"
+    r")\b",
+    re.IGNORECASE,
 )
 
-# ── Router (lazy-loaded on first call) ────────────────────────────────────────
-
-_router: SemanticRouter | None = None
-
-
-def _get_router() -> SemanticRouter:
-    global _router
-    if _router is None:
-        encoder = FastEmbedEncoder()
-        _router = SemanticRouter(
-            encoder=encoder,
-            routes=[_profile_route, _study_route, _concept_route, _off_topic_route],
-            auto_sync="local",
-        )
-    return _router
-
+# ── Classifier ────────────────────────────────────────────────────────────────
 
 def classify(message: str) -> str:
     """
     Returns one of: 'profile_query', 'study_advice', 'concept_question', 'off_topic', 'unknown'
-    Falls back to 'unknown' on any error so the full LLM prompt still runs.
+    Falls back to 'unknown' so the full LLM prompt still runs.
     """
-    try:
-        result = _get_router()(message)
-        return result.name if result.name else "unknown"
-    except Exception:
-        return "unknown"
+    if _OFF_TOPIC_PATTERNS.search(message):
+        return "off_topic"
+    if _PROFILE_PATTERNS.search(message):
+        return "profile_query"
+    if _STUDY_PATTERNS.search(message):
+        return "study_advice"
+    if _CONCEPT_PATTERNS.search(message):
+        return "concept_question"
+    return "unknown"
