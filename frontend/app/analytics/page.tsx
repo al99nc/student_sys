@@ -143,12 +143,29 @@ export default function AnalyticsPage() {
           <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
             cortexQ
           </Link>
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
-            <Link href="/dashboard" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>
-            <Link href="/upload" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">Upload</Link>
-            <Link href="/coach" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">Coach</Link>
-            <span className="text-foreground">Analytics</span>
+
+          <nav className="hidden md:flex items-center gap-1">
+            {[
+              { label: "Dashboard", href: "/dashboard" },
+              { label: "Upload", href: "/upload" },
+              { label: "Coach", href: "/coach" },
+              { label: "Analytics", href: "/analytics", active: true },
+            ].map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                prefetch={false}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  item.active
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
+
           <Link
             href="/dashboard"
             prefetch={false}
