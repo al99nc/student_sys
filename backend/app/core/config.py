@@ -139,7 +139,7 @@ class Settings(BaseSettings):
     # Must be set in .env — empty string disables Wayl webhook verification.
     WAYL_WEBHOOK_SECRET: str = ""
     # Price per credit in IQD (minimum total per link is 1000 IQD).
-    CREDIT_PRICE_IQD: int = 5000
+    CREDIT_PRICE_IQD: int = 250
 
     # Comma-separated list of allowed CORS origins.
     # Avoids hardcoding production IPs directly in source code.

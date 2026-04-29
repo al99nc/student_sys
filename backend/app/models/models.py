@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -37,6 +37,8 @@ class User(Base):
     extra_usage_enabled = Column(Integer, default=1, server_default="1", nullable=False)
     # Admin flag — only set via direct DB update, never via API
     is_admin = Column(Integer, default=0, server_default="0", nullable=False)
+    # IP address at signup — used to prevent trial abuse
+    signup_ip = Column(String(45), nullable=True, index=True)
 
     lectures = relationship("Lecture", back_populates="owner")
 

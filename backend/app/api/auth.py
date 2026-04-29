@@ -16,13 +16,18 @@ def signup(request: Request, user_data: UserCreate, db: Session = Depends(get_db
     existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    existing_ip = db.query(User).filter(User.signup_ip == ip).first()
+
     local_part = user_data.email.split("@")[0]
     bro_bonus = local_part.lower().endswith("-fromali")
 
     user = User(
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
-        credit_balance=100 if bro_bonus else 0,
+        credit_balance=0 if existing_ip else (100 if bro_bonus else 0),
+        signup_ip=ip,
     )
     db.add(user)
     db.commit()

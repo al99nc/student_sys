@@ -1,13 +1,16 @@
 import type { Metadata, Viewport } from 'next'
-import { Plus_Jakarta_Sans } from 'next/font/google'
+import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
 import Script from 'next/script'
 import { TelegramProvider } from '@/lib/TelegramProvider'
+import { MaterialSymbolsFont } from '@/components/material-symbols-font'
 import './globals.css'
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
+const plusJakarta = localFont({
+  src: '../public/fonts/PlusJakartaSans.woff2',
+  weight: '400 800',
   variable: "--font-plus-jakarta",
+  display: "swap",
 })
 
 export const metadata: Metadata = {
@@ -34,22 +37,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`dark ${plusJakarta.variable}`}>
-      <head>
-        {/* Must load before React so window.Telegram.WebApp is available on mount */}
-        <Script
-          src="https://telegram.org/js/telegram-web-app.js"
-          strategy="afterInteractive"
-        />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
-        />
-      </head>
+
       <body className="font-sans antialiased bg-background min-h-screen">
+        <MaterialSymbolsFont />
         <TelegramProvider>
           {children}
         </TelegramProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
+        {/* Must be in body, not head — afterInteractive requires body context */}
+        <Script
+          src="https://telegram.org/js/telegram-web-app.js"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   )

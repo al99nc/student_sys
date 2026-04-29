@@ -28,7 +28,7 @@ from app.models.models import CoachPerformanceUsage, Lecture, User
 # ── Plan tier ─────────────────────────────────────────────────────────────────
 
 def plan_tier(user: User | None) -> str:
-    """Return "free" | "pro" | "enterprise"."""
+    """Return "free" | "pro" | "enterprise". Reads directly from user.plan — source of truth."""
     if user is None:
         return "free"
     p = (user.plan or "free").lower()
@@ -173,7 +173,6 @@ def assert_can_upload(db: Session, user: User) -> None:
     n = count_uploads_this_month(db, user.id)
     if n >= limit:
         tier = plan_tier(user)
-        # Free users with credits can keep uploading — 1 credit per upload
         if tier == "free" and (user.credit_balance or 0) > 0:
             return
         from fastapi import HTTPException, status
@@ -312,7 +311,6 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
         return True
     if plan_tier(user) in ("pro", "enterprise"):
         return True  # plan covers this action — no credit charge
-    # If extra usage is disabled, allow action without spending credits
     if not user.extra_usage_enabled:
         return True
     res = db.execute(
@@ -329,6 +327,11 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
     ok = bool(getattr(res, "rowcount", 0))
     if ok:
         db.refresh(user)
+        if (user.credit_balance or 0) == 0 and (user.plan or "free") == "pro":
+            db.execute(text("UPDATE users SET plan = 'free' WHERE id = :id"), {"id": user.id})
+            if commit:
+                db.commit()
+            db.refresh(user)
     return ok
 
 
@@ -338,7 +341,6 @@ def refund_credits(db: Session, user: User, amount: int, *, commit: bool = True)
         return
     if plan_tier(user) in ("pro", "enterprise"):
         return  # nothing was charged
-    # If extra usage is disabled, nothing was charged so don't refund
     if not user.extra_usage_enabled:
         return
     db.execute(

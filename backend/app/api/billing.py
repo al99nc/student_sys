@@ -211,10 +211,15 @@ def toggle_extra_usage(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Toggle extra usage setting (allow spending credits when limit is hit)."""
+    """Toggle extra usage. Off = downgrade to free. On + credits = restore pro."""
     current_user.extra_usage_enabled = 1 - current_user.extra_usage_enabled
+    turning_on = bool(current_user.extra_usage_enabled)
+    if not turning_on:
+        current_user.plan = "free"
+    elif (current_user.credit_balance or 0) > 0:
+        current_user.plan = "pro"
     db.commit()
-    return {"extra_usage_enabled": bool(current_user.extra_usage_enabled)}
+    return {"extra_usage_enabled": turning_on}
 
 
 @router.post("/checkout-session", response_model=CheckoutSessionOut)
@@ -225,12 +230,7 @@ def create_checkout_session(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Overflow credit purchase via Stripe Checkout (Pro/Enterprise subscribers only)."""
-    if plan_tier(current_user) not in ("pro", "enterprise"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Overflow credits are available to Pro and Enterprise subscribers only. Upgrade your plan first.",
-        )
+    """Credit purchase via Stripe Checkout."""
     stripe.api_key = _get_stripe_key()
     credits = body.credits
     total_cents = credits * settings.CREDIT_PRICE_CENTS
@@ -460,6 +460,8 @@ def _handle_credits_purchase(db: Session, sess: dict) -> None:
     if user.credit_balance is None:
         user.credit_balance = 0
     user.credit_balance += credits
+    if (user.plan or "free") == "free":
+        user.plan = "pro"
 
     # Store customer ID for future checkouts (skip re-creating the customer)
     customer_id = sess.get("customer")
@@ -581,12 +583,7 @@ def create_wayl_checkout(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Overflow credit purchase via Wayl/IQD (Pro/Enterprise subscribers only)."""
-    if plan_tier(current_user) not in ("pro", "enterprise"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Overflow credits are available to Pro and Enterprise subscribers only. Upgrade your plan first.",
-        )
+    """Credit purchase via Wayl/IQD."""
     credits = body.credits
     total_iqd = credits * settings.CREDIT_PRICE_IQD
 
@@ -825,6 +822,8 @@ async def wayl_webhook(request: Request, db: Session = Depends(get_db)):
     if user.credit_balance is None:
         user.credit_balance = 0
     user.credit_balance += credits
+    if (user.plan or "free") == "free":
+        user.plan = "pro"
     db.commit()
 
     logger.info("Wayl: credited %s credits to user %s (ref %s)", credits, user_id, reference_id)
