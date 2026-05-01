@@ -11,6 +11,10 @@ import {
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { StepNav } from "@/components/step-nav";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   Share2, Shuffle, RefreshCw, Check, X,
   ChevronRight, Home, BarChart3, Zap, BookOpen, Lightbulb,
@@ -76,15 +80,15 @@ function groupByTopic(mcqs: MCQ[]): Record<string, MCQ[]> {
 type ActiveTab = "mcqs" | "summary" | "concepts";
 
 const CONFIDENCE_OPTIONS: { value: Confidence; label: string }[] = [
-  { value: "guessed", label: "Guessed" },
-  { value: "unsure",  label: "Unsure"  },
+  { value: "guessed",   label: "Guessed"   },
+  { value: "unsure",    label: "Unsure"    },
   { value: "confident", label: "Confident" },
 ];
 
-const CONF_STYLE: Record<Confidence, { bg: string; border: string; color: string }> = {
-  guessed:   { bg: "rgba(251,146,60,0.1)",  border: "rgba(251,146,60,0.3)",  color: "#fb923c" },
-  unsure:    { bg: "rgba(250,204,21,0.1)",  border: "rgba(250,204,21,0.3)",  color: "#facc15" },
-  confident: { bg: "rgba(74,222,128,0.1)",  border: "rgba(74,222,128,0.3)",  color: "#4ade80" },
+const CONF_CLASS: Record<Confidence, string> = {
+  guessed:   "bg-orange-400/10 border-orange-400/30 text-orange-400",
+  unsure:    "bg-yellow-400/10 border-yellow-400/30 text-yellow-400",
+  confident: "bg-emerald-400/10 border-emerald-400/30 text-emerald-400",
 };
 
 const LETTER_TO_OPTION: Record<string, keyof LiveTimeline> = {
@@ -104,11 +108,7 @@ function TimerDisplay({ startRef }: { startRef: React.MutableRefObject<number> }
   }, [startRef]);
   const m = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const s = (elapsed % 60).toString().padStart(2, "0");
-  return (
-    <span style={{ fontFamily: "monospace", fontSize: 13, color: "#64748b", fontVariantNumeric: "tabular-nums" }}>
-      {m}:{s}
-    </span>
-  );
+  return <span className="font-mono text-[13px] text-muted-foreground tabular-nums">{m}:{s}</span>;
 }
 
 // ─── Performance types ────────────────────────────────────────────────────────
@@ -187,25 +187,25 @@ export default function ResultsPage() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  const [results, setResults]         = useState<Results | null>(null);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState("");
-  const [processing, setProcessing]   = useState(false);
+  const [results, setResults]       = useState<Results | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState("");
+  const [processing, setProcessing] = useState(false);
 
-  const [answers, setAnswers]         = useState<Record<number, AnswerEntry>>({});
+  const [answers, setAnswers]           = useState<Record<number, AnswerEntry>>({});
   const [pendingAnswer, setPendingAnswer] = useState<{ globalIndex: number; letter: string } | null>(null);
-  const [score, setScore]             = useState(0);
-  const [shuffleMode, setShuffleMode] = useState(false);
+  const [score, setScore]               = useState(0);
+  const [shuffleMode, setShuffleMode]   = useState(false);
   const [confirmRetake, setConfirmRetake] = useState(false);
   const [shuffledMcqs, setShuffledMcqs]   = useState<Array<MCQ & { _index: number }>>([]);
-  const [activeTab, setActiveTab]     = useState<ActiveTab>("mcqs");
-  const [shareToken, setShareToken]   = useState<string | null>(null);
-  const [copied, setCopied]           = useState(false);
+  const [activeTab, setActiveTab]       = useState<ActiveTab>("mcqs");
+  const [shareToken, setShareToken]     = useState<string | null>(null);
+  const [copied, setCopied]             = useState(false);
   const [activeViewers, setActiveViewers] = useState(0);
-  const [totalViews, setTotalViews]   = useState(0);
-  const [sharing, setSharing]         = useState(false);
-  const [saveStatus, setSaveStatus]   = useState<"idle" | "saving" | "saved">("idle");
-  const [retakeCount, setRetakeCount] = useState(0);
+  const [totalViews, setTotalViews]     = useState(0);
+  const [sharing, setSharing]           = useState(false);
+  const [saveStatus, setSaveStatus]     = useState<"idle" | "saving" | "saved">("idle");
+  const [retakeCount, setRetakeCount]   = useState(0);
 
   const [weakPoints, setWeakPoints]   = useState<WeakPoint[]>([]);
   const [readiness, setReadiness]     = useState<Readiness | null>(null);
@@ -215,18 +215,18 @@ export default function ResultsPage() {
   const [aiInsightStatus, setAiInsightStatus] = useState<"loading" | "fresh" | "stale" | "no_data" | "error">("loading");
   const [insightTab, setInsightTab]   = useState<"next" | "insight" | "plan" | "quiz">("next");
 
-  const sessionStartRef   = useRef<number>(Date.now());
-  const viewerPollRef     = useRef<ReturnType<typeof setInterval> | null>(null);
-  const saveTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionStartRef     = useRef<number>(Date.now());
+  const viewerPollRef       = useRef<ReturnType<typeof setInterval> | null>(null);
+  const saveTimeoutRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasScrolledToResume = useRef(false);
-  const perfSessionId     = useRef<string | null>(null);
-  const perfQuestionMap   = useRef<Record<string, string>>({});
-  const questionStartTime = useRef<number>(Date.now());
+  const perfSessionId       = useRef<string | null>(null);
+  const perfQuestionMap     = useRef<Record<string, string>>({});
+  const questionStartTime   = useRef<number>(Date.now());
   const confidenceStartTime = useRef<number>(Date.now());
-  const firstAnswerTime   = useRef<number | null>(null);
-  const firstAnswerLetter = useRef<string | null>(null);
-  const hoverStartRef     = useRef<{ letter: string; at: number } | null>(null);
-  const liveTimelineRef   = useRef<LiveTimeline>({
+  const firstAnswerTime     = useRef<number | null>(null);
+  const firstAnswerLetter   = useRef<string | null>(null);
+  const hoverStartRef       = useRef<{ letter: string; at: number } | null>(null);
+  const liveTimelineRef     = useRef<LiveTimeline>({
     time_on_option_a: 0, time_on_option_b: 0,
     time_on_option_c: 0, time_on_option_d: 0,
     second_choice: null, re_read_question: false, re_read_count: 0,
@@ -566,9 +566,8 @@ export default function ResultsPage() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#0d0f1c" }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(123,47,255,0.2)", borderTopColor: "#7B2FFF", animation: "spin 0.8s linear infinite" }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -577,22 +576,21 @@ export default function ResultsPage() {
 
   if (error === "not_found") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#0d0f1c", padding: 16 }}>
-        <div style={{ maxWidth: 420, width: "100%", background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: 32, textAlign: "center" }}>
-          <div style={{ width: 64, height: 64, borderRadius: 18, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
-            <AlertTriangle size={28} style={{ color: "#64748b" }} />
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <div className="max-w-sm w-full bg-card rounded-2xl border border-border p-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-muted border border-border flex items-center justify-center mx-auto mb-6">
+            <AlertTriangle className="w-7 h-7 text-muted-foreground" />
           </div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: "#e2e8f0", margin: "0 0 8px", letterSpacing: "-0.01em" }}>Not Processed Yet</h2>
-          <p style={{ color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>Generate study materials for this lecture to get started.</p>
-          <button
-            onClick={handleProcess}
-            disabled={processing}
-            style={{ width: "100%", padding: "13px 0", borderRadius: 14, background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", color: "white", fontWeight: 700, fontSize: 15, border: "none", cursor: processing ? "not-allowed" : "pointer", opacity: processing ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}
-          >
-            {processing ? <><Loader2 size={16} style={{ animation: "spin 0.8s linear infinite" }} /> Processing...</> : "Generate Study Materials"}
-          </button>
+          <h2 className="text-[22px] font-extrabold tracking-tight text-foreground mb-2">Not Processed Yet</h2>
+          <p className="text-sm text-muted-foreground mb-7 leading-relaxed">
+            Generate study materials for this lecture to get started.
+          </p>
+          <Button onClick={handleProcess} disabled={processing} size="lg" className="w-full">
+            {processing
+              ? <><Loader2 className="w-4 h-4 animate-spin" />Processing...</>
+              : "Generate Study Materials"}
+          </Button>
         </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -607,41 +605,38 @@ export default function ResultsPage() {
   // ── MCQ List ─────────────────────────────────────────────────────────────────
 
   const MCQList = ({ mcqs }: { mcqs: Array<MCQ & { _index: number }> }) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div className="flex flex-col gap-3.5">
       {mcqs.map((mcq, displayIdx) => {
-        const globalIdx = mcq._index;
-        const answered  = answers[globalIdx];
-        const isPending = pendingAnswer?.globalIndex === globalIdx;
+        const globalIdx  = mcq._index;
+        const answered   = answers[globalIdx];
+        const isPending  = pendingAnswer?.globalIndex === globalIdx;
         const isAnswered = answered !== undefined;
         const isCorrect  = answered?.letter === mcq.answer;
-
-        const cardBorderLeft = isAnswered
-          ? isCorrect ? "3px solid #4ade80" : "3px solid #f87171"
-          : isPending ? "3px solid #7B2FFF"
-          : "1px solid rgba(255,255,255,0.07)";
 
         return (
           <div
             key={globalIdx}
             id={`mcq-${globalIdx}`}
-            style={{
-              background: "rgba(255,255,255,0.028)",
-              border: "1px solid rgba(255,255,255,0.07)",
-              borderLeft: cardBorderLeft,
-              borderRadius: 16,
-              padding: "20px 22px",
-              scrollMarginTop: 72,
-              transition: "border-color 0.2s",
-            }}
+            className={cn(
+              "bg-muted/5 border border-border rounded-2xl px-[22px] py-5 scroll-mt-[72px] transition-colors",
+              isAnswered && isCorrect  && "border-l-[3px] border-l-emerald-400",
+              isAnswered && !isCorrect && "border-l-[3px] border-l-red-400",
+              isPending  && !isAnswered && "border-l-[3px] border-l-violet-500"
+            )}
           >
             {/* Header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "#3a3f60", padding: "3px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 7 }}>
+            <div className="flex justify-between items-start mb-3.5">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 px-2.5 py-1 bg-muted/20 border border-border rounded-[7px]">
                 Q{String(displayIdx + 1).padStart(2, "0")}
               </span>
               {isAnswered && (
-                <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 8, background: isCorrect ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)", color: isCorrect ? "#4ade80" : "#f87171", border: `1px solid ${isCorrect ? "rgba(74,222,128,0.25)" : "rgba(248,113,113,0.25)"}` }}>
-                  {isCorrect ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                <span className={cn(
+                  "flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border",
+                  isCorrect
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                    : "bg-red-500/10 text-red-400 border-red-500/25"
+                )}>
+                  {isCorrect ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                   {isCorrect ? "Correct" : "Incorrect"}
                 </span>
               )}
@@ -649,7 +644,7 @@ export default function ResultsPage() {
 
             {/* Question */}
             <p
-              style={{ fontSize: 14, fontWeight: 500, color: "#e2e8f0", marginBottom: 18, lineHeight: 1.65 }}
+              className="text-sm font-medium text-foreground mb-4 leading-relaxed"
               onPointerEnter={() => {
                 if (!isAnswered && isPending) {
                   liveTimelineRef.current.re_read_question = true;
@@ -661,66 +656,37 @@ export default function ResultsPage() {
             </p>
 
             {/* Options */}
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {mcq.options.map((option, j) => {
                 const letter = option.charAt(0);
                 const isThisSelected = answered?.letter === letter || (isPending && pendingAnswer?.letter === letter);
                 const isThisCorrect  = letter === mcq.answer;
 
-                let optBg: string, optBorder: string, optColor: string;
-                if (isAnswered) {
-                  if (isThisCorrect)       { optBg = "rgba(74,222,128,0.08)";  optBorder = "rgba(74,222,128,0.3)";  optColor = "#e2e8f0"; }
-                  else if (isThisSelected) { optBg = "rgba(248,113,113,0.08)"; optBorder = "rgba(248,113,113,0.3)"; optColor = "#94a3b8"; }
-                  else                     { optBg = "rgba(255,255,255,0.02)"; optBorder = "rgba(255,255,255,0.06)"; optColor = "#3a3f60"; }
-                } else if (isPending) {
-                  if (isThisSelected)      { optBg = "rgba(123,47,255,0.12)";  optBorder = "rgba(123,47,255,0.35)"; optColor = "#e2e8f0"; }
-                  else                     { optBg = "rgba(255,255,255,0.02)"; optBorder = "rgba(255,255,255,0.06)"; optColor = "#64748b"; }
-                } else {
-                  optBg = "rgba(255,255,255,0.03)"; optBorder = "rgba(255,255,255,0.08)"; optColor = "#94a3b8";
-                }
-
                 return (
                   <button
                     key={j}
                     onClick={() => !isAnswered && !isPending && handleSelectAnswer(globalIdx, letter)}
-                    onMouseEnter={(e) => {
-                      if (!isAnswered) handleOptionHoverStart(letter);
-                      if (!isAnswered && !isPending) {
-                        e.currentTarget.style.background = "rgba(123,47,255,0.09)";
-                        e.currentTarget.style.borderColor = "rgba(123,47,255,0.3)";
-                        e.currentTarget.style.color = "#c4b5fd";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isAnswered) handleOptionHoverEnd(letter);
-                      if (!isAnswered && !isPending) {
-                        e.currentTarget.style.background = optBg;
-                        e.currentTarget.style.borderColor = optBorder;
-                        e.currentTarget.style.color = optColor;
-                      }
-                    }}
+                    onMouseEnter={() => { if (!isAnswered) handleOptionHoverStart(letter); }}
+                    onMouseLeave={() => { if (!isAnswered) handleOptionHoverEnd(letter); }}
                     disabled={isAnswered || isPending}
-                    style={{
-                      padding: "11px 14px",
-                      borderRadius: 11,
-                      fontSize: 13,
-                      textAlign: "left",
-                      transition: "all 0.15s",
-                      border: `1px solid ${optBorder}`,
-                      background: optBg,
-                      color: optColor,
-                      cursor: isAnswered || isPending ? "default" : "pointer",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 8,
-                      fontFamily: "inherit",
-                      lineHeight: 1.5,
-                    }}
+                    className={cn(
+                      "px-3.5 py-2.5 rounded-xl text-[13px] text-left transition-all border flex justify-between items-center gap-2 leading-snug",
+                      isAnswered ? (
+                        isThisCorrect
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-foreground cursor-default"
+                          : isThisSelected
+                            ? "bg-red-500/10 border-red-500/30 text-muted-foreground cursor-default"
+                            : "bg-muted/10 border-border text-muted-foreground/30 cursor-default"
+                      ) : isPending ? (
+                        isThisSelected
+                          ? "bg-violet-600/10 border-violet-500/35 text-foreground cursor-default"
+                          : "bg-muted/10 border-border text-muted-foreground cursor-default"
+                      ) : "bg-muted/15 border-border text-muted-foreground hover:bg-violet-600/10 hover:border-violet-500/30 hover:text-violet-300 cursor-pointer"
+                    )}
                   >
                     <span>{option}</span>
-                    {isAnswered && isThisCorrect  && <Check size={13} style={{ color: "#4ade80", flexShrink: 0 }} />}
-                    {isAnswered && isThisSelected && !isThisCorrect && <X size={13} style={{ color: "#f87171", flexShrink: 0 }} />}
+                    {isAnswered && isThisCorrect   && <Check className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
+                    {isAnswered && isThisSelected && !isThisCorrect && <X className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
                   </button>
                 );
               })}
@@ -728,46 +694,43 @@ export default function ResultsPage() {
 
             {/* Confidence prompt */}
             {isPending && (
-              <div id={`confidence-${globalIdx}`} style={{ marginTop: 18, borderRadius: 13, border: "1px solid rgba(123,47,255,0.25)", background: "rgba(123,47,255,0.06)", padding: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <Brain size={14} style={{ color: "#7B2FFF" }} />
-                  <p style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", margin: 0 }}>How confident were you?</p>
+              <div id={`confidence-${globalIdx}`} className="mt-4 rounded-xl border border-violet-600/25 bg-violet-600/5 p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Brain className="w-3.5 h-3.5 text-violet-500" />
+                  <p className="text-sm font-semibold text-foreground">How confident were you?</p>
                 </div>
-                <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 14px" }}>Your answer is locked in — this helps track your learning.</p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const }}>
-                  {CONFIDENCE_OPTIONS.map((opt) => {
-                    const cs = CONF_STYLE[opt.value];
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => handleConfidence(opt.value)}
-                        style={{ padding: "7px 16px", borderRadius: 10, border: `1px solid ${cs.border}`, background: cs.bg, color: cs.color, fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "opacity 0.15s", fontFamily: "inherit" }}
-                        onMouseEnter={e => (e.currentTarget.style.opacity = "0.8")}
-                        onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
+                <p className="text-xs text-muted-foreground mb-3.5">Your answer is locked in — this helps track your learning.</p>
+                <div className="flex gap-2 flex-wrap">
+                  {CONFIDENCE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => handleConfidence(opt.value)}
+                      className={cn("px-4 py-1.5 rounded-[10px] text-[13px] font-semibold cursor-pointer transition-opacity hover:opacity-80 border", CONF_CLASS[opt.value])}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
 
             {/* Explanation */}
             {isAnswered && mcq.explanation && (
-              <div style={{ marginTop: 14, padding: "13px 15px", borderRadius: 11, background: isCorrect ? "rgba(74,222,128,0.05)" : "rgba(123,47,255,0.05)", border: `1px solid ${isCorrect ? "rgba(74,222,128,0.18)" : "rgba(123,47,255,0.18)"}` }}>
-                <p style={{ color: "#94a3b8", lineHeight: 1.65, margin: "0 0 8px", fontSize: 13 }}>
-                  <span style={{ fontWeight: 600, color: "#e2e8f0" }}>Answer: {mcq.answer}</span>
+              <div className={cn(
+                "mt-3.5 p-3.5 rounded-xl border text-sm",
+                isCorrect
+                  ? "bg-emerald-500/5 border-emerald-500/20"
+                  : "bg-violet-600/5 border-violet-600/20"
+              )}>
+                <p className="text-muted-foreground leading-relaxed mb-2">
+                  <span className="font-semibold text-foreground">Answer: {mcq.answer}</span>
                   {" — "}{mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}
                 </p>
-                {answered.confidence && (() => {
-                  const cs = CONF_STYLE[answered.confidence];
-                  return (
-                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, background: cs.bg, border: `1px solid ${cs.border}`, color: cs.color }}>
-                      {CONFIDENCE_OPTIONS.find(o => o.value === answered.confidence)?.label}
-                    </span>
-                  );
-                })()}
+                {answered.confidence && (
+                  <span className={cn("inline-block px-2.5 py-1 rounded-[7px] text-[11px] font-semibold border", CONF_CLASS[answered.confidence])}>
+                    {CONFIDENCE_OPTIONS.find(o => o.value === answered.confidence)?.label}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -779,42 +742,43 @@ export default function ResultsPage() {
   // ── Performance Sidebar ───────────────────────────────────────────────────────
 
   const PerformanceSidebar = () => (
-    <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, overflow: "hidden" }}>
+    <Card className="overflow-hidden p-0">
       {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="flex border-b border-border">
         {(["next", "insight", "plan", "quiz"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setInsightTab(t)}
-            style={{
-              flex: 1, padding: "11px 0", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase" as const, letterSpacing: "0.06em",
-              background: insightTab === t ? "rgba(123,47,255,0.1)" : "transparent",
-              border: "none", borderBottom: `2px solid ${insightTab === t ? "#7B2FFF" : "transparent"}`,
-              color: insightTab === t ? "#c4b5fd" : "#3a3f60",
-              cursor: "pointer", transition: "all 0.15s", fontFamily: "inherit",
-            }}
+            className={cn(
+              "flex-1 py-2.5 text-[11px] font-bold uppercase tracking-wider border-0 border-b-2 cursor-pointer transition-all",
+              insightTab === t
+                ? "bg-violet-600/10 border-b-violet-500 text-violet-300"
+                : "border-b-transparent text-muted-foreground/40 hover:text-muted-foreground"
+            )}
           >
             {t === "next" ? "Next" : t === "insight" ? "AI" : t === "plan" ? "Plan" : "Quiz"}
           </button>
         ))}
       </div>
 
-      <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="p-4 flex flex-col gap-3.5">
 
         {/* NEXT tab */}
         {insightTab === "next" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="flex flex-col gap-3.5">
             {readiness && (
-              <div style={{ borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", padding: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ fontSize: 12, color: "#64748b" }}>Readiness Score</span>
-                  <span style={{ fontSize: 26, fontWeight: 800, color: "#e2e8f0", lineHeight: 1 }}>{Math.round(readiness.readiness_score)}%</span>
+              <div className="rounded-xl bg-muted/20 border border-border p-3.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-xs text-muted-foreground">Readiness Score</span>
+                  <span className="text-2xl font-extrabold text-foreground leading-none">{Math.round(readiness.readiness_score)}%</span>
                 </div>
-                <div style={{ height: 5, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden", marginBottom: 10 }}>
-                  <div style={{ height: "100%", borderRadius: 999, width: `${readiness.readiness_score}%`, background: "linear-gradient(90deg, #7B2FFF, #00D2FD)", transition: "width 0.8s ease" }} />
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-2.5">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-600 to-cyan-400 transition-all duration-700"
+                    style={{ width: `${readiness.readiness_score}%` }}
+                  />
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#3a3f60" }}>
+                <div className="flex justify-between text-[11px] text-muted-foreground/50">
                   <span>{readiness.weak_topics_count} weak</span>
                   <span>{readiness.strong_topics_count} strong</span>
                   <span>{readiness.total_questions_answered} answered</span>
@@ -823,47 +787,45 @@ export default function ResultsPage() {
             )}
 
             {nextAction ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ borderRadius: 12, background: "rgba(123,47,255,0.07)", border: "1px solid rgba(123,47,255,0.2)", padding: 14 }}>
-                  <p style={{ fontSize: 11, fontWeight: 700, color: "#a78bfa", textTransform: "uppercase" as const, letterSpacing: "0.08em", margin: "0 0 6px" }}>Recommended Now</p>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", margin: nextAction.topic ? "0 0 10px" : 0 }}>{nextAction.next_step}</p>
+              <div className="flex flex-col gap-2.5">
+                <div className="rounded-xl bg-violet-600/5 border border-violet-600/20 p-3.5">
+                  <p className="text-[11px] font-bold text-violet-400 uppercase tracking-widest mb-1.5">Recommended Now</p>
+                  <p className={cn("text-[13px] font-semibold text-foreground", nextAction.topic && "mb-2.5")}>{nextAction.next_step}</p>
                   {nextAction.topic && (
-                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8" }}>
-                      {nextAction.topic}
-                    </span>
+                    <Badge variant="secondary" className="text-[11px]">{nextAction.topic}</Badge>
                   )}
                 </div>
                 {nextAction.reason.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <div className="flex flex-col gap-1.5">
                     {nextAction.reason.map((r, i) => (
-                      <p key={i} style={{ fontSize: 12, color: "#64748b", display: "flex", alignItems: "flex-start", gap: 6, margin: 0 }}>
-                        <ChevronRight size={12} style={{ color: "#7B2FFF", marginTop: 2, flexShrink: 0 }} />{r}
+                      <p key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                        <ChevronRight className="w-3 h-3 text-violet-500 mt-0.5 flex-shrink-0" />{r}
                       </p>
                     ))}
                   </div>
                 )}
                 {nextAction.confidence_gap_alert && (
-                  <div style={{ borderRadius: 9, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.25)", padding: "8px 12px", fontSize: 12, color: "#fb923c", display: "flex", alignItems: "center", gap: 8 }}>
-                    <AlertTriangle size={12} />
+                  <div className="rounded-[9px] bg-orange-400/10 border border-orange-400/25 px-3 py-2 text-xs text-orange-400 flex items-center gap-2">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />
                     Overconfidence pattern detected
                   </div>
                 )}
               </div>
             ) : (
-              <p style={{ fontSize: 12, color: "#3a3f60" }}>Complete a session to get your next action.</p>
+              <p className="text-xs text-muted-foreground/50">Complete a session to get your next action.</p>
             )}
 
             {weakPoints.length > 0 && (
               <div>
-                <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "#3a3f60", margin: "0 0 10px" }}>Weak Topics</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-2.5">Weak Topics</p>
+                <div className="flex flex-col gap-2">
                   {weakPoints.slice(0, 4).map((wp) => (
-                    <div key={wp.topic} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: wp.dangerous_misconception ? "#f87171" : "#fb923c" }} />
-                      <span style={{ fontSize: 12, color: "#64748b", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{wp.topic}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0" }}>{Math.round((wp.accuracy_rate || 0) * 100)}%</span>
+                    <div key={wp.topic} className="flex items-center gap-2">
+                      <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", wp.dangerous_misconception ? "bg-red-400" : "bg-orange-400")} />
+                      <span className="text-xs text-muted-foreground flex-1 truncate">{wp.topic}</span>
+                      <span className="text-xs font-semibold text-foreground">{Math.round((wp.accuracy_rate || 0) * 100)}%</span>
                       {wp.accuracy_trend !== undefined && wp.accuracy_trend !== null && (
-                        <TrendingUp size={12} style={{ color: wp.accuracy_trend >= 0 ? "#4ade80" : "#f87171", transform: wp.accuracy_trend >= 0 ? "none" : "rotate(180deg)", flexShrink: 0 }} />
+                        <TrendingUp className={cn("w-3 h-3 flex-shrink-0", wp.accuracy_trend >= 0 ? "text-emerald-400" : "text-red-400 rotate-180")} />
                       )}
                     </div>
                   ))}
@@ -875,45 +837,41 @@ export default function ResultsPage() {
 
         {/* AI INSIGHT tab */}
         {insightTab === "insight" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>AI Insight</p>
-              <button
-                onClick={handleRefreshInsight}
-                style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#64748b", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
-              >
-                <RefreshCw size={11} />Refresh
-              </button>
+          <div className="flex flex-col gap-3.5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">AI Insight</p>
+              <Button variant="outline" size="sm" onClick={handleRefreshInsight} className="h-7 text-xs gap-1.5">
+                <RefreshCw className="w-3 h-3" />Refresh
+              </Button>
             </div>
             {aiInsightStatus === "loading" && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#64748b" }}>
-                <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />
-                Generating insight...
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />Generating insight...
               </div>
             )}
-            {aiInsightStatus === "no_data"  && <p style={{ fontSize: 12, color: "#3a3f60" }}>Complete at least one session to unlock AI insights.</p>}
-            {aiInsightStatus === "error"    && <p style={{ fontSize: 12, color: "#f87171" }}>Could not load insight. Try refreshing.</p>}
+            {aiInsightStatus === "no_data"  && <p className="text-xs text-muted-foreground/50">Complete at least one session to unlock AI insights.</p>}
+            {aiInsightStatus === "error"    && <p className="text-xs text-red-400">Could not load insight. Try refreshing.</p>}
             {aiInsight && (aiInsightStatus === "fresh" || aiInsightStatus === "stale") && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <span style={{
-                  display: "inline-block", padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em",
-                  background: aiInsight.urgency_level === "critical" ? "rgba(248,113,113,0.12)" : aiInsight.urgency_level === "elevated" ? "rgba(251,146,60,0.12)" : "rgba(74,222,128,0.1)",
-                  color: aiInsight.urgency_level === "critical" ? "#f87171" : aiInsight.urgency_level === "elevated" ? "#fb923c" : "#4ade80",
-                  border: `1px solid ${aiInsight.urgency_level === "critical" ? "rgba(248,113,113,0.25)" : aiInsight.urgency_level === "elevated" ? "rgba(251,146,60,0.25)" : "rgba(74,222,128,0.2)"}`,
-                }}>
+              <div className="flex flex-col gap-3">
+                <span className={cn(
+                  "inline-block px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider border w-fit",
+                  aiInsight.urgency_level === "critical" ? "bg-red-500/10 text-red-400 border-red-500/25"
+                  : aiInsight.urgency_level === "elevated" ? "bg-orange-400/10 text-orange-400 border-orange-400/25"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                )}>
                   {aiInsight.urgency_level}
                 </span>
-                <div style={{ borderRadius: 12, background: "rgba(123,47,255,0.06)", border: "1px solid rgba(123,47,255,0.18)", padding: 14 }}>
-                  <p style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.65, margin: 0 }}>{aiInsight.personalized_message}</p>
+                <div className="rounded-xl bg-violet-600/5 border border-violet-600/20 p-3.5">
+                  <p className="text-[13px] text-foreground leading-relaxed">{aiInsight.personalized_message}</p>
                 </div>
                 <div>
-                  <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "#3a3f60", margin: "0 0 6px" }}>Study Now</p>
-                  <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>{aiInsight.next_topic_to_study}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-1.5">Study Now</p>
+                  <p className="text-[13px] text-muted-foreground">{aiInsight.next_topic_to_study}</p>
                 </div>
                 {aiInsight.critical_insight && (
-                  <div style={{ borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", padding: 12 }}>
-                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "#3a3f60", margin: "0 0 6px" }}>Hidden Pattern</p>
-                    <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>{aiInsight.critical_insight}</p>
+                  <div className="rounded-[10px] bg-muted/20 border border-border p-3">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-1.5">Hidden Pattern</p>
+                    <p className="text-[13px] text-muted-foreground">{aiInsight.critical_insight}</p>
                   </div>
                 )}
               </div>
@@ -923,114 +881,120 @@ export default function ResultsPage() {
 
         {/* PLAN tab */}
         {insightTab === "plan" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "#3a3f60", margin: 0 }}>3-Day Study Plan</p>
+          <div className="flex flex-col gap-3.5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">3-Day Study Plan</p>
             {aiInsight?.daily_plan && aiInsight.daily_plan.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {aiInsight.daily_plan.map((day) => {
-                  const pc = day.priority === "critical" ? "#f87171" : day.priority === "high" ? "#fb923c" : "#4ade80";
-                  const pb = day.priority === "critical" ? "rgba(248,113,113,0.1)" : day.priority === "high" ? "rgba(251,146,60,0.1)" : "rgba(74,222,128,0.08)";
-                  return (
-                    <div key={day.day} style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)", padding: 14 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Day {day.day}</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, background: pb, color: pc, border: `1px solid ${pc}30` }}>{day.priority}</span>
-                          <span style={{ fontSize: 11, color: "#64748b" }}>{day.question_count}q</span>
-                        </div>
+              <div className="flex flex-col gap-2">
+                {aiInsight.daily_plan.map((day) => (
+                  <div key={day.day} className="rounded-xl border border-border bg-muted/10 p-3.5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[13px] font-semibold text-foreground">Day {day.day}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border",
+                          day.priority === "critical" ? "bg-red-500/10 text-red-400 border-red-500/20"
+                          : day.priority === "high"   ? "bg-orange-400/10 text-orange-400 border-orange-400/20"
+                          :                             "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        )}>
+                          {day.priority}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">{day.question_count}q</span>
                       </div>
-                      <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>{day.focus}</p>
                     </div>
-                  );
-                })}
+                    <p className="text-xs text-muted-foreground">{day.focus}</p>
+                  </div>
+                ))}
               </div>
             ) : (
-              <p style={{ fontSize: 12, color: "#3a3f60" }}>Complete a session to generate your personalized plan.</p>
+              <p className="text-xs text-muted-foreground/50">Complete a session to generate your personalized plan.</p>
             )}
           </div>
         )}
 
         {/* QUIZ tab */}
         {insightTab === "quiz" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "#3a3f60", margin: 0 }}>Weekly Review Quiz</p>
+          <div className="flex flex-col gap-3.5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">Weekly Review Quiz</p>
             {weeklyQuiz?.assignment_id ? (
-              <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.025)", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", margin: 0 }}>{weeklyQuiz.questions.length} questions ready</p>
+              <div className="rounded-xl border border-border bg-muted/10 p-4 flex flex-col gap-3">
+                <p className="text-[13px] font-semibold text-foreground">{weeklyQuiz.questions.length} questions ready</p>
                 {weeklyQuiz.weak_topics.length > 0 && (
-                  <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>Covering: {weeklyQuiz.weak_topics.slice(0, 3).join(", ")}</p>
+                  <p className="text-xs text-muted-foreground">Covering: {weeklyQuiz.weak_topics.slice(0, 3).join(", ")}</p>
                 )}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Link href={`/quiz/${lectureId}?weekly=${weeklyQuiz.assignment_id}`} style={{ flex: 1, padding: "9px 0", borderRadius: 10, background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", color: "white", fontWeight: 700, fontSize: 13, textDecoration: "none", textAlign: "center", display: "block" }}>
-                    Start Quiz
-                  </Link>
-                  <button onClick={handleDismissQuiz} style={{ padding: "9px 14px", borderRadius: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#64748b", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                    Dismiss
-                  </button>
+                <div className="flex gap-2">
+                  <Button asChild className="flex-1" size="sm">
+                    <Link href={`/quiz/${lectureId}?weekly=${weeklyQuiz.assignment_id}`}>Start Quiz</Link>
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleDismissQuiz}>Dismiss</Button>
                 </div>
               </div>
             ) : (
-              <div style={{ textAlign: "center", padding: "24px 0" }}>
-                <Target size={28} style={{ color: "#3a3f60", margin: "0 auto 10px", display: "block" }} />
-                <p style={{ fontSize: 12, color: "#3a3f60" }}>Answer 3+ questions in weak topics to unlock your weekly quiz.</p>
+              <div className="text-center py-6">
+                <Target className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2.5" />
+                <p className="text-xs text-muted-foreground/50">Answer 3+ questions in weak topics to unlock your weekly quiz.</p>
               </div>
             )}
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#0d0f1c", color: "#e2e8f0", paddingBottom: isMobile ? 120 : 48 }}>
+    <div className={cn("min-h-screen bg-background text-foreground", isMobile ? "pb-[120px]" : "pb-12")}>
 
       {/* Header */}
-      <header style={{ position: "sticky", top: 0, zIndex: 50, width: "100%", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(13,15,28,0.96)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}>
-        <div style={{ maxWidth: 1280, margin: "0 auto", display: "flex", height: 56, alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-          {/* Logo */}
-          <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-            <div style={{ width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, color: "white", flexShrink: 0 }}>
+      <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
+          <Link href="/dashboard" className="flex items-center gap-2.5 no-underline">
+            <div className="w-8 h-8 rounded-[10px] bg-violet-600 flex items-center justify-center text-[11px] font-black text-white flex-shrink-0">
               cQ
             </div>
-            {!isMobile && <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>CortexQ</span>}
+            {!isMobile && <span className="text-foreground font-bold text-sm">CortexQ</span>}
           </Link>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Save status */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-              {saveStatus === "saving" && <Loader2 size={16} style={{ color: "#94a3b8", animation: "spin 0.8s linear infinite" }} />}
-              {saveStatus === "saved"  && <Cloud    size={18} style={{ color: "#4ade80" }} />}
-              {saveStatus === "idle"   && <CloudOff size={18} style={{ color: "#64748b" }} />}
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl border border-border bg-muted/20 flex items-center justify-center">
+              {saveStatus === "saving" && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+              {saveStatus === "saved"  && <Cloud    className="w-[18px] h-[18px] text-emerald-400" />}
+              {saveStatus === "idle"   && <CloudOff className="w-[18px] h-[18px] text-muted-foreground" />}
             </div>
           </div>
         </div>
         <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: `Lecture #${lectureId}` }]} />
       </header>
 
-      <main style={{ maxWidth: 1280, margin: "0 auto", padding: isMobile ? "20px 14px" : "28px 20px" }}>
+      <main className={cn("max-w-7xl mx-auto", isMobile ? "px-3.5 py-5" : "px-5 py-7")}>
 
         {/* Title */}
-        <div style={{ marginBottom: 24 }}>
-          <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "#e2e8f0", letterSpacing: "-0.02em", margin: "0 0 12px" }}>Study Materials</h1>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 9, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 600, color: "#94a3b8" }}>
-              <BookOpen size={12} />{totalCount} MCQs
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 9, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", fontSize: 12, color: "#64748b" }}>
-              <Calendar size={12} />{new Date(results.created_at).toLocaleDateString()}
-            </span>
+        <div className="mb-6">
+          <h1 className={cn("font-extrabold tracking-tight text-foreground mb-3", isMobile ? "text-[22px]" : "text-[28px]")}>
+            Study Materials
+          </h1>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary" className="gap-1.5 text-xs">
+              <BookOpen className="w-3 h-3" />{totalCount} MCQs
+            </Badge>
+            <Badge variant="outline" className="gap-1.5 text-xs text-muted-foreground">
+              <Calendar className="w-3 h-3" />{new Date(results.created_at).toLocaleDateString()}
+            </Badge>
           </div>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 3, padding: "4px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, width: "fit-content", marginBottom: 24 }}>
+        <div className="flex gap-1 p-1 bg-muted/10 border border-border rounded-xl w-fit mb-6">
           {(["mcqs", "summary", "concepts"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              style={{ padding: "7px 18px", borderRadius: 9, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: activeTab === tab ? "rgba(123,47,255,0.18)" : "transparent", color: activeTab === tab ? "#c4b5fd" : "#64748b", transition: "all 0.18s", fontFamily: "inherit" }}
+              className={cn(
+                "px-4 py-1.5 rounded-[9px] text-[13px] font-semibold border-0 cursor-pointer transition-all",
+                activeTab === tab
+                  ? "bg-violet-600/15 text-violet-300"
+                  : "bg-transparent text-muted-foreground hover:text-foreground"
+              )}
             >
               {tab === "mcqs" ? "MCQs" : tab === "summary" ? "Summary" : "Key Concepts"}
             </button>
@@ -1039,90 +1003,102 @@ export default function ResultsPage() {
 
         {/* Error */}
         {error && error !== "not_found" && (
-          <div style={{ marginBottom: 18, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171", borderRadius: 12, padding: "12px 16px", fontSize: 13 }}>
+          <div className="mb-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl px-4 py-3 text-[13px]">
             {error}
           </div>
         )}
 
         {/* Content grid */}
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "300px 1fr", gap: 20, alignItems: "start" }}>
+        <div className={cn("grid gap-5 items-start", isMobile ? "grid-cols-1" : "grid-cols-[300px_1fr]")}>
 
           {/* Sidebar */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="flex flex-col gap-4">
 
             {/* Score panel */}
-            <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 20 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#3a3f60", margin: "0 0 10px" }}>Performance</p>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 }}>
-                <span style={{ fontSize: 48, fontWeight: 800, color: "#e2e8f0", lineHeight: 1 }}>{score}</span>
-                <span style={{ fontSize: 18, color: "#64748b" }}>/ {totalCount}</span>
-              </div>
-              <div style={{ height: 5, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden", marginBottom: 12 }}>
-                <div style={{ height: "100%", borderRadius: 999, width: `${totalCount > 0 ? (score / totalCount) * 100 : 0}%`, background: "linear-gradient(90deg, #7B2FFF, #00D2FD)", transition: "width 0.8s ease" }} />
-              </div>
-              {answeredCount > 0 && (
-                <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 4px" }}>{scorePercent}% accuracy — {answeredCount}/{totalCount} answered</p>
-              )}
-              {retakeCount > 0 && (
-                <p style={{ fontSize: 12, color: "#3a3f60", margin: "0 0 14px" }}>{retakeCount} retake{retakeCount !== 1 ? "s" : ""} completed</p>
-              )}
-
-              {confirmRetake && (
-                <div style={{ borderRadius: 12, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", padding: 14, marginBottom: 14 }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", margin: "0 0 4px" }}>Clear all answers?</p>
-                  <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px" }}>Your current progress will be lost.</p>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={handleReset} style={{ flex: 1, padding: "8px 0", borderRadius: 10, background: "rgba(248,113,113,0.14)", border: "1px solid rgba(248,113,113,0.28)", color: "#f87171", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Yes, retake</button>
-                    <button onClick={() => setConfirmRetake(false)} style={{ flex: 1, padding: "8px 0", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", color: "#94a3b8", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-                  </div>
+            <Card>
+              <CardHeader className="pb-0">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">Performance</p>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <div className="flex items-baseline gap-2 mb-3.5">
+                  <span className="text-5xl font-extrabold text-foreground leading-none">{score}</span>
+                  <span className="text-lg text-muted-foreground">/ {totalCount}</span>
                 </div>
-              )}
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-3">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-600 to-cyan-400 transition-all duration-700"
+                    style={{ width: `${totalCount > 0 ? (score / totalCount) * 100 : 0}%` }}
+                  />
+                </div>
+                {answeredCount > 0 && (
+                  <p className="text-[13px] text-muted-foreground mb-1">{scorePercent}% accuracy — {answeredCount}/{totalCount} answered</p>
+                )}
+                {retakeCount > 0 && (
+                  <p className="text-xs text-muted-foreground/40 mb-3.5">{retakeCount} retake{retakeCount !== 1 ? "s" : ""} completed</p>
+                )}
 
-              <div style={{ display: "flex", gap: 10, marginTop: confirmRetake ? 0 : 14 }}>
-                <button
-                  onClick={() => answeredCount > 0 ? setConfirmRetake(true) : handleReset()}
-                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px 0", borderRadius: 12, background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", color: "white", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer", fontFamily: "inherit" }}
-                >
-                  <RefreshCw size={13} />Retake
-                </button>
-                <button
-                  onClick={handleToggleShuffle}
-                  style={{ width: 42, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 12, background: shuffleMode ? "linear-gradient(135deg,#7B2FFF,#00D2FD)" : "rgba(255,255,255,0.05)", border: `1px solid ${shuffleMode ? "transparent" : "rgba(255,255,255,0.1)"}`, color: shuffleMode ? "white" : "#64748b", cursor: "pointer", fontFamily: "inherit" }}
-                >
-                  <Shuffle size={14} />
-                </button>
-              </div>
-            </div>
+                {confirmRetake && (
+                  <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-3.5 mb-3.5">
+                    <p className="text-[13px] font-semibold text-foreground mb-1">Clear all answers?</p>
+                    <p className="text-xs text-muted-foreground mb-3">Your current progress will be lost.</p>
+                    <div className="flex gap-2">
+                      <Button onClick={handleReset} variant="destructive" size="sm" className="flex-1">Yes, retake</Button>
+                      <Button onClick={() => setConfirmRetake(false)} variant="outline" size="sm" className="flex-1">Cancel</Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className={cn("flex gap-2.5", confirmRetake ? "" : "mt-3.5")}>
+                  <Button
+                    onClick={() => answeredCount > 0 ? setConfirmRetake(true) : handleReset()}
+                    size="sm"
+                    className="flex-1"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />Retake
+                  </Button>
+                  <Button
+                    onClick={handleToggleShuffle}
+                    variant={shuffleMode ? "default" : "outline"}
+                    size="sm"
+                    className="w-10 px-0"
+                  >
+                    <Shuffle className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
 
             <PerformanceSidebar />
 
             {results.key_concepts.length > 0 && (
-              <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 20 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#3a3f60", margin: "0 0 12px" }}>Key Concepts</p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                  {results.key_concepts.slice(0, 6).map((concept, i) => (
-                    <span key={i} style={{ padding: "4px 11px", borderRadius: 8, fontSize: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8" }}>
-                      {concept}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <Card>
+                <CardHeader className="pb-0">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">Key Concepts</p>
+                </CardHeader>
+                <CardContent className="pt-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {results.key_concepts.slice(0, 6).map((concept, i) => (
+                      <Badge key={i} variant="secondary" className="text-xs">{concept}</Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
 
           {/* Main content */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="flex flex-col gap-4">
 
             {activeTab === "mcqs" && (
               shuffleMode
                 ? <MCQList mcqs={shuffledMcqs} />
                 : Object.entries(grouped).map(([topic, mcqs]) => (
                     <div key={topic}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                        <h3 style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8", margin: 0 }}>{topic}</h3>
-                        <span style={{ padding: "3px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#3a3f60" }}>
+                      <div className="flex items-center gap-2.5 mb-3">
+                        <h3 className="text-sm font-bold text-muted-foreground">{topic}</h3>
+                        <Badge variant="outline" className="text-[11px] text-muted-foreground/50">
                           {mcqs.length} questions
-                        </span>
+                        </Badge>
                       </div>
                       <MCQList mcqs={mcqs as Array<MCQ & { _index: number }>} />
                     </div>
@@ -1130,48 +1106,54 @@ export default function ResultsPage() {
             )}
 
             {activeTab === "summary" && (
-              <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                  <BookOpen size={17} style={{ color: "#7B2FFF" }} />
-                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "#e2e8f0", margin: 0 }}>Summary</h2>
-                </div>
-                <p style={{ color: "#94a3b8", lineHeight: 1.75, margin: 0 }}>{results.summary}</p>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2.5 text-base">
+                    <BookOpen className="w-[17px] h-[17px] text-violet-500" />Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground leading-[1.75]">{results.summary}</p>
+                </CardContent>
+              </Card>
             )}
 
             {activeTab === "concepts" && (
-              <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                  <Lightbulb size={17} style={{ color: "#7B2FFF" }} />
-                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "#e2e8f0", margin: 0 }}>High-Yield Key Concepts</h2>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                  {results.key_concepts.map((concept, i) => (
-                    <span key={i} style={{ padding: "7px 16px", borderRadius: 10, fontSize: 13, background: "rgba(123,47,255,0.08)", border: "1px solid rgba(123,47,255,0.2)", color: "#c4b5fd" }}>
-                      {concept}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2.5 text-base">
+                    <Lightbulb className="w-[17px] h-[17px] text-violet-500" />High-Yield Key Concepts
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-2.5">
+                    {results.key_concepts.map((concept, i) => (
+                      <span key={i} className="px-4 py-1.5 rounded-[10px] text-[13px] bg-violet-600/10 border border-violet-600/20 text-violet-300">
+                        {concept}
+                      </span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* Score banner */}
             {answeredCount === totalCount && totalCount > 0 && activeTab === "mcqs" && (
-              <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderLeft: `3px solid ${scorePercent >= 70 ? "#4ade80" : "#fb923c"}`, borderRadius: 16, padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" as const }}>
+              <div className={cn(
+                "bg-muted/5 border border-border border-l-[3px] rounded-2xl px-5 py-4 flex items-center justify-between gap-4 flex-wrap",
+                scorePercent >= 70 ? "border-l-emerald-400" : "border-l-orange-400"
+              )}>
                 <div>
-                  <p style={{ fontWeight: 700, fontSize: 15, color: "#e2e8f0", margin: "0 0 4px" }}>
+                  <p className="font-bold text-[15px] text-foreground mb-1">
                     {scorePercent >= 70 ? "Great work!" : "Keep studying!"} — {score}/{totalCount} ({scorePercent}%)
                   </p>
-                  <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
+                  <p className="text-[13px] text-muted-foreground">
                     {scorePercent >= 70 ? "You're well-prepared for this topic." : "Review the explanations for questions you missed."}
                   </p>
                 </div>
-                <button
-                  onClick={() => setConfirmRetake(true)}
-                  style={{ padding: "9px 20px", borderRadius: 12, background: "linear-gradient(135deg, #7B2FFF, #00D2FD)", color: "white", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer", flexShrink: 0, fontFamily: "inherit" }}
-                >
+                <Button onClick={() => setConfirmRetake(true)} size="sm" className="flex-shrink-0">
                   Retake
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -1180,35 +1162,48 @@ export default function ResultsPage() {
 
       {/* Mobile tools bar */}
       {isMobile && (
-        <div style={{ position: "fixed", bottom: 56, left: 0, right: 0, zIndex: 40, borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(13,15,28,0.96)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", display: "flex", justifyContent: "space-around", alignItems: "center", padding: "10px 16px", gap: 8 }}>
-          <Link href={`/quiz/${lectureId}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, background: "rgba(123,47,255,0.12)", border: "1px solid rgba(123,47,255,0.25)", color: "#a78bfa", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
-            <Zap size={14} />Quiz
-          </Link>
-          <button onClick={handleToggleShuffle} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, background: shuffleMode ? "linear-gradient(135deg,#7B2FFF,#00D2FD)" : "rgba(255,255,255,0.05)", border: `1px solid ${shuffleMode ? "transparent" : "rgba(255,255,255,0.1)"}`, color: shuffleMode ? "white" : "#64748b", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-            <Shuffle size={14} />{shuffleMode ? "Sectioned" : "Shuffle"}
-          </button>
-          <button onClick={shareToken ? handleCopyLink : handleShare} disabled={sharing} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, background: copied ? "linear-gradient(135deg,#7B2FFF,#00D2FD)" : "rgba(255,255,255,0.05)", border: `1px solid ${copied ? "transparent" : "rgba(255,255,255,0.1)"}`, color: copied ? "white" : "#64748b", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-            {copied ? <Check size={14} /> : <Share2 size={14} />}{copied ? "Copied" : "Share"}
-          </button>
+        <div className="fixed bottom-14 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur flex justify-around items-center px-4 py-2.5 gap-2">
+          <Button asChild variant="secondary" size="sm" className="gap-1.5 text-violet-300 bg-violet-600/10 border-violet-600/25 hover:bg-violet-600/15">
+            <Link href={`/quiz/${lectureId}`}>
+              <Zap className="w-3.5 h-3.5" />Quiz
+            </Link>
+          </Button>
+          <Button
+            onClick={handleToggleShuffle}
+            variant={shuffleMode ? "default" : "outline"}
+            size="sm"
+            className="gap-1.5"
+          >
+            <Shuffle className="w-3.5 h-3.5" />
+            {shuffleMode ? "Sectioned" : "Shuffle"}
+          </Button>
+          <Button
+            onClick={shareToken ? handleCopyLink : handleShare}
+            disabled={sharing}
+            variant={copied ? "default" : "outline"}
+            size="sm"
+            className="gap-1.5"
+          >
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+            {copied ? "Copied" : "Share"}
+          </Button>
         </div>
       )}
 
       {/* Mobile nav */}
       {isMobile && (
-        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 50, borderTop: "1px solid rgba(255,255,255,0.06)", background: "#0d0f1c", display: "flex", justifyContent: "space-around", alignItems: "center", padding: "10px 16px", paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}>
-          <Link href="/dashboard" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: "#3a3f60", textDecoration: "none" }}>
-            <Home size={20} /><span style={{ fontSize: 11 }}>Home</span>
+        <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background flex justify-around items-center px-4 pb-[max(10px,env(safe-area-inset-bottom))] pt-2.5">
+          <Link href="/dashboard" className="flex flex-col items-center gap-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors no-underline">
+            <Home className="w-5 h-5" /><span className="text-[11px]">Home</span>
           </Link>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: "#7B2FFF" }}>
-            <BookOpen size={20} /><span style={{ fontSize: 11 }}>Study</span>
+          <div className="flex flex-col items-center gap-1 text-violet-500">
+            <BookOpen className="w-5 h-5" /><span className="text-[11px]">Study</span>
           </div>
-          <Link href="/analytics" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: "#3a3f60", textDecoration: "none" }}>
-            <BarChart3 size={20} /><span style={{ fontSize: 11 }}>Stats</span>
+          <Link href="/analytics" className="flex flex-col items-center gap-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors no-underline">
+            <BarChart3 className="w-5 h-5" /><span className="text-[11px]">Stats</span>
           </Link>
         </nav>
       )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
