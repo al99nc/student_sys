@@ -31,6 +31,9 @@ services:
       - MINI_APP_URL=${MINI_APP_URL:-https://themcq.xyz/upload}
       - BACKEND_URL=http://84.235.244.210:8000/
       - BOT_SECRET=${BOT_SECRET:-cortexq-bot-secret-2026}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_PHONE=${TELEGRAM_PHONE}
     depends_on:
       - backend
 

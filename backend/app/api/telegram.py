@@ -183,21 +183,6 @@ async def bot_upload_temp(
     return {"token": token}
 
 
-@bot_router.get("/user-plan")
-def bot_user_plan(
-    telegram_user_id: int,
-    _: None = Depends(_check_bot_secret),
-    db: Session = Depends(get_db),
-):
-    """Return the plan for a Telegram user (looked up by synthetic email)."""
-    synthetic_email = f"tg_{telegram_user_id}@telegram.local"
-    user = db.query(User).filter(User.email == synthetic_email).first()
-    if not user:
-        return {"plan": "free", "premium": False}
-    premium = user.plan in ("pro", "enterprise")
-    return {"plan": user.plan, "premium": premium}
-
-
 @bot_router.get("/temp/{token}")
 def bot_fetch_temp(token: str):
     """Mini App fetches the pre-uploaded PDF using the token."""
