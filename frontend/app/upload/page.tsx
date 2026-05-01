@@ -168,7 +168,7 @@ function TelegramAnnouncement() {
 
           <div className="flex flex-col sm:flex-row gap-3">
             <a
-              href="https://t.me/cortexqbot"
+              href="https://t.me/cortexQ_bot"
               target="_blank"
               rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-foreground text-background text-sm font-bold hover:opacity-90 transition-opacity"

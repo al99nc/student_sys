@@ -569,7 +569,10 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const inputLocked = isConvLocked || lockedDueToLimit;
 
   return (
-    <div className="chat-root bg-background text-foreground">
+    <div className="chat-root bg-background text-foreground" style={{ flexDirection: "column" }}>
+      <AppHeader activePage="Coach" />
+
+      <div className="flex flex-1 overflow-hidden">
 
       {/* ── Practice fullscreen modal ────────────────────────────────────────── */}
       {practiceModal && (
@@ -952,6 +955,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
             </p>
           </div>
         </div>
+      </div>
       </div>
 
       <style>{`

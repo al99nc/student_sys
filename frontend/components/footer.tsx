@@ -3,7 +3,6 @@ import { Sparkles } from "lucide-react"
 
 const footerLinks = [
   { label: "About", href: "/about" },
-  { label: "About", href: "/about" },
   { label: "Privacy", href: "#" },
   { label: "Terms", href: "#" },
   { label: "Twitter", href: "#" },
