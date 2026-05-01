@@ -683,7 +683,7 @@ function UploadContent() {
   // ── Main upload page ───────────────────────────────────────────────────────
   return (
     <div className="relative min-h-screen bg-background text-foreground flex flex-col">
-      <TelegramAnnouncement />
+      {!isInTelegram && <TelegramAnnouncement />}
 
       {!isInTelegram && <AppHeader activePage="Upload" />}
 

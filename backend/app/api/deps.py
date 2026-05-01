@@ -1,5 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.core.security import decode_token
@@ -25,14 +26,20 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
-    # Force fresh load of is_admin from DB (avoid cached 0)
-    db.refresh(user, ["is_admin"])
-    
+
+    db.refresh(user)
+
     return user
 
 
-def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
-    if not current_user.is_admin:
+def get_current_admin(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    row = db.execute(
+        text("SELECT is_admin FROM users WHERE id = :id"),
+        {"id": current_user.id},
+    ).fetchone()
+    if not row or not row[0]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user

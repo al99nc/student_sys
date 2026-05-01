@@ -436,6 +436,11 @@ async def send_message(
             refund_credits(db, current_user, cost, commit=True)
         raise
 
+    if answer is None:
+        if cost > 0 and spent:
+            refund_credits(db, current_user, cost, commit=True)
+        raise HTTPException(status_code=503, detail="AI service is not configured")
+
     # ── Attach hard-data enrichments (no AI needed — computed from context) ──────
     if analyzer_decision and analyzer_decision.get("primary_topic"):
         primary_topic = analyzer_decision["primary_topic"]

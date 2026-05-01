@@ -2077,7 +2077,6 @@ Return ONLY this JSON — no markdown, no extra text:
     except httpx.TimeoutException:
         return _chat_fallback(reason="timeout")
     except Exception as e:
-        import logging
         logging.getLogger(__name__).exception("_call_ai_for_chat unexpected error: %s", e)
         return _chat_fallback(reason="unknown")
 

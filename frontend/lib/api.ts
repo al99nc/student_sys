@@ -9,11 +9,13 @@ export const api = axios.create({
   timeout: 15000, // 15 s — prevents requests from hanging forever if backend is unreachable
 });
 
-// Attach token automatically
+// Attach token automatically, but don't override an explicitly-provided Authorization header.
 api.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (!config.headers.Authorization) {
+    const token = getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 });

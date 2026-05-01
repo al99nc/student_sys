@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useEffect, useRef, useState, ReactNode } from "react";
 
 // ── Telegram WebApp type declarations ─────────────────────────────────────
 
@@ -81,6 +81,9 @@ export interface TelegramWebApp {
     notificationOccurred(type: "error" | "success" | "warning"): void;
     selectionChanged(): void;
   };
+  enableClosingConfirmation(): void;
+  disableClosingConfirmation(): void;
+  disableVerticalSwipes(): void;
 }
 
 // ── Context ────────────────────────────────────────────────────────────────
@@ -121,6 +124,32 @@ async function loginWithTelegram(initData: string): Promise<void> {
 
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [webApp, setWebApp] = useState<TelegramWebApp | null>(null);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+
+  // Block the iOS/iPad left-edge swipe-back gesture globally.
+  // touchstart is passive (no lag); touchmove is non-passive so we can preventDefault.
+  useEffect(() => {
+    const onTouchStart = (e: TouchEvent) => {
+      swipeStartX.current = e.touches[0].clientX;
+      swipeStartY.current = e.touches[0].clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!e.cancelable) return;
+      const dx = e.touches[0].clientX - swipeStartX.current;
+      const dy = e.touches[0].clientY - swipeStartY.current;
+      // Swipe starting within 30px of left edge, moving right, more horizontal than vertical
+      if (swipeStartX.current < 30 && dx > 8 && Math.abs(dx) > Math.abs(dy)) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
 
   useEffect(() => {
     const tg = (window as unknown as { Telegram?: { WebApp?: TelegramWebApp } })
@@ -131,6 +160,11 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
     tg.ready();   // removes Telegram's loading state
     tg.expand();  // expand to full height
+
+    // Prevent accidental Mini App close on swipe gestures
+    tg.enableClosingConfirmation?.();
+    tg.disableVerticalSwipes?.();
+
     setWebApp(tg);
 
     // Auto-authenticate: exchange Telegram identity for a cortexQ JWT,
