@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision = '012_add_signup_ip_to_users'
-down_revision = 'f1a1e6dde3fe'
+down_revision = '011'
 branch_labels = None
 depends_on = None
 

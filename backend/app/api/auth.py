@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.models import User
 from app.schemas.auth import UserCreate, UserLogin, Token, UserOut, OnboardingUpdate
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import hash_password, verify_password, create_access_token, needs_rehash
 from app.core.limiter import limiter
 from app.api.deps import get_current_user
 
@@ -41,6 +41,9 @@ def login(request: Request, user_data: UserLogin, db: Session = Depends(get_db))
     user = db.query(User).filter(User.email == user_data.email).first()
     if not user or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if needs_rehash(user.hashed_password):
+        user.hashed_password = hash_password(user_data.password)
+        db.commit()
     token = create_access_token({"sub": str(user.id), "is_admin": bool(user.is_admin)})
     return {"access_token": token, "token_type": "bearer"}
 

@@ -1,9 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSolved } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ArrowLeft, BookOpen, Brain, ChevronDown, ChevronUp,
   Loader2, XCircle, CheckCircle2,
@@ -41,6 +43,150 @@ export default function SolvedPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [supportsWakeLock, setSupportsWakeLock] = useState(false);
+  const [workMinutes, setWorkMinutes] = useState(25);
+  const [breakMinutes, setBreakMinutes] = useState(5);
+  const [timeLeft, setTimeLeft] = useState(25 * 60);
+  const [mode, setMode] = useState<"work" | "break">("work");
+  const [running, setRunning] = useState(false);
+  const [sessionComplete, setSessionComplete] = useState(false);
+  const wakeLockRef = useRef<any>(null);
+  const timerRef = useRef<number | null>(null);
+
+  const requestWakeLock = async () => {
+    if (typeof window === "undefined" || !("wakeLock" in navigator)) return;
+    try {
+      const lock = await (navigator as any).wakeLock.request("screen");
+      wakeLockRef.current = lock;
+      setWakeLockActive(true);
+      lock.addEventListener("release", () => {
+        wakeLockRef.current = null;
+        setWakeLockActive(false);
+      });
+    } catch {
+      setWakeLockActive(false);
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    if (wakeLockRef.current?.release) {
+      try {
+        await wakeLockRef.current.release();
+      } catch {
+        // ignore release failure
+      }
+      wakeLockRef.current = null;
+      setWakeLockActive(false);
+    }
+  };
+
+  const startTimer = async () => {
+    setRunning(true);
+    if (supportsWakeLock) {
+      await requestWakeLock();
+    }
+  };
+
+  const playBeep = () => {
+    if (typeof window === "undefined") return;
+    if (window.AudioContext || (window as any).webkitAudioContext) {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(520, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.28);
+      return;
+    }
+    if (navigator.vibrate) {
+      navigator.vibrate([120, 80, 120]);
+    }
+  };
+
+  const notifyUser = async (title: string, body: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      if ("Notification" in window) {
+        if (Notification.permission === "granted") {
+          new Notification(title, { body });
+          return;
+        }
+        if (Notification.permission !== "denied") {
+          const permission = await Notification.requestPermission();
+          if (permission === "granted") {
+            new Notification(title, { body });
+            return;
+          }
+        }
+      }
+      if (navigator.vibrate) {
+        navigator.vibrate([100, 70, 100]);
+      }
+    } catch {
+      if (navigator.vibrate) {
+        navigator.vibrate([100, 70, 100]);
+      }
+    }
+  };
+
+  const handleTimerComplete = async () => {
+    setRunning(false);
+    setSessionComplete(true);
+    await releaseWakeLock();
+    playBeep();
+    notifyUser(
+      "Pomodoro complete",
+      mode === "work"
+        ? "Time for a break or keep studying."
+        : "Break finished. Ready for the next work session?"
+    );
+  };
+
+  const resetTimer = () => {
+    setRunning(false);
+    setSessionComplete(false);
+    setTimeLeft(mode === "work" ? workMinutes * 60 : breakMinutes * 60);
+  };
+
+  useEffect(() => {
+    const wakeLockSupported = typeof window !== "undefined" && "wakeLock" in navigator;
+    setSupportsWakeLock(wakeLockSupported);
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible" && wakeLockSupported && !wakeLockRef.current) {
+        await requestWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      releaseWakeLock();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (running) {
+      timerRef.current = window.setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            window.clearInterval(timerRef.current!);
+            handleTimerComplete();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+      }
+    };
+  }, [running]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
@@ -77,32 +223,169 @@ export default function SolvedPage() {
   const totalItems = data.mcqs.length + data.essays.length;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0d0f1c", color: "#e2e8f0", fontFamily: "inherit" }}>
-
-      {/* Header */}
-      <header style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(13,15,28,0.92)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "14px 20px", display: "flex", alignItems: "center", gap: 14 }}>
-        <Link href="/lectures" style={{ color: "#94a3b8", display: "flex", alignItems: "center" }}>
-          <ArrowLeft style={{ width: 20, height: 20 }} />
-        </Link>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 11, color: "#7B2FFF", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>Study Guide</p>
-          <p style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.lecture_title}</p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(123,47,255,0.12)", border: "1px solid rgba(123,47,255,0.25)", borderRadius: 8, padding: "5px 10px", flexShrink: 0 }}>
-          <Brain style={{ width: 14, height: 14, color: "#a78bfa" }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: "#a78bfa" }}>{totalItems} Items</span>
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-50 border-b border-border/70 bg-background/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-4 sm:px-6">
+          <Link href="/lectures" className="text-muted-foreground hover:text-foreground transition-colors flex items-center">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-primary">Study Guide</p>
+            <p className="truncate text-base font-semibold text-foreground">{data.lecture_title}</p>
+          </div>
+          <div className="ml-auto inline-flex items-center gap-2 rounded-2xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm text-primary">
+            <Brain className="w-4 h-4" />
+            <span>{totalItems} Items</span>
+          </div>
         </div>
       </header>
 
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px 80px" }}>
+      <main className="mx-auto max-w-7xl px-4 pb-20 pt-6 sm:px-6">
 
         {/* Intro */}
-        <div style={{ background: "rgba(123,47,255,0.08)", border: "1px solid rgba(123,47,255,0.2)", borderRadius: 14, padding: "14px 18px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
-          <BookOpen style={{ width: 20, height: 20, color: "#a78bfa", flexShrink: 0 }} />
-          <p style={{ fontSize: 13, color: "#c4b5fd", lineHeight: 1.5 }}>
-            Study mode — read each question, think of your answer, then expand to reveal the correct answer.
-          </p>
-        </div>
+        <Card className="border-border/80 bg-background/90 shadow-sm mb-6">
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <BookOpen className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Study mode</p>
+                <p className="text-sm text-muted-foreground">Read each question, think through your answer, then expand to reveal the correct solution.</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary">
+              {totalItems} items in this lecture
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Pomodoro timer */}
+        <Card className="border-border/80 bg-background/90 shadow-sm mb-8">
+          <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">Pomodoro timer</CardTitle>
+              <p className="text-sm text-muted-foreground">Keep the screen active while studying and switch cleanly between work and break sessions.</p>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-semibold text-foreground border-border/50 bg-muted/10">
+              <span className={`h-2.5 w-2.5 rounded-full ${wakeLockActive ? "bg-emerald-400" : "bg-slate-500"}`} />
+              <span>
+                {wakeLockActive
+                  ? "Screen awake"
+                  : supportsWakeLock
+                  ? "Tap start to keep awake"
+                  : "Wake lock unsupported"
+                }
+              </span>
+            </div>
+          </CardHeader>
+
+          <CardContent className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-3xl border border-border/70 bg-background/50 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Work</p>
+              <input
+                type="number"
+                min={1}
+                value={workMinutes}
+                onChange={(event) => {
+                  const value = Math.max(1, Number(event.target.value) || 1);
+                  setWorkMinutes(value);
+                  if (!running && mode === "work" && !sessionComplete) {
+                    setTimeLeft(value * 60);
+                  }
+                }}
+                className="mt-3 w-full rounded-2xl border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+            <div className="rounded-3xl border border-border/70 bg-background/50 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Break</p>
+              <input
+                type="number"
+                min={1}
+                value={breakMinutes}
+                onChange={(event) => {
+                  const value = Math.max(1, Number(event.target.value) || 1);
+                  setBreakMinutes(value);
+                  if (!running && mode === "break" && !sessionComplete) {
+                    setTimeLeft(value * 60);
+                  }
+                }}
+                className="mt-3 w-full rounded-2xl border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+            <div className="rounded-3xl border border-border/70 bg-background/50 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Mode</p>
+              <div className="mt-3 text-lg font-semibold text-foreground">{mode === "work" ? "Study" : "Break"}</div>
+            </div>
+            <div className="rounded-3xl border border-border/70 bg-background/50 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Time left</p>
+              <div className="mt-3 text-3xl font-semibold text-foreground">{`${String(Math.floor(timeLeft / 60)).padStart(2, "0")}:${String(timeLeft % 60).padStart(2, "0")}`}</div>
+            </div>
+          </CardContent>
+
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={async () => {
+                if (sessionComplete) {
+                  setSessionComplete(false);
+                  setTimeLeft(mode === "work" ? workMinutes * 60 : breakMinutes * 60);
+                }
+                if (running) {
+                  setRunning(false);
+                } else {
+                  await startTimer();
+                }
+              }}>
+                {running ? "Pause" : "Start"}
+              </Button>
+              <Button variant="outline" onClick={() => resetTimer()}>
+                Reset
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">{running ? "Timer is running" : "Ready to start your session"}</p>
+          </CardContent>
+
+          {sessionComplete && (
+            <CardContent className="rounded-3xl border border-primary/20 bg-primary/10 p-4">
+              <div className="flex flex-col gap-3">
+                <p className="text-sm font-semibold text-foreground">
+                  {mode === "work" ? "Work session complete" : "Break complete"}
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {mode === "work" ? (
+                    <>
+                      <Button onClick={() => {
+                        setMode("break");
+                        setTimeLeft(breakMinutes * 60);
+                        setSessionComplete(false);
+                        setRunning(true);
+                      }}>
+                        Take break
+                      </Button>
+                      <Button variant="outline" onClick={() => {
+                        setMode("work");
+                        setTimeLeft(workMinutes * 60);
+                        setSessionComplete(false);
+                        setRunning(true);
+                      }}>
+                        Keep studying
+                      </Button>
+                    </>
+                  ) : (
+                    <Button onClick={() => {
+                      setMode("work");
+                      setTimeLeft(workMinutes * 60);
+                      setSessionComplete(false);
+                      setRunning(true);
+                    }}>
+                      Continue Pomodoro
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          )}
+        </Card>
 
         {/* ── MCQs section ── */}
         {hasMCQs && (
@@ -251,7 +534,7 @@ export default function SolvedPage() {
             </Link>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

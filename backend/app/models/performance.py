@@ -244,3 +244,32 @@ class StudentAiInsight(Base):
     trigger                         = Column(String(50), nullable=False)   # first_time|background_stale|forced
     questions_answered_at_generation = Column(Integer, nullable=False)
     is_current                      = Column(Boolean, default=True, server_default="1", nullable=False)
+
+
+class FsrsCard(Base):
+    """
+    FSRS spaced-repetition card state for one student × one question.
+    Created on first answer attempt; updated on every subsequent attempt.
+    State values: 0=New, 1=Learning, 2=Review, 3=Relearning (mirrors fsrs.State).
+    """
+    __tablename__ = "fsrs_cards"
+
+    id               = Column(String(36), primary_key=True, default=_uuid)
+    student_id       = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    question_id      = Column(String(36), ForeignKey("mcq_questions.id"), nullable=False, index=True)
+    # Core FSRS memory parameters
+    stability        = Column(Float, nullable=True)    # memory half-life in days
+    difficulty       = Column(Float, nullable=True)    # item difficulty 0–1
+    due_date         = Column(DateTime, nullable=False) # next scheduled review time
+    last_review_date = Column(DateTime, nullable=True)
+    state            = Column(Integer, default=0, server_default="0", nullable=False)
+    reps             = Column(Integer, default=0, server_default="0", nullable=False)
+    lapses           = Column(Integer, default=0, server_default="0", nullable=False)
+    elapsed_days     = Column(Integer, default=0, server_default="0", nullable=False)
+    scheduled_days   = Column(Integer, default=0, server_default="0", nullable=False)
+    created_at       = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at       = Column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "question_id", name="uq_fsrs_card_student_question"),
+    )

@@ -11,10 +11,24 @@ import {
   coachSendMessage,
   coachSearch,
   getEntitlements,
+  coachGeneratePracticeMCQs,
+  coachGeneratePracticeEssays,
+  coachGeneratePractice,
+  coachGenerateEssay,
+  FreshMCQ,
+  EssayQuestion,
   QuizResult,
 } from "@/lib/api";
+import { AppHeader } from "@/components/app-header";
+import {
+  Plus, Search, X, MessageSquare, Trash2, ArrowLeft,
+  Menu, Bot, ArrowUp, Paperclip, Lock, CheckCircle, XCircle,
+  Clock, Lightbulb, History, ArrowRight, Dumbbell,
+  FileText, AlertCircle, ChevronRight, BookOpen, Sparkles, ChevronDown,
+  Eye, Trophy,
+} from "lucide-react";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Conversation {
   id: string;
@@ -56,7 +70,37 @@ interface Message {
   payg_limit?: boolean;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+interface PracticeEntry {
+  msgId: string;
+  type: "mcq" | "essay";
+  topic: string;
+  timestamp: string;
+}
+type PracticeMap = Record<string, PracticeEntry[]>;
+
+interface PracticeModalData {
+  type: "mcq" | "essay";
+  topic: string;
+  count: number;
+  questions: FreshMCQ[] | EssayQuestion[] | null;
+  generating: boolean;
+  error?: string | null;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+const PRACTICE_KEY = "cortexq_practice_map";
+
+function loadPracticeMap(): PracticeMap {
+  if (typeof window === "undefined") return {};
+  try { return JSON.parse(localStorage.getItem(PRACTICE_KEY) ?? "{}"); }
+  catch { return {}; }
+}
+
+function savePracticeMap(map: PracticeMap) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(PRACTICE_KEY, JSON.stringify(map));
+}
 
 function groupByDate(convs: Conversation[]): { label: string; items: Conversation[] }[] {
   const now = new Date();
@@ -68,12 +112,8 @@ function groupByDate(convs: Conversation[]): { label: string; items: Conversatio
   weekAgo.setDate(now.getDate() - 7);
 
   const groups: Record<string, Conversation[]> = {
-    Today: [],
-    Yesterday: [],
-    "This week": [],
-    Older: [],
+    Today: [], Yesterday: [], "This week": [], Older: [],
   };
-
   for (const c of convs) {
     const d = new Date(c.updated_at);
     if (d.toDateString() === today) groups["Today"].push(c);
@@ -81,13 +121,12 @@ function groupByDate(convs: Conversation[]): { label: string; items: Conversatio
     else if (d >= weekAgo) groups["This week"].push(c);
     else groups["Older"].push(c);
   }
-
   return Object.entries(groups)
     .filter(([, items]) => items.length > 0)
     .map(([label, items]) => ({ label, items }));
 }
 
-function urgencyColor(urgency?: string) {
+function urgencyColor(urgency?: string): string {
   switch (urgency) {
     case "critical": return "#f87171";
     case "high":     return "#fb923c";
@@ -99,13 +138,23 @@ function urgencyColor(urgency?: string) {
 function isValid(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    return normalized !== "" && normalized !== "null" && normalized !== "none";
+    const n = value.trim().toLowerCase();
+    return n !== "" && n !== "null" && n !== "none";
   }
   return true;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+const QUICK_REPLIES: Record<string, string[]> = {
+  practice_questions:       ["Start now →", "What am I getting wrong?", "Make it harder"],
+  review_topic:             ["Explain it simply", "Most tested concept?", "3 things I must know"],
+  misconception_correction: ["What's my exact mistake?", "Give me a fixed example", "How common is this?"],
+  spaced_review:            ["When do I review again?", "How fast do I forget?", "Quick refresher"],
+  confidence_building:      ["How do I know I know it?", "Show me my progress", "What does 80% feel like?"],
+  exam_strategy:            ["How does this appear on exams?", "What traps exist?", "Give me an exam question"],
+  off_topic:                ["What should I study today?", "How am I doing?", "Show my weak spots"],
+};
+
+// ── CoachPageInner ─────────────────────────────────────────────────────────────
 
 function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const router = useRouter();
@@ -117,7 +166,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const quizTopic = searchParams.get("quiz_topic");
   const autoQ     = searchParams.get("q");
 
-  // Mobile detection (SSR-safe: default false = desktop render first)
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
@@ -126,52 +174,58 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Sidebar state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Active conversation
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [convTitle, setConvTitle] = useState("New Conversation");
   const [loadingConv, setLoadingConv] = useState(false);
   const [pendingAutoMsg, setPendingAutoMsg] = useState<string | null>(null);
 
-  // User plan
   const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">("free");
   const [creditBalance, setCreditBalance] = useState(0);
   const [extraUsageEnabled, setExtraUsageEnabled] = useState(true);
   const [lockedDueToLimit, setLockedDueToLimit] = useState(false);
   const [countdown, setCountdown] = useState("");
 
-  // Model selector
   const [selectedModel, setSelectedModel] = useState<"llama" | "gemini">("llama");
-
-  // Input state
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
 
+  // Practice map (sidebar indicators)
+  const [practiceMap, setPracticeMap] = useState<PracticeMap>({});
+  const [practicePopoverConvId, setPracticePopoverConvId] = useState<string | null>(null);
+
+  // Standalone practice panel in toolbar
+  const [practiceOpen, setPracticeOpen] = useState(false);
+  const [practiceTopic, setPracticeTopic] = useState("");
+  const [practiceCount, setPracticeCount] = useState(5);
+
+  // Practice modal (fullscreen overlay)
+  const [practiceModal, setPracticeModal] = useState<PracticeModalData | null>(null);
+
   const isFreeUser = userPlan === "free" && creditBalance === 0;
-  // Free users cannot use Gemini — treat as permanently locked
   const isConvLocked = false;
   const lockExpiresAt = null;
 
-  // UI refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch user plan/credits/toggle
+  useEffect(() => {
+    setPracticeMap(loadPracticeMap());
+  }, []);
+
   useEffect(() => {
     getEntitlements().then(res => {
       setUserPlan(res.data.plan ?? "free");
@@ -180,7 +234,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     }).catch(() => {});
   }, []);
 
-  // Countdown timer for conv lock
   useEffect(() => {
     if (!lockExpiresAt) { setCountdown(""); return; }
     const update = () => {
@@ -196,26 +249,19 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockExpiresAt]);
 
-  // Open sidebar by default only on large screens
   useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
-      setSidebarOpen(true);
-    }
+    if (typeof window !== "undefined" && window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
-  // Sync URL to active conversation
   useEffect(() => {
     if (typeof window === "undefined") return;
     const target = activeId ? `/coach/${activeId}` : "/coach";
-    if (window.location.pathname !== target) {
-      window.history.pushState(null, "", target);
-    }
+    if (window.location.pathname !== target) window.history.pushState(null, "", target);
   }, [activeId]);
 
-  // Global keypress → focus textarea (desktop only)
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
-      if (window.innerWidth < 1024) return; // skip on mobile
+      if (window.innerWidth < 1024) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -228,7 +274,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     return () => window.removeEventListener("keydown", handleGlobalKey);
   }, []);
 
-  // Auto-resize textarea
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -236,7 +281,13 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
   }, [input]);
 
-  // ── Search ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (practiceOpen) {
+      const lastMeta = messages.slice().reverse()
+        .find(m => m.ai_metadata?.practice_topic || m.ai_metadata?.topic_focus)?.ai_metadata;
+      setPracticeTopic(lastMeta?.practice_topic ?? lastMeta?.topic_focus ?? convTitle ?? "");
+    }
+  }, [practiceOpen, messages, convTitle]);
 
   const handleSearchChange = (val: string) => {
     setSearchQuery(val);
@@ -246,13 +297,9 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
       try {
         const res = await coachSearch(val.trim());
         setSearchResults(res.data);
-      } catch {
-        setSearchResults([]);
-      }
+      } catch { setSearchResults([]); }
     }, 300);
   };
-
-  // ── Load conversation ────────────────────────────────────────────────────────
 
   const loadConversation = useCallback(async (id: string) => {
     setLoadingConv(true);
@@ -262,28 +309,16 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
       const res = await coachGetConversation(id);
       setMessages(res.data.messages || []);
       setConvTitle(res.data.title || "Conversation");
-    } catch {
-      setMessages([]);
-    } finally {
-      setLoadingConv(false);
-    }
+    } catch { setMessages([]); }
+    finally { setLoadingConv(false); }
   }, []);
-
-  // ── Init ────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
     const pathSegments = typeof window !== "undefined" ? window.location.pathname.split("/") : [];
     const pathConvId = pathSegments[2] || null;
     const targetConvId = returnConvId || pathConvId;
-
-    // Check if coming from MCQ library
     const mcqContext = typeof window !== "undefined" ? sessionStorage.getItem("mcqContext") : null;
-    const fromMcq = typeof window !== "undefined" ? sessionStorage.getItem("fromMcq") === "true" : false;
-
-    if (quizScore || quizTotal) {
-      console.log(`[Coach] Quiz params: score=${quizScore}/${quizTotal} (${quizPct}%)`);
-    }
 
     coachListConversations()
       .then(async res => {
@@ -293,25 +328,21 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
           if (quizScore !== null && quizTotal !== null) {
             const pct = quizPct ?? Math.round((parseInt(quizScore) / parseInt(quizTotal)) * 100);
             const topicPart = quizTopic ? ` on ${quizTopic}` : "";
-            const msg = `I just finished the practice quiz${topicPart} and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`;
-            setPendingAutoMsg(msg);
+            setPendingAutoMsg(`I just finished the practice quiz${topicPart} and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`);
           }
         } else if (autoQ) {
           setPendingAutoMsg(autoQ);
         } else if (mcqContext) {
-          // Prepopulate input with MCQ context
           setInput(`Help me understand this question:\n\n${mcqContext}`);
-          // Clear from session storage
           if (typeof window !== "undefined") {
             sessionStorage.removeItem("mcqContext");
             sessionStorage.removeItem("fromMcq");
           }
         }
       })
-      .catch((err) => console.error("[Coach] Failed to load conversations:", err));
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct, autoQ]);
-
-  // ── Auto-send pending quiz result ────────────────────────────────────────────
 
   useEffect(() => {
     if (!pendingAutoMsg || !activeId || sending) return;
@@ -324,8 +355,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     handleSend(msg, qr);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, pendingAutoMsg]);
-
-  // ── New chat ─────────────────────────────────────────────────────────────────
 
   const handleNewChat = async (forceLlama = false) => {
     if (isMobile) setSidebarOpen(false);
@@ -341,8 +370,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     } catch {}
   };
 
-  // ── Delete conversation ──────────────────────────────────────────────────────
-
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -356,8 +383,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     } catch {}
   };
 
-  // ── Image attachment ─────────────────────────────────────────────────────────
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -365,10 +390,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     e.target.value = "";
   };
 
-  const removeImage = () => {
-    setImagePreview(null);
-    setImageMime(null);
-  };
+  const removeImage = () => { setImagePreview(null); setImageMime(null); };
 
   const applyImageFile = (file: File) => {
     setImageMime(file.type);
@@ -377,7 +399,6 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     reader.readAsDataURL(file);
   };
 
-  // Paste image from clipboard
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -396,12 +417,9 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Send message ─────────────────────────────────────────────────────────────
-
   const handleSend = async (overrideText?: string, quizResult?: QuizResult) => {
     const text = overrideText !== undefined ? overrideText.trim() : input.trim();
     if ((!text && !imagePreview) || sending) return;
-
     const imgData = overrideText !== undefined ? null : imagePreview;
     const imgMime = overrideText !== undefined ? null : imageMime;
     if (overrideText === undefined) { setInput(""); removeImage(); } else { setInput(""); }
@@ -414,10 +432,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
         convId = res.data.id;
         setActiveId(convId);
         setConversations(prev => [res.data, ...prev]);
-      } catch {
-        setSending(false);
-        return;
-      }
+      } catch { setSending(false); return; }
     }
 
     const optimisticUser: Message = {
@@ -428,33 +443,24 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
       image_mime: imgMime,
       created_at: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, optimisticUser]);
-
     const thinkingId = `thinking-${Date.now()}`;
     const thinkingMsg: Message = {
-      id: thinkingId,
-      role: "assistant",
-      content: "…",
-      created_at: new Date().toISOString(),
+      id: thinkingId, role: "assistant", content: "…", created_at: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, thinkingMsg]);
+    setMessages(prev => [...prev, optimisticUser, thinkingMsg]);
 
     try {
       const res = await coachSendMessage(convId!, text, imgData ?? undefined, imgMime ?? undefined, quizResult, selectedModel);
       const { user_message, assistant_message } = res.data;
-
       setMessages(prev =>
-        prev
-          .filter(m => m.id !== optimisticUser.id && m.id !== thinkingId)
-          .concat([user_message, assistant_message])
+        prev.filter(m => m.id !== optimisticUser.id && m.id !== thinkingId)
+            .concat([user_message, assistant_message])
       );
-
       if (assistant_message) {
         setConversations(prev =>
-          prev.map(c =>
-            c.id === convId
-              ? { ...c, updated_at: new Date().toISOString(), title: text.slice(0, 60) || c.title, message_count: (c.message_count || 0) + 2 }
-              : c
+          prev.map(c => c.id === convId
+            ? { ...c, updated_at: new Date().toISOString(), title: text.slice(0, 60) || c.title, message_count: (c.message_count || 0) + 2 }
+            : c
           )
         );
         setConvTitle(text.slice(0, 60) || convTitle);
@@ -467,16 +473,11 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
       const isPayg = typeof detail === "object" && detail?.payg_limit === true;
       if (is403) setLockedDueToLimit(true);
       const errContent = is403
-        ? typeof detail === "object"
-          ? `${detail.message ?? ""} ${detail.hint ?? ""}`.trim()
-          : (detail ?? "You've reached your message limit.")
+        ? (typeof detail === "object" ? `${detail.message ?? ""} ${detail.hint ?? ""}`.trim() : (detail ?? "You've reached your message limit."))
         : "I'm temporarily offline. Check your connection and try again.";
       const errMsg: Message = {
-        id: `err-${Date.now()}`,
-        role: "assistant",
-        content: errContent,
-        created_at: new Date().toISOString(),
-        payg_limit: isPayg,
+        id: `err-${Date.now()}`, role: "assistant", content: errContent,
+        created_at: new Date().toISOString(), payg_limit: isPayg,
       };
       setMessages(prev => [...prev.filter(m => m.id !== optimisticUser.id), optimisticUser, errMsg]);
     } finally {
@@ -485,580 +486,302 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  // ── Displayed conversations ──────────────────────────────────────────────────
+  const handlePracticeGenerated = useCallback((type: "mcq" | "essay", topic: string, msgId: string) => {
+    const convId = activeId;
+    if (!convId) return;
+    setPracticeMap(prev => {
+      const updated: PracticeMap = { ...prev };
+      const existing = updated[convId] ?? [];
+      if (existing.some(e => e.msgId === msgId && e.type === type)) return prev;
+      updated[convId] = [...existing, { msgId, type, topic, timestamp: new Date().toISOString() }];
+      savePracticeMap(updated);
+      return updated;
+    });
+  }, [activeId]);
+
+  // Start practice modal: open in "building" state, call API, transition to countdown
+  const handleStartPractice = useCallback(async (type: "mcq" | "essay", topic: string, count: number) => {
+    const convId = activeId;
+    const buildStart = Date.now();
+
+    setPracticeModal({ type, topic, count, questions: null, generating: true, error: null });
+    setPracticeOpen(false);
+
+    try {
+      let questions: FreshMCQ[] | EssayQuestion[];
+      if (type === "mcq") {
+        const res = convId && topic
+          ? await coachGeneratePracticeMCQs(convId, topic, count)
+          : await coachGeneratePractice(topic || "general", count);
+        questions = res.data.questions;
+      } else {
+        const res = convId && topic
+          ? await coachGeneratePracticeEssays(convId, topic, Math.min(count, 5))
+          : await coachGenerateEssay(topic || "general", 3);
+        questions = res.data.questions;
+      }
+
+      if (!questions || questions.length === 0) throw new Error("No questions were returned.");
+
+      // Ensure the build animation runs for at least 1.8s
+      const elapsed = Date.now() - buildStart;
+      if (elapsed < 1800) await new Promise(r => setTimeout(r, 1800 - elapsed));
+
+      setPracticeModal(prev => prev ? { ...prev, questions, generating: false } : null);
+    } catch (e: unknown) {
+      setPracticeModal(prev => prev ? { ...prev, generating: false, error: (e as Error)?.message || "Generation failed" } : null);
+    }
+  }, [activeId]);
+
+  // Called when PracticeModal closes (with or without a result)
+  const handlePracticeClose = useCallback((result?: { correct: number; total: number; topic: string; type: "mcq" | "essay" }) => {
+    setPracticeModal(null);
+    if (!result) return;
+
+    // Track in practiceMap
+    const practiceId = `modal-${Date.now()}`;
+    handlePracticeGenerated(result.type, result.topic, practiceId);
+
+    // Auto-send score/completion to coach
+    if (result.type === "mcq" && result.total > 0) {
+      const pct = Math.round((result.correct / result.total) * 100);
+      handleSend(`I just scored ${result.correct}/${result.total} (${pct}%) on "${result.topic}" practice MCQs. Give me honest feedback and tell me exactly what to work on next.`);
+    } else if (result.type === "essay") {
+      handleSend(`I just reviewed ${result.total} essay questions on "${result.topic}". Break down the key concepts I need to really master here.`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handlePracticeGenerated]);
+
+  const scrollToMsg = (msgId: string) => {
+    setPracticePopoverConvId(null);
+    if (isMobile) setSidebarOpen(false);
+    setTimeout(() => {
+      document.getElementById(`msg-${msgId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 200);
+  };
 
   const displayedConvs = searchResults ?? conversations;
   const grouped = groupByDate(displayedConvs);
   const hasContent = input.trim() || imagePreview;
   const inputLocked = isConvLocked || lockedDueToLimit;
 
-  // ── Render ────────────────────────────────────────────────────────────────────
-
   return (
-    <div
-      className="chat-root"
-      style={{ backgroundColor: "var(--background)", color: "#e2e8f0" }}
-    >
+    <div className="chat-root bg-background text-foreground">
 
-      {/* ── MOBILE BACKDROP ─────────────────────────────────────────────────── */}
-      {isMobile && sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 40,
-            background: "rgba(0,0,0,0.65)",
-            backdropFilter: "blur(4px)",
-            WebkitBackdropFilter: "blur(4px)",
-          }}
+      {/* ── Practice fullscreen modal ────────────────────────────────────────── */}
+      {practiceModal && (
+        <PracticeModal
+          data={practiceModal}
+          onClose={handlePracticeClose}
         />
+      )}
+
+      {/* Mobile backdrop */}
+      {isMobile && sidebarOpen && (
+        <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm" />
       )}
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────────────── */}
       <aside
-        style={
+        className={`flex flex-col bg-card border-r border-border flex-shrink-0 ${
           isMobile
-            ? {
-                position: "fixed",
-                top: 0,
-                bottom: 0,
-                left: 0,
-                zIndex: 50,
-                width: 300,
-                transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
-                transition: "transform 0.3s cubic-bezier(0.4,0,0.2,1)",
-                display: "flex",
-                flexDirection: "column",
-                backgroundColor: "var(--card)",
-                borderRight: "1px solid var(--border)",
-                boxShadow: sidebarOpen ? "8px 0 40px rgba(0,0,0,0.6)" : "none",
-              }
-            : {
-                flexShrink: 0,
-                display: "flex",
-                flexDirection: "column",
-                width: sidebarOpen ? 260 : 0,
-                minWidth: sidebarOpen ? 260 : 0,
-                overflow: "hidden",
-                transition: "width 0.22s ease, min-width 0.22s ease",
-                backgroundColor: "var(--card)",
-                borderRight: "1px solid var(--border)",
-              }
-        }
+            ? `fixed inset-y-0 left-0 z-50 w-[300px] transition-transform duration-300 ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`
+            : `transition-[width] duration-200 overflow-hidden ${sidebarOpen ? "w-[260px] min-w-[260px]" : "w-0 min-w-0"}`
+        }`}
       >
-        {/* Inner content — fixed 300px wide to prevent layout reflow during animation */}
         <div
-          style={{
-            width: isMobile ? "100%" : 260,
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            paddingTop: isMobile ? "env(safe-area-inset-top)" : 0,
-          }}
+          className="flex flex-col flex-1 overflow-hidden"
+          style={{ width: isMobile ? "100%" : 260, paddingTop: isMobile ? "env(safe-area-inset-top)" : 0 }}
         >
           {/* Sidebar header */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "16px 16px 8px",
-              borderBottom: "1px solid var(--border)",
-            }}
-          >
-            <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 10,
-                  background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                  fontSize: 11,
-                  fontWeight: 900,
-                  color: "white",
-                }}
-              >
-                cQ
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <Link href="/dashboard" className="flex items-center gap-2.5 no-underline">
+              <div className="w-8 h-8 rounded-[10px] bg-foreground flex items-center justify-center flex-shrink-0">
+                <span className="text-background font-black text-[11px]">cQ</span>
               </div>
-              <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>CortexQ</span>
+              <span className="text-foreground font-bold text-sm">cortexQ</span>
             </Link>
             {isMobile && (
-              <button
-                onClick={() => setSidebarOpen(false)}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "rgba(255,255,255,0.05)",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#64748b",
-                }}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+              <button onClick={() => setSidebarOpen(false)} className="w-9 h-9 rounded-lg flex items-center justify-center bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
           {/* New chat button */}
-          <div style={{ padding: "12px 12px 8px" }}>
+          <div className="p-3">
             <button
               onClick={() => handleNewChat()}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 14px",
-                borderRadius: 12,
-                background: "var(--primary)",
-                border: "none",
-                color: "white",
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "opacity 0.15s",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
-              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+              className="w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-foreground text-background text-sm font-semibold hover:opacity-85 transition-opacity"
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 17, color: "white" }}>add</span>
+              <Plus className="w-4 h-4" />
               New conversation
             </button>
           </div>
 
           {/* Search */}
-          <div style={{ padding: "4px 12px 8px" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "9px 12px",
-                borderRadius: 10,
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid var(--border)",
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#3a3f60", flexShrink: 0 }}>search</span>
+          <div className="px-3 pb-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/40 border border-border">
+              <Search className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
               <input
                 value={searchQuery}
                 onChange={e => handleSearchChange(e.target.value)}
                 placeholder="Search…"
-                style={{
-                  flex: 1,
-                  background: "transparent",
-                  border: "none",
-                  outline: "none",
-                  color: "white",
-                  fontSize: 13,
-                }}
+                className="flex-1 bg-transparent border-none outline-none text-foreground text-sm placeholder:text-muted-foreground/40"
               />
               {searchQuery && (
-                <button
-                  onClick={() => handleSearchChange("")}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#4a5280", padding: 0 }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+                <button onClick={() => handleSearchChange("")} className="text-muted-foreground/50 hover:text-foreground">
+                  <X className="w-3 h-3" />
                 </button>
               )}
             </div>
           </div>
 
           {/* Conversation list */}
-          <div
-            className="momentum-scroll"
-            style={{ flex: 1, padding: "0 8px 8px", overflowX: "hidden" }}
-          >
+          <div className="momentum-scroll flex-1 px-2 pb-2 overflow-x-hidden">
             {searchQuery && searchResults?.length === 0 && (
-              <p style={{ color: "#3a3f60", fontSize: 12, padding: "8px 12px" }}>
-                No results for &ldquo;{searchQuery}&rdquo;
-              </p>
+              <p className="text-muted-foreground/40 text-xs px-3 py-2">No results for &ldquo;{searchQuery}&rdquo;</p>
             )}
 
             {grouped.map(group => (
-              <div key={group.label} style={{ marginBottom: 8 }}>
-                <p
-                  style={{
-                    color: "#2a2f50",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    padding: "6px 12px 4px",
-                  }}
-                >
-                  {group.label}
-                </p>
-                {group.items.map(conv => (
-                  <div
-                    key={conv.id}
-                    onClick={() => {
-                      loadConversation(conv.id);
-                      if (isMobile) setSidebarOpen(false);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "9px 10px",
-                      borderRadius: 10,
-                      cursor: "pointer",
-                      background:
-                        activeId === conv.id
-                          ? "rgba(123,47,255,0.14)"
-                          : "transparent",
-                      borderLeft:
-                        activeId === conv.id
-                          ? "2px solid #7B2FFF"
-                          : "2px solid transparent",
-                      transition: "background 0.15s",
-                      position: "relative",
-                    }}
-                    onMouseEnter={e => {
-                      if (activeId !== conv.id)
-                        (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.03)";
-                    }}
-                    onMouseLeave={e => {
-                      if (activeId !== conv.id)
-                        (e.currentTarget as HTMLDivElement).style.background = "transparent";
-                    }}
-                  >
-                    <span
-                      className="material-symbols-outlined"
-                      style={{
-                        fontSize: 15,
-                        flexShrink: 0,
-                        color: activeId === conv.id ? "#7B2FFF" : "#3a3f60",
-                      }}
-                    >
-                      chat
-                    </span>
-                    <p
-                      style={{
-                        flex: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        fontSize: 13,
-                        fontWeight: 500,
-                        color: activeId === conv.id ? "#e2e8f0" : "#94a3b8",
-                      }}
-                    >
-                      {conv.title}
-                    </p>
-                    <button
-                      onClick={e => handleDelete(conv.id, e)}
-                      className="group-hover:opacity-100"
-                      style={{
-                        opacity: 0,
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "#4a5280",
-                        padding: "2px",
-                        flexShrink: 0,
-                        transition: "color 0.15s",
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.opacity = "1";
-                        e.currentTarget.style.color = "#f87171";
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.opacity = "0";
-                        e.currentTarget.style.color = "#4a5280";
-                      }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 14 }}>delete</span>
-                    </button>
-                  </div>
-                ))}
+              <div key={group.label} className="mb-2">
+                <p className="text-muted-foreground/30 text-[10px] font-bold uppercase tracking-widest px-3 py-1.5">{group.label}</p>
+                {group.items.map(conv => {
+                  const hasPractice = (practiceMap[conv.id]?.length ?? 0) > 0;
+                  const isActive = activeId === conv.id;
+                  return (
+                    <div key={conv.id} className="group/conv relative">
+                      <div
+                        onClick={() => { loadConversation(conv.id); if (isMobile) setSidebarOpen(false); }}
+                        className={`flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+                          isActive
+                            ? "bg-muted text-foreground border-l-2 border-foreground/30"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/30 border-l-2 border-transparent"
+                        }`}
+                      >
+                        <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-foreground/70" : "text-muted-foreground/40"}`} />
+                        <p className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium">{conv.title}</p>
+
+                        {hasPractice && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setPracticePopoverConvId(p => p === conv.id ? null : conv.id); }}
+                            title="Has practice sessions"
+                            className="flex-shrink-0"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-orange-400 block" style={{ animation: "practiceDot 2s ease-in-out infinite" }} />
+                          </button>
+                        )}
+
+                        <button
+                          onClick={e => handleDelete(conv.id, e)}
+                          className="opacity-0 group-hover/conv:opacity-100 flex-shrink-0 text-muted-foreground/40 hover:text-destructive transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Practice popover */}
+                      {hasPractice && practicePopoverConvId === conv.id && (
+                        <div className="absolute left-0 right-0 z-50 mx-2 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
+                          <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Practice sessions</span>
+                            <button onClick={() => setPracticePopoverConvId(null)} className="text-muted-foreground/40 hover:text-foreground"><X className="w-3 h-3" /></button>
+                          </div>
+                          <div className="p-2 space-y-1">
+                            {(practiceMap[conv.id] ?? []).map((entry, i) => (
+                              <button
+                                key={i}
+                                onClick={() => scrollToMsg(entry.msgId)}
+                                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-muted/50 transition-colors group/entry"
+                              >
+                                {entry.type === "mcq"
+                                  ? <BookOpen className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                                  : <FileText className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                                }
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-foreground/80 truncate">{entry.topic}</p>
+                                  <p className="text-[10px] text-muted-foreground/40 uppercase">{entry.type === "mcq" ? "MCQs" : "Essays"}</p>
+                                </div>
+                                <ChevronRight className="w-3 h-3 text-muted-foreground/30 group-hover/entry:text-muted-foreground transition-colors flex-shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
 
             {conversations.length === 0 && !searchQuery && (
-              <p style={{ color: "#2a2f50", fontSize: 12, padding: "12px" }}>
-                No conversations yet. Start a new chat!
-              </p>
+              <p className="text-muted-foreground/30 text-xs px-3 py-3">No conversations yet. Start a new chat!</p>
             )}
           </div>
 
-          {/* Dashboard link */}
-          <div
-            style={{
-              padding: "12px",
-              borderTop: "1px solid var(--border)",
-              paddingBottom: "max(12px, env(safe-area-inset-bottom))",
-            }}
-          >
-            <Link
-              href="/dashboard"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "9px 12px",
-                borderRadius: 10,
-                color: "#3a3f60",
-                fontSize: 13,
-                textDecoration: "none",
-                transition: "color 0.15s",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.color = "#94a3b8")}
-              onMouseLeave={e => (e.currentTarget.style.color = "#3a3f60")}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>arrow_back</span>
+          {/* Back link */}
+          <div className="p-3 border-t border-border" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+            <Link href="/dashboard" className="flex items-center gap-2 px-3 py-2 rounded-lg text-muted-foreground/50 text-sm hover:text-muted-foreground transition-colors no-underline">
+              <ArrowLeft className="w-4 h-4" />
               Back to Dashboard
             </Link>
           </div>
         </div>
       </aside>
 
-      {/* ── MAIN AREA ───────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
+      {/* ── MAIN AREA ─────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
-        {/* ── HEADER ──────────────────────────────────────────────────────── */}
-        <header
-          style={{
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "0 12px",
-            height: 56,
-            paddingTop: "env(safe-area-inset-top)",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--background)",
-            zIndex: 10,
-          }}
-        >
-          {/* Menu button */}
-          <button
-            onClick={() => setSidebarOpen(p => !p)}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              color: "#4a5280",
-              transition: "color 0.15s, background 0.15s",
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = "#e2e8f0";
-              e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = "#4a5280";
-              e.currentTarget.style.background = "transparent";
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>menu</span>
+        {/* Header */}
+        <header className="flex-shrink-0 flex items-center gap-2.5 px-3 border-b border-border bg-background z-10" style={{ height: 56, paddingTop: "env(safe-area-inset-top)" }}>
+          <button onClick={() => setSidebarOpen(p => !p)} className="w-10 h-10 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0">
+            <Menu className="w-5 h-5" />
           </button>
 
-          {/* Coach identity */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 9,
-                background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                boxShadow: "0 0 14px rgba(123,47,255,0.35)",
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 15, color: "white" }}>smart_toy</span>
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+              <Bot className="w-4 h-4 text-foreground/70" />
             </div>
-            <div style={{ minWidth: 0 }}>
-              <p
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "white",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  lineHeight: 1.2,
-                }}
-              >
-                {activeId ? convTitle : "CortexQ Coach"}
-              </p>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: "0.07em",
-                  textTransform: "uppercase",
-                  color: "#3a3f60",
-                  lineHeight: 1.2,
-                }}
-              >
-                AI Study Advisor
-              </p>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-foreground truncate leading-tight">{activeId ? convTitle : "cortexQ Coach"}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/40 leading-tight">AI Study Advisor</p>
             </div>
           </div>
 
-          {/* New chat button */}
-          <button
-            onClick={() => handleNewChat()}
-            title="New conversation"
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              background: "rgba(123,47,255,0.12)",
-              border: "1px solid rgba(123,47,255,0.22)",
-              cursor: "pointer",
-              color: "#a78bfa",
-              transition: "opacity 0.15s",
-            }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = "0.75")}
-            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>edit_square</span>
+          <button onClick={() => handleNewChat()} title="New conversation" className="w-10 h-10 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0 border border-border/50">
+            <Plus className="w-4 h-4" />
           </button>
         </header>
 
-        {/* ── MESSAGES ────────────────────────────────────────────────────── */}
-        <div
-          className="momentum-scroll"
-          style={{ flex: 1, padding: "0" }}
-        >
-          <div
-            style={{
-              maxWidth: 700,
-              margin: "0 auto",
-              padding: "20px 16px 16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-            }}
-          >
+        {/* Messages */}
+        <div className="momentum-scroll flex-1">
+          <div className="max-w-[700px] mx-auto px-4 py-5 flex flex-col gap-1">
 
-            {/* Empty state */}
             {!activeId && messages.length === 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "48px 8px 32px",
-                  gap: 24,
-                }}
-              >
-                {/* Glowing icon */}
-                <div
-                  style={{
-                    width: 72,
-                    height: 72,
-                    borderRadius: 22,
-                    background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 8px 40px rgba(123,47,255,0.45), 0 0 0 1px rgba(123,47,255,0.2)",
-                  }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 36, color: "white" }}>smart_toy</span>
+              <div className="flex flex-col items-center justify-center py-16 gap-6">
+                <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
+                  <Bot className="w-8 h-8 text-foreground/50" />
                 </div>
-
-                <div style={{ textAlign: "center" }}>
-                  <h2
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 800,
-                      color: "#e2e8f0",
-                      margin: "0 0 6px",
-                      letterSpacing: "-0.01em",
-                    }}
-                  >
-                    What would you like to study?
-                  </h2>
-                  <p style={{ fontSize: 13, color: "#3a4060", margin: 0, lineHeight: 1.5 }}>
-                    I have full visibility into your performance data.
-                  </p>
+                <div className="text-center">
+                  <h2 className="text-xl font-bold text-foreground mb-1.5">What would you like to study?</h2>
+                  <p className="text-sm text-muted-foreground">I have full visibility into your performance data.</p>
                 </div>
-
-                {/* Suggestion grid */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 10,
-                    width: "100%",
-                    maxWidth: 420,
-                  }}
-                >
+                <div className="grid grid-cols-2 gap-2.5 w-full max-w-[420px]">
                   {[
-                    { icon: "analytics", text: "What are my weakest topics right now?" },
-                    { icon: "event_note", text: "Give me a 10-minute study plan" },
-                    { icon: "psychology", text: "How can I fix my overconfidence?" },
-                    { icon: "priority_high", text: "Which topic should I practice first?" },
+                    { icon: <BookOpen className="w-4 h-4" />, text: "What are my weakest topics right now?" },
+                    { icon: <Sparkles className="w-4 h-4" />, text: "Give me a 10-minute study plan" },
+                    { icon: <Bot className="w-4 h-4" />, text: "How can I fix my overconfidence?" },
+                    { icon: <ArrowRight className="w-4 h-4" />, text: "Which topic should I practice first?" },
                   ].map(({ icon, text }) => (
                     <button
                       key={text}
                       onClick={() => handleSend(text)}
-                      style={{
-                        padding: "14px 14px",
-                        borderRadius: 14,
-                        background: "rgba(255,255,255,0.03)",
-                        border: "1px solid rgba(255,255,255,0.07)",
-                        color: "#64748b",
-                        fontSize: 12,
-                        textAlign: "left",
-                        lineHeight: 1.45,
-                        cursor: "pointer",
-                        transition: "all 0.18s",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 8,
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.borderColor = "rgba(123,47,255,0.35)";
-                        e.currentTarget.style.background = "rgba(123,47,255,0.07)";
-                        e.currentTarget.style.color = "#c4b5fd";
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)";
-                        e.currentTarget.style.background = "rgba(255,255,255,0.03)";
-                        e.currentTarget.style.color = "#64748b";
-                      }}
+                      className="flex flex-col gap-2 p-3.5 rounded-xl bg-card border border-border/50 text-left text-muted-foreground text-xs leading-snug hover:text-foreground hover:border-border hover:bg-muted/30 transition-all"
                     >
-                      <span
-                        className="material-symbols-outlined"
-                        style={{ fontSize: 18, color: "#4a5280" }}
-                      >
-                        {icon}
-                      </span>
+                      <span className="text-muted-foreground/40">{icon}</span>
                       {text}
                     </button>
                   ))}
@@ -1066,243 +789,142 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
               </div>
             )}
 
-            {/* Loading */}
             {loadingConv && (
-              <div style={{ display: "flex", justifyContent: "center", padding: "48px 0" }}>
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "50%",
-                    border: "2px solid rgba(123,47,255,0.2)",
-                    borderTopColor: "#7B2FFF",
-                    animation: "spin 0.8s linear infinite",
-                  }}
-                />
+              <div className="flex justify-center py-12">
+                <div className="w-6 h-6 rounded-full border-2 border-border border-t-foreground/60 animate-spin" />
               </div>
             )}
 
-            {/* Messages */}
             {messages.map(msg => (
               <MessageBubble
                 key={msg.id}
                 msg={msg}
-                convId={activeId}
                 onQuickReply={(text) => handleSend(text)}
+                onStartPractice={handleStartPractice}
+                onPracticeGenerated={(type, topic, msgId) => handlePracticeGenerated(type, topic, msgId)}
               />
             ))}
 
-            <div ref={messagesEndRef} style={{ height: 4 }} />
+            <div ref={messagesEndRef} className="h-1" />
           </div>
         </div>
 
-        {/* ── INPUT AREA ──────────────────────────────────────────────────── */}
-        <div
-          style={{
-            flexShrink: 0,
-            padding: "10px 16px",
-            paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-            borderTop: "1px solid var(--border)",
-            background: "var(--background)",
-          }}
-        >
-          <div style={{ maxWidth: 700, margin: "0 auto" }}>
+        {/* ── INPUT AREA ────────────────────────────────────────────────────── */}
+        <div className="flex-shrink-0 px-4 border-t border-border bg-background" style={{ paddingTop: 10, paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+          <div className="max-w-[700px] mx-auto">
 
-            {/* Model toggle */}
+            {/* Standalone practice panel */}
+            {practiceOpen && (
+              <div className="mb-3 p-3 rounded-xl bg-card border border-border">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Dumbbell className="w-3.5 h-3.5 text-muted-foreground/50" />
+                    <span className="text-xs font-semibold text-foreground/70">Generate Practice</span>
+                  </div>
+                  <button onClick={() => setPracticeOpen(false)} className="text-muted-foreground/40 hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <input
+                  value={practiceTopic}
+                  onChange={e => setPracticeTopic(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && practiceTopic.trim() && handleStartPractice("mcq", practiceTopic.trim(), practiceCount)}
+                  placeholder="Topic (e.g. Cardiology, Pharmacokinetics…)"
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-foreground/30 transition-colors mb-2.5"
+                />
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 p-1 bg-background rounded-lg border border-border">
+                    {[3, 5, 10].map(n => (
+                      <button key={n} onClick={() => setPracticeCount(n)} className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${practiceCount === n ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{n}</button>
+                    ))}
+                  </div>
+                  <div className="flex-1 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => practiceTopic.trim() && handleStartPractice("mcq", practiceTopic.trim(), practiceCount)}
+                      disabled={!practiceTopic.trim()}
+                      className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-foreground text-background text-xs font-semibold hover:opacity-85 transition-opacity disabled:opacity-40"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      MCQs
+                    </button>
+                    <button
+                      onClick={() => practiceTopic.trim() && handleStartPractice("essay", practiceTopic.trim(), practiceCount)}
+                      disabled={!practiceTopic.trim()}
+                      className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-muted border border-border text-foreground/70 text-xs font-semibold hover:text-foreground transition-colors disabled:opacity-40"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      Essays
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Model toggle + practice trigger */}
             {!inputLocked && (
-              <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+              <div className="flex items-center gap-2 mb-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!extraUsageEnabled) return; // toggle off — locked to llama
-                    if (isFreeUser && selectedModel === "llama") return; // Gemini is Pro only
-                    setSelectedModel(m => m === "llama" ? "gemini" : "llama");
-                  }}
-                  title={!extraUsageEnabled ? "Extra usage is off — using Llama 3.3" : isFreeUser ? "Gemini is a Pro feature" : undefined}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    padding: "4px 10px 4px 8px",
-                    borderRadius: 999,
-                    border: `1px solid ${selectedModel === "gemini" ? "rgba(0,210,253,0.35)" : "rgba(255,255,255,0.1)"}`,
-                    background: selectedModel === "gemini" ? "rgba(0,210,253,0.08)" : "rgba(255,255,255,0.04)",
-                    color: selectedModel === "gemini" ? "#00D2FD" : "#64748b",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: (!extraUsageEnabled || isFreeUser) ? "default" : "pointer",
-                    transition: "all 0.18s",
-                    opacity: (!extraUsageEnabled || isFreeUser) ? 0.6 : 1,
-                  }}
+                  onClick={() => { if (!extraUsageEnabled || isFreeUser) return; setSelectedModel(m => m === "llama" ? "gemini" : "llama"); }}
+                  title={!extraUsageEnabled ? "Extra usage is off" : isFreeUser ? "Gemini is a Pro feature" : undefined}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold transition-all ${
+                    selectedModel === "gemini" ? "border-foreground/30 bg-muted text-foreground" : "border-border/50 bg-transparent text-muted-foreground"
+                  } ${(!extraUsageEnabled || isFreeUser) ? "opacity-60 cursor-default" : "cursor-pointer hover:border-border"}`}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 13 }}>
-                    {!extraUsageEnabled ? "psychology" : selectedModel === "gemini" ? "auto_awesome" : "psychology"}
-                  </span>
+                  <Sparkles className="w-3 h-3" />
                   {!extraUsageEnabled ? "Llama 3.3" : selectedModel === "gemini" ? "Gemini 2.5" : "Llama 3.3"}
-                  {!extraUsageEnabled
-                    ? <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.5 }}>toggle_off</span>
-                    : isFreeUser
-                    ? <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.5 }}>lock</span>
-                    : <span className="material-symbols-outlined" style={{ fontSize: 13, opacity: 0.6 }}>unfold_more</span>
-                  }
+                  {isFreeUser && <Lock className="w-2.5 h-2.5 opacity-50" />}
                 </button>
-                {!extraUsageEnabled && (
-                  <span style={{ fontSize: 10, color: "#64748b", marginLeft: 6 }}>
-                    Extra usage off — Llama only
-                  </span>
-                )}
+
+                <button
+                  onClick={() => setPracticeOpen(p => !p)}
+                  className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold transition-all ${
+                    practiceOpen ? "border-foreground/30 bg-muted text-foreground" : "border-border/50 text-muted-foreground hover:text-foreground hover:border-border"
+                  }`}
+                >
+                  <Dumbbell className="w-3 h-3" />
+                  Practice
+                </button>
               </div>
             )}
 
             {/* Image preview */}
             {imagePreview && (
-              <div style={{ marginBottom: 10, position: "relative", display: "inline-block" }}>
+              <div className="mb-2.5 relative inline-block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imagePreview}
-                  alt="attachment"
-                  style={{
-                    height: 72,
-                    borderRadius: 12,
-                    objectFit: "cover",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                  }}
-                />
-                <button
-                  onClick={removeImage}
-                  style={{
-                    position: "absolute",
-                    top: -8,
-                    right: -8,
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    background: "#f87171",
-                    border: "none",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    color: "white",
-                  }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 13 }}>close</span>
+                <img src={imagePreview} alt="attachment" className="h-[72px] rounded-xl object-cover border border-border" />
+                <button onClick={removeImage} className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive flex items-center justify-center text-white">
+                  <X className="w-3 h-3" />
                 </button>
               </div>
             )}
 
             {/* Lock banner */}
             {inputLocked && (
-              <div style={{
-                padding: "14px 16px",
-                borderRadius: 16,
-                background: "rgba(15,15,28,0.97)",
-                border: "1px solid rgba(123,47,255,0.35)",
-                marginBottom: 8,
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 17, color: "#a855f7" }}>lock</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>
-                    Chat limit reached
-                  </span>
-                  {countdown && (
-                    <span style={{ marginLeft: "auto", fontSize: 12, color: "#64748b" }}>
-                      Unlocks in {countdown}
-                    </span>
-                  )}
+              <div className="p-4 rounded-xl bg-card border border-border mb-2">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <Lock className="w-4 h-4 text-muted-foreground/70" />
+                  <span className="text-sm font-semibold text-foreground">Chat limit reached</span>
+                  {countdown && <span className="ml-auto text-xs text-muted-foreground">Unlocks in {countdown}</span>}
                 </div>
-                <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 12px" }}>
-                  Monthly message limit reached. Start a new chat or upgrade to Pro for unlimited messages.
-                </p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={() => handleNewChat(true)}
-                    style={{
-                      flex: 1,
-                      padding: "8px 0",
-                      borderRadius: 10,
-                      background: "rgba(255,255,255,0.07)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      color: "#cbd5e1",
-                      fontWeight: 600,
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
-                  >
-                    New Chat
-                  </button>
-                  <Link
-                    href="/billing"
-                    style={{
-                      flex: 1,
-                      padding: "8px 0",
-                      borderRadius: 10,
-                      background: "linear-gradient(135deg,#7b2fff,#a855f7)",
-                      color: "#fff",
-                      fontWeight: 600,
-                      fontSize: 13,
-                      textDecoration: "none",
-                      textAlign: "center",
-                    }}
-                  >
-                    Get Pro
-                  </Link>
+                <p className="text-xs text-muted-foreground mb-3">Monthly message limit reached. Start a new chat or upgrade to Pro for unlimited messages.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => handleNewChat(true)} className="flex-1 py-2 rounded-lg bg-muted border border-border text-sm font-semibold text-foreground/80 hover:text-foreground transition-colors">New Chat</button>
+                  <Link href="/billing" className="flex-1 py-2 rounded-lg bg-foreground text-background text-sm font-semibold text-center no-underline hover:opacity-85 transition-opacity">Get Pro</Link>
                 </div>
               </div>
             )}
 
             {/* Input pill */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-end",
-                gap: 8,
-                padding: "8px 8px 8px 14px",
-                borderRadius: 26,
-                background: inputLocked ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.05)",
-                border: `1px solid ${inputLocked ? "rgba(255,255,255,0.04)" : "var(--border)"}`,
-                transition: "border-color 0.18s",
-                opacity: inputLocked ? 0.5 : 1,
-                pointerEvents: inputLocked ? "none" : "auto",
-              }}
-            >
-              {/* Attach — locked for free users */}
+            <div className={`flex items-end gap-2 px-3.5 py-2 rounded-[26px] border transition-colors ${inputLocked ? "bg-muted/20 border-border/30 opacity-50 pointer-events-none" : "bg-muted/30 border-border"}`}>
               <button
                 onClick={() => isFreeUser ? null : fileInputRef.current?.click()}
                 title={isFreeUser ? "Image upload is a Pro feature" : "Attach image (or paste)"}
                 disabled={isFreeUser}
-                style={{
-                  flexShrink: 0,
-                  width: 34,
-                  height: 34,
-                  borderRadius: 10,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: isFreeUser ? "not-allowed" : "pointer",
-                  color: isFreeUser ? "#2a2f4a" : "#3a3f60",
-                  marginBottom: 2,
-                  transition: "color 0.15s",
-                  position: "relative",
-                }}
-                onMouseEnter={e => { if (!isFreeUser) e.currentTarget.style.color = "#7B2FFF"; }}
-                onMouseLeave={e => { if (!isFreeUser) e.currentTarget.style.color = "#3a3f60"; }}
+                className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center mb-0.5 transition-colors ${isFreeUser ? "text-muted-foreground/20 cursor-not-allowed" : "text-muted-foreground/50 hover:text-foreground cursor-pointer"}`}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
-                  {isFreeUser ? "lock" : "attach_file"}
-                </span>
+                {isFreeUser ? <Lock className="w-4 h-4" /> : <Paperclip className="w-4 h-4" />}
               </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={handleFileChange}
-              />
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
-              {/* Textarea */}
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -1310,89 +932,30 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
                 onKeyDown={handleKeyDown}
                 placeholder="Ask the coach anything…"
                 rows={1}
-                style={{
-                  flex: 1,
-                  background: "transparent",
-                  border: "none",
-                  outline: "none",
-                  resize: "none",
-                  color: "white",
-                  fontSize: 15,
-                  lineHeight: 1.5,
-                  maxHeight: 140,
-                  overflowY: "auto",
-                  padding: "7px 0",
-                  fontFamily: "inherit",
-                }}
+                className="flex-1 bg-transparent border-none outline-none resize-none text-foreground text-[15px] leading-relaxed max-h-[140px] overflow-y-auto py-1.5 placeholder:text-muted-foreground/40 font-[inherit]"
               />
 
-              {/* Send — active when has content, Claude-style */}
               <button
                 onClick={() => handleSend()}
                 disabled={sending || !hasContent || inputLocked}
-                style={{
-                  flexShrink: 0,
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: hasContent
-                    ? "linear-gradient(135deg, #7B2FFF, #00D2FD)"
-                    : "rgba(255,255,255,0.07)",
-                  border: "none",
-                  cursor: hasContent ? "pointer" : "default",
-                  marginBottom: 2,
-                  transition: "all 0.2s",
-                  opacity: sending ? 0.7 : 1,
-                }}
+                className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center mb-0.5 transition-all ${hasContent ? "bg-foreground text-background hover:opacity-85 cursor-pointer" : "bg-muted text-muted-foreground cursor-default"} ${sending ? "opacity-70" : ""}`}
               >
-                {sending ? (
-                  <div
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: "50%",
-                      border: "2px solid rgba(255,255,255,0.25)",
-                      borderTopColor: "white",
-                      animation: "spin 0.8s linear infinite",
-                    }}
-                  />
-                ) : (
-                  <span
-                    className="material-symbols-outlined"
-                    style={{
-                      fontSize: 18,
-                      color: hasContent ? "white" : "#3a3f60",
-                      fontVariationSettings: "'FILL' 1",
-                    }}
-                  >
-                    arrow_upward
-                  </span>
-                )}
+                {sending
+                  ? <div className="w-3.5 h-3.5 rounded-full border-2 border-background/25 border-t-background animate-spin" />
+                  : <ArrowUp className="w-4 h-4" />
+                }
               </button>
             </div>
 
-            <p
-              style={{
-                fontSize: 10,
-                color: "#1e2238",
-                textAlign: "center",
-                marginTop: 8,
-              }}
-            >
+            <p className="text-[10px] text-muted-foreground/20 text-center mt-2">
               CortexQ Coach uses your real performance data — responses are specific to you.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Spin animation for loading states */}
       <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes coach-bounce {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
           40% { transform: scale(1); opacity: 1; }
@@ -1401,64 +964,612 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
           from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        @keyframes practiceDot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(0.75); }
+        }
+        @keyframes buildBlock {
+          from { opacity: 0; transform: scale(0) rotate(-8deg); }
+          70%  { transform: scale(1.15) rotate(2deg); }
+          to   { opacity: 1; transform: scale(1) rotate(0deg); }
+        }
+        @keyframes blockCollapse {
+          from { opacity: 1; transform: scale(1); }
+          to   { opacity: 0; transform: scale(0) rotate(8deg); }
+        }
+        @keyframes countPop {
+          from { opacity: 0; transform: scale(0.4); }
+          65%  { transform: scale(1.18); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+        @keyframes countFade {
+          from { opacity: 1; transform: scale(1); }
+          to   { opacity: 0; transform: scale(1.5); }
+        }
+        @keyframes owlDrop {
+          from { opacity: 0; transform: translateX(-50%) translateY(-32px) scale(0.6); }
+          65%  { transform: translateX(-50%) translateY(6px) scale(1.12); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+        }
+        @keyframes modalSlideUp {
+          from { opacity: 0; transform: translateY(24px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes indetermBar {
+          0%   { left: -60%; width: 50%; }
+          50%  { left: 60%;  width: 60%; }
+          100% { left: 120%; width: 50%; }
+        }
+        @keyframes optionReveal {
+          from { opacity: 0; transform: translateX(-8px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes feedbackSlide {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes doneScale {
+          from { opacity: 0; transform: scale(0.5); }
+          65%  { transform: scale(1.1); }
+          to   { opacity: 1; transform: scale(1); }
+        }
       `}</style>
     </div>
   );
 }
 
-// ── MessageBubble ─────────────────────────────────────────────────────────────
+// ── PracticeModal ──────────────────────────────────────────────────────────────
+
+function PracticeModal({
+  data,
+  onClose,
+}: {
+  data: PracticeModalData;
+  onClose: (result?: { correct: number; total: number; topic: string; type: "mcq" | "essay" }) => void;
+}) {
+  const [phase, setPhase] = useState<"building" | "error" | "countdown" | "active" | "done">("building");
+  const [countdownNum, setCountdownNum] = useState(3);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [advanceProgress, setAdvanceProgress] = useState(0);
+  const [advancingFromIdx, setAdvancingFromIdx] = useState<number | null>(null);
+  const [essayRevealed, setEssayRevealed] = useState<Record<number, boolean>>({});
+
+  const mcqs = data.type === "mcq" ? (data.questions as FreshMCQ[] | null) : null;
+  const essays = data.type === "essay" ? (data.questions as EssayQuestion[] | null) : null;
+  const totalQ = mcqs?.length ?? essays?.length ?? 0;
+  const correctCount = mcqs ? mcqs.filter((q, i) => answers[i] === q.answer).length : 0;
+  const pct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
+
+  // Transition from building → countdown when generation completes
+  useEffect(() => {
+    if (!data.generating && data.questions && data.questions.length > 0 && phase === "building") {
+      setPhase("countdown");
+    }
+    if (data.error && phase === "building") {
+      setPhase("error");
+    }
+  }, [data.generating, data.questions, data.error, phase]);
+
+  // Countdown 3 → 2 → 1 → active
+  useEffect(() => {
+    if (phase !== "countdown") return;
+    if (countdownNum <= 0) {
+      const t = setTimeout(() => setPhase("active"), 150);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setCountdownNum(n => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [phase, countdownNum]);
+
+  // Auto-advance after answering (MCQ only)
+  useEffect(() => {
+    if (advancingFromIdx === null) return;
+    const duration = 3500;
+    const start = Date.now();
+    const tick = setInterval(() => {
+      const progress = Math.min(((Date.now() - start) / duration) * 100, 100);
+      setAdvanceProgress(progress);
+      if (progress >= 100) {
+        clearInterval(tick);
+        setAdvanceProgress(0);
+        const nextIdx = advancingFromIdx + 1;
+        setAdvancingFromIdx(null);
+        if (nextIdx >= totalQ) {
+          setPhase("done");
+        } else {
+          setCurrentIdx(nextIdx);
+        }
+      }
+    }, 50);
+    return () => clearInterval(tick);
+  }, [advancingFromIdx, totalQ]);
+
+  const handleMCQAnswer = (letter: string) => {
+    if (advancingFromIdx !== null || answers[currentIdx]) return;
+    setAnswers(prev => ({ ...prev, [currentIdx]: letter }));
+    setAdvancingFromIdx(currentIdx);
+  };
+
+  const handleEssayReveal = () => {
+    setEssayRevealed(prev => ({ ...prev, [currentIdx]: true }));
+  };
+
+  const handleEssayNext = () => {
+    setAnswers(prev => ({ ...prev, [currentIdx]: "seen" }));
+    const nextIdx = currentIdx + 1;
+    if (nextIdx >= totalQ) {
+      setPhase("done");
+    } else {
+      setCurrentIdx(nextIdx);
+      setEssayRevealed(prev => ({ ...prev }));
+    }
+  };
+
+  const handleClose = () => {
+    if (phase === "done") {
+      onClose({ correct: correctCount, total: totalQ, topic: data.topic, type: data.type });
+    } else {
+      onClose();
+    }
+  };
+
+  const currentMCQ = mcqs?.[currentIdx];
+  const currentEssay = essays?.[currentIdx];
+  const currentAnswer = answers[currentIdx];
+  const isLastQ = currentIdx === totalQ - 1;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ padding: "16px" }}>
+      {/* Backdrop — coach page visible & blurred at edges */}
+      <div className="absolute inset-0 bg-background/85 backdrop-blur-md" onClick={phase === "error" ? handleClose : undefined} />
+
+      {/* Modal shell */}
+      <div className="relative z-10 w-full max-w-[480px] flex flex-col" style={{ maxHeight: "calc(100dvh - 32px)" }}>
+
+        {/* Floating Bot avatar (Duolingo-style) */}
+        <div
+          className="absolute left-1/2 z-20 w-16 h-16 rounded-full bg-foreground flex items-center justify-center shadow-2xl border-4 border-background"
+          style={{ top: -28, animation: "owlDrop 0.55s cubic-bezier(0.34,1.56,0.64,1) both" }}
+        >
+          <Bot className="w-8 h-8 text-background" />
+        </div>
+
+        {/* Modal card */}
+        <div
+          className="bg-card rounded-3xl border border-border shadow-2xl overflow-hidden flex flex-col"
+          style={{ marginTop: 28, maxHeight: "calc(100dvh - 60px)", animation: "modalSlideUp 0.4s cubic-bezier(0.34,1.56,0.64,1) both" }}
+        >
+
+          {/* ── Building phase ── */}
+          {phase === "building" && <BuildingPhase topic={data.topic} type={data.type} />}
+
+          {/* ── Error phase ── */}
+          {phase === "error" && (
+            <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+              <AlertCircle className="w-10 h-10 text-destructive" />
+              <p className="text-base font-bold text-foreground">Something went wrong</p>
+              <p className="text-sm text-muted-foreground">{data.error ?? "Failed to generate questions. Please try again."}</p>
+              <button onClick={handleClose} className="px-6 py-2.5 rounded-xl bg-foreground text-background font-semibold text-sm hover:opacity-85 transition-opacity">
+                Close
+              </button>
+            </div>
+          )}
+
+          {/* ── Countdown phase ── */}
+          {phase === "countdown" && <CountdownPhase count={countdownNum} />}
+
+          {/* ── Active: MCQ ── */}
+          {phase === "active" && data.type === "mcq" && currentMCQ && (
+            <MCQPhase
+              question={currentMCQ}
+              currentIdx={currentIdx}
+              total={totalQ}
+              selected={currentAnswer}
+              advancing={advancingFromIdx !== null}
+              advanceProgress={advanceProgress}
+              onAnswer={handleMCQAnswer}
+            />
+          )}
+
+          {/* ── Active: Essay ── */}
+          {phase === "active" && data.type === "essay" && currentEssay && (
+            <EssayPhase
+              question={currentEssay}
+              currentIdx={currentIdx}
+              total={totalQ}
+              revealed={!!essayRevealed[currentIdx]}
+              isLast={isLastQ}
+              onReveal={handleEssayReveal}
+              onNext={handleEssayNext}
+            />
+          )}
+
+          {/* ── Done phase ── */}
+          {phase === "done" && (
+            <DonePhase
+              type={data.type}
+              correct={correctCount}
+              total={totalQ}
+              pct={pct}
+              topic={data.topic}
+              onClose={handleClose}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── BuildingPhase ──────────────────────────────────────────────────────────────
+
+function BuildingPhase({ topic, type }: { topic: string; type: "mcq" | "essay" }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-14 gap-7">
+      {/* Assembling blocks */}
+      <div className="grid grid-cols-3 gap-2.5">
+        {Array.from({ length: 9 }).map((_, i) => (
+          <div
+            key={i}
+            className="w-11 h-11 rounded-2xl bg-muted"
+            style={{ animation: `buildBlock 0.5s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.09}s both` }}
+          />
+        ))}
+      </div>
+
+      <div className="text-center">
+        <p className="text-base font-bold text-foreground mb-1">Assembling your practice session…</p>
+        <p className="text-sm text-muted-foreground">
+          Crafting {type === "mcq" ? "MCQs" : "essay questions"} for <span className="text-foreground font-semibold">{topic || "your topic"}</span>
+        </p>
+      </div>
+
+      {/* Indeterminate progress bar */}
+      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden relative">
+        <div
+          className="absolute top-0 h-full bg-foreground/50 rounded-full"
+          style={{ animation: "indetermBar 1.6s ease-in-out infinite" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── CountdownPhase ─────────────────────────────────────────────────────────────
+
+function CountdownPhase({ count }: { count: number }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-16 gap-3">
+      <div
+        key={count}
+        className="text-[96px] font-black text-foreground leading-none tabular-nums select-none"
+        style={{ animation: "countPop 0.45s cubic-bezier(0.34,1.56,0.64,1) both" }}
+      >
+        {count === 0 ? "GO!" : count}
+      </div>
+      <p className="text-sm text-muted-foreground font-medium">
+        {count === 3 ? "Take a breath…" : count === 2 ? "Stay focused…" : count === 1 ? "Almost…" : "Let's go!"}
+      </p>
+    </div>
+  );
+}
+
+// ── MCQPhase ───────────────────────────────────────────────────────────────────
+
+function MCQPhase({
+  question, currentIdx, total, selected, advancing, advanceProgress, onAnswer,
+}: {
+  question: FreshMCQ;
+  currentIdx: number;
+  total: number;
+  selected?: string;
+  advancing: boolean;
+  advanceProgress: number;
+  onAnswer: (letter: string) => void;
+}) {
+  const isCorrect = selected ? selected === question.answer : false;
+
+  return (
+    <div className="flex flex-col overflow-hidden" style={{ maxHeight: "calc(100dvh - 90px)" }}>
+      {/* Top progress */}
+      <div className="px-5 pt-5 pb-3 flex-shrink-0">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-foreground rounded-full transition-all duration-500"
+              style={{ width: `${(currentIdx / total) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums font-semibold flex-shrink-0">
+            {currentIdx + 1} / {total}
+          </span>
+        </div>
+
+        {/* Advance countdown bar */}
+        {advancing && (
+          <div className="h-0.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-none ${isCorrect ? "bg-green-400" : "bg-red-400"}`}
+              style={{ width: `${advanceProgress}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-5 pb-6 momentum-scroll">
+        {/* Question text */}
+        <p className="text-[17px] font-bold text-foreground leading-snug mb-5" style={{ animation: "optionReveal 0.3s ease both" }}>
+          {question.question}
+        </p>
+
+        {/* Options */}
+        <div className="flex flex-col gap-3">
+          {question.options.map((opt, oi) => {
+            const letter = ["A", "B", "C", "D"][oi];
+            const isThisCorrect = letter === question.answer;
+            const isThisSelected = letter === selected;
+
+            let optCls = "bg-muted/30 border-border text-foreground hover:bg-muted/60 hover:border-foreground/20 cursor-pointer";
+            if (selected) {
+              if (isThisCorrect) optCls = "bg-green-500/15 border-green-400/60 text-green-300 scale-[1.01]";
+              else if (isThisSelected) optCls = "bg-red-500/15 border-red-400/60 text-red-300";
+              else optCls = "bg-transparent border-border/20 text-muted-foreground/30 cursor-default";
+            }
+
+            return (
+              <button
+                key={oi}
+                onClick={() => onAnswer(letter)}
+                disabled={!!selected || advancing}
+                className={`w-full flex items-center gap-3 px-4 py-4 rounded-2xl border text-sm font-medium text-left transition-all duration-250 ${optCls}`}
+                style={{ animation: `optionReveal 0.3s ease ${oi * 0.06}s both` }}
+              >
+                <span className="w-7 h-7 rounded-xl bg-background/40 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {letter}
+                </span>
+                <span className="flex-1 leading-snug">{opt.replace(/^[A-D]\.\s*/i, "")}</span>
+                {selected && isThisCorrect && <CheckCircle className="w-5 h-5 flex-shrink-0 text-green-400" />}
+                {selected && isThisSelected && !isThisCorrect && <XCircle className="w-5 h-5 flex-shrink-0 text-red-400" />}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Feedback banner */}
+        {selected && (
+          <div
+            className={`mt-4 py-3 px-4 rounded-2xl text-sm font-bold text-center ${isCorrect ? "bg-green-500/12 text-green-400" : "bg-red-500/12 text-red-400"}`}
+            style={{ animation: "feedbackSlide 0.3s ease both" }}
+          >
+            {isCorrect ? "✓ Correct!" : `✗ Wrong — correct answer: ${question.answer}`}
+            {!isCorrect && question.explanation && (
+              <p className="text-xs font-normal text-muted-foreground mt-1.5 leading-relaxed text-left">{question.explanation}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── EssayPhase ─────────────────────────────────────────────────────────────────
+
+function EssayPhase({
+  question, currentIdx, total, revealed, isLast, onReveal, onNext,
+}: {
+  question: EssayQuestion;
+  currentIdx: number;
+  total: number;
+  revealed: boolean;
+  isLast: boolean;
+  onReveal: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="flex flex-col overflow-hidden" style={{ maxHeight: "calc(100dvh - 90px)" }}>
+      {/* Progress */}
+      <div className="px-5 pt-5 pb-3 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-foreground rounded-full transition-all duration-500"
+              style={{ width: `${(currentIdx / total) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums font-semibold flex-shrink-0">{currentIdx + 1} / {total}</span>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-5 pb-6 momentum-scroll">
+        {/* Question */}
+        <p className="text-[17px] font-bold text-foreground leading-snug mb-4" style={{ animation: "optionReveal 0.3s ease both" }}>
+          {question.question}
+        </p>
+
+        {/* Key points */}
+        {question.key_points && question.key_points.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-5">
+            {question.key_points.map((kp, i) => (
+              <span key={i} className="text-[11px] px-2.5 py-1 rounded-lg bg-muted border border-border text-muted-foreground font-medium">
+                {kp}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Reveal / model answer */}
+        {!revealed ? (
+          <button
+            onClick={onReveal}
+            className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-muted border border-border text-foreground font-semibold text-sm hover:bg-muted/70 transition-colors"
+          >
+            <Eye className="w-4 h-4" />
+            Show Model Answer
+          </button>
+        ) : (
+          <div className="rounded-2xl bg-muted/40 border border-border/60 overflow-hidden" style={{ animation: "feedbackSlide 0.3s ease both" }}>
+            <div className="px-4 py-2.5 border-b border-border/40">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Model Answer</p>
+            </div>
+            <div className="px-4 py-4">
+              <p className="text-sm text-foreground/80 leading-relaxed">{question.ideal_answer}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Next / Finish button */}
+        {revealed && (
+          <button
+            onClick={onNext}
+            className="w-full mt-4 py-4 rounded-2xl bg-foreground text-background font-bold text-sm hover:opacity-85 transition-opacity"
+            style={{ animation: "feedbackSlide 0.3s ease 0.15s both" }}
+          >
+            {isLast ? "Finish Review →" : "Next Question →"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── DonePhase ──────────────────────────────────────────────────────────────────
+
+function DonePhase({ type, correct, total, pct, topic, onClose }: {
+  type: "mcq" | "essay";
+  correct: number;
+  total: number;
+  pct: number;
+  topic: string;
+  onClose: () => void;
+}) {
+  const good = pct >= 70;
+  const mid  = pct >= 50;
+
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-12 gap-5 text-center">
+      {type === "mcq" ? (
+        <>
+          {/* Score */}
+          <div
+            className={`text-[80px] font-black leading-none tabular-nums ${good ? "text-green-400" : mid ? "text-yellow-400" : "text-red-400"}`}
+            style={{ animation: "doneScale 0.6s cubic-bezier(0.34,1.56,0.64,1) both" }}
+          >
+            {pct}%
+          </div>
+
+          <div>
+            <p className="text-lg font-bold text-foreground mb-1">
+              {good ? "Solid work! 🎯" : mid ? "Not bad — keep pushing" : "Room to grow — let's fix it"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {correct} of {total} correct on <span className="text-foreground font-semibold">{topic}</span>
+            </p>
+          </div>
+
+          {/* Score bar */}
+          <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-[width] duration-1000 ease-out ${good ? "bg-green-400" : mid ? "bg-yellow-400" : "bg-red-400"}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ animation: "doneScale 0.6s cubic-bezier(0.34,1.56,0.64,1) both" }}>
+            <Trophy className="w-16 h-16 text-foreground/60 mx-auto" />
+          </div>
+          <div>
+            <p className="text-lg font-bold text-foreground mb-1">Review complete!</p>
+            <p className="text-sm text-muted-foreground">
+              You reviewed {total} essay questions on <span className="text-foreground font-semibold">{topic}</span>
+            </p>
+          </div>
+        </>
+      )}
+
+      <button
+        onClick={onClose}
+        className="w-full py-4 rounded-2xl bg-foreground text-background font-bold text-base hover:opacity-85 transition-opacity"
+        style={{ animation: "feedbackSlide 0.4s ease 0.3s both" }}
+      >
+        Back to Coach →
+      </button>
+
+      <p className="text-xs text-muted-foreground/40">The coach will review your results and suggest what's next</p>
+    </div>
+  );
+}
+
+// ── InlinePracticeCard (trigger only) ─────────────────────────────────────────
+
+function InlinePracticeCard({
+  topic,
+  count,
+  onStartPractice,
+}: {
+  topic: string;
+  count: number;
+  onStartPractice: (type: "mcq" | "essay", topic: string, count: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <Dumbbell className="w-3 h-3 text-muted-foreground/40" />
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">
+          AI Coach Practice{topic ? ` — ${topic}` : ""}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => onStartPractice("mcq", topic, count)}
+          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-foreground text-background font-bold text-sm hover:opacity-85 transition-opacity"
+        >
+          <BookOpen className="w-4 h-4" />
+          MCQs
+        </button>
+        <button
+          onClick={() => onStartPractice("essay", topic, count)}
+          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-muted border border-border text-foreground/70 font-semibold text-sm hover:text-foreground hover:bg-muted/70 transition-colors"
+        >
+          <FileText className="w-4 h-4" />
+          Essays
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── MessageBubble ──────────────────────────────────────────────────────────────
 
 function MessageBubble({
   msg,
-  convId,
   onQuickReply,
+  onStartPractice,
+  onPracticeGenerated,
 }: {
   msg: Message;
-  convId?: string | null;
   onQuickReply?: (text: string) => void;
+  onStartPractice: (type: "mcq" | "essay", topic: string, count: number) => void;
+  onPracticeGenerated?: (type: "mcq" | "essay", topic: string, msgId: string) => void;
 }) {
   const isUser = msg.role === "user";
   const isThinking = msg.content === "…";
   const meta = msg.ai_metadata;
 
-  // ── User bubble ──────────────────────────────────────────────────────────────
   if (isUser) {
     return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          paddingLeft: "12%",
-          animation: "msg-in 0.2s ease",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, maxWidth: "100%" }}>
+      <div id={`msg-${msg.id}`} className="flex justify-end pl-[12%]" style={{ animation: "msg-in 0.2s ease" }}>
+        <div className="flex flex-col items-end gap-1 max-w-full">
           {msg.image_data && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={msg.image_data}
-              alt="attachment"
-              style={{
-                maxHeight: 220,
-                borderRadius: 18,
-                objectFit: "contain",
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
-            />
+            <img src={msg.image_data} alt="attachment" className="max-h-[220px] rounded-[18px] object-contain border border-border" />
           )}
           {msg.content && (
-            <div
-              style={{
-                background: "rgba(123,47,255,0.24)",
-                border: "1px solid rgba(123,47,255,0.28)",
-                borderRadius: "18px 18px 4px 18px",
-                padding: "9px 13px",
-                color: "#e2e8f0",
-                fontSize: 14,
-                lineHeight: 1.5,
-                wordBreak: "break-word",
-              }}
-            >
+            <div className="bg-muted border border-border/50 rounded-[18px_18px_4px_18px] px-3.5 py-2.5 text-foreground text-sm leading-relaxed break-words">
               {msg.content}
             </div>
           )}
@@ -1467,186 +1578,68 @@ function MessageBubble({
     );
   }
 
-  const isStudyAction =
-    isValid(meta?.action) && meta && meta.action && !["greeting", "off_topic"].includes(meta.action);
-  const urgColor = urgencyColor(meta && isValid(meta.urgency) ? meta.urgency : undefined);
-
-  // ── Assistant bubble ─────────────────────────────────────────────────────────
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 7,
-        paddingRight: "4%",
-        animation: "msg-in 0.2s ease",
-      }}
-    >
-      {/* Avatar */}
-      <div
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: 7,
-          background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-          marginTop: 3,
-        }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 13, color: "white" }}>smart_toy</span>
+    <div id={`msg-${msg.id}`} className="flex gap-2 pr-[4%]" style={{ animation: "msg-in 0.2s ease" }}>
+      <div className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Bot className="w-3.5 h-3.5 text-foreground/50" />
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-
-        {/* Thinking dots */}
+      <div className="flex-1 min-w-0 flex flex-col gap-2">
         {isThinking ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "10px 14px",
-              borderRadius: "4px 16px 16px 16px",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.07)",
-              width: "fit-content",
-            }}
-          >
+          <div className="flex items-center gap-1 px-3.5 py-3 rounded-[4px_16px_16px_16px] bg-card border border-border/50 w-fit">
             {[0, 150, 300].map(d => (
-              <div
-                key={d}
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: "#7B2FFF",
-                  animation: `coach-bounce 1.4s ease-in-out ${d}ms infinite`,
-                }}
-              />
+              <div key={d} className="w-1.5 h-1.5 rounded-full bg-foreground/40" style={{ animation: `coach-bounce 1.4s ease-in-out ${d}ms infinite` }} />
             ))}
           </div>
         ) : (
           <>
-            {/* 2. Main text bubble */}
-            <div
-              style={{
-                background: "rgba(255,255,255,0.035)",
-                border: "1px solid rgba(255,255,255,0.07)",
-                borderRadius: "4px 16px 16px 16px",
-                padding: "9px 13px",
-                color: "#cbd5e1",
-                fontSize: 14,
-                lineHeight: 1.6,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              }}
-            >
+            <div className="bg-card border border-border/50 rounded-[4px_16px_16px_16px] px-3.5 py-2.5 text-foreground/80 text-sm leading-relaxed whitespace-pre-wrap break-words">
               {msg.content}
             </div>
 
-            {/* Buy credits CTA for PAYG limit */}
             {msg.payg_limit && (
-              <Link
-                href="/billing"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  marginTop: 10,
-                  padding: "10px 18px",
-                  borderRadius: 12,
-                  background: "linear-gradient(135deg,#7b2fff,#a855f7)",
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: 14,
-                  textDecoration: "none",
-                }}
-              >
+              <Link href="/billing" className="inline-flex items-center gap-2 mt-2 px-4 py-2.5 rounded-xl bg-foreground text-background font-semibold text-sm no-underline hover:opacity-85 transition-opacity">
                 Buy More Credits →
               </Link>
             )}
 
-            {/* 5. Calibration pulse */}
+            {meta && isValid(meta.check_in) && (
+              <CheckInBanner text={meta.check_in!} daysAway={meta.days_since_last} />
+            )}
+
+            {meta && isValid(meta.why_this_matters) && (
+              <WhyThisMatters text={meta.why_this_matters!} urgency={meta.urgency} isRelapse={meta.is_relapse} />
+            )}
+
+            {meta?.mastery_progress && (
+              <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-xl bg-card border border-border/50">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-muted-foreground/50">
+                  <span>Mastery — {meta.mastery_progress.topic}</span>
+                  <span>{meta.mastery_progress.current}/{meta.mastery_progress.target}</span>
+                </div>
+                <MasteryBar current={meta.mastery_progress.current} target={meta.mastery_progress.target} />
+              </div>
+            )}
+
+            {meta?.topic_chain && meta.topic_chain.length > 0 && (
+              <TopicChain chain={meta.topic_chain} />
+            )}
+
             {meta && isValid(meta.calibration_pulse) && (
               <CalibrationPulse text={meta.calibration_pulse!} />
             )}
 
-            {/* 6. Practice CTA - MCQ/Essay choice */}
-            {(meta?.practice_topic || meta?.practice_document_id) && (() => {
-              const topic  = meta.practice_topic ?? meta.topic_focus ?? "";
-              const docId  = meta.practice_document_id ?? 0;
-              const count  = meta.question_count ?? 5;
-              const fromStr = convId ? `&from=${convId}` : "";
-              
-              const mcqHref = topic
-                ? `/coach/practice/mcqs/${convId}?count=${count}&topic=${encodeURIComponent(topic)}`
-                : `/quiz/${docId}?count=${count}${fromStr}`;
-              const essayHref = topic
-                ? `/coach/practice/essay/${convId}?count=3&topic=${encodeURIComponent(topic)}`
-                : `/quiz/${docId}?count=${count}${fromStr}`;
-              
-              return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                      Practice →
-                    </span>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <Link
-                      href={mcqHref}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        padding: "12px 16px",
-                        borderRadius: 14,
-                        background: "linear-gradient(135deg, #7B2FFF, #00D2FD)",
-                        color: "white",
-                        fontWeight: 700,
-                        fontSize: 13,
-                        textDecoration: "none",
-                        boxShadow: "0 4px 20px rgba(123,47,255,0.35)",
-                        transition: "opacity 0.15s, transform 0.15s",
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.opacity = "0.85"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "none"; }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 17 }}>quiz</span>
-                      MCQs
-                    </Link>
-                    <Link
-                      href={essayHref}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        padding: "12px 16px",
-                        borderRadius: 14,
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        color: "#cbd5e1",
-                        fontWeight: 600,
-                        fontSize: 13,
-                        textDecoration: "none",
-                        transition: "all 0.15s",
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.25)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 17 }}>edit_note</span>
-                      Essays
-                    </Link>
-                  </div>
-                </div>
-              );
-            })()}
+            {(meta?.practice_topic || meta?.practice_document_id) && (
+              <InlinePracticeCard
+                topic={meta.practice_topic ?? meta.topic_focus ?? ""}
+                count={meta.question_count ?? 5}
+                onStartPractice={(type, topic, count) => {
+                  onStartPractice(type, topic, count);
+                  onPracticeGenerated?.(type, topic, msg.id);
+                }}
+              />
+            )}
 
-            {/* 8. Quick replies */}
             {meta?.action && meta.action !== "greeting" && onQuickReply && (
               <QuickReplies action={meta.action} topicFocus={meta.topic_focus} onSelect={onQuickReply} />
             )}
@@ -1661,21 +1654,10 @@ function MessageBubble({
 
 function MasteryBar({ current, target }: { current: number; target: number }) {
   const pct = Math.min((current / Math.max(target, 1)) * 100, 100);
-  const fromColor = current >= target ? "#4ade80" : current >= target * 0.65 ? "#facc15" : "#f87171";
-  const toColor   = current >= target ? "#22c55e" : current >= target * 0.65 ? "#eab308" : "#ef4444";
-
+  const color = current >= target ? "#4ade80" : current >= target * 0.65 ? "#facc15" : "#f87171";
   return (
-    <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-      <div
-        style={{
-          height: "100%",
-          borderRadius: 999,
-          width: `${pct}%`,
-          background: `linear-gradient(90deg, ${fromColor}, ${toColor})`,
-          boxShadow: `0 0 8px ${fromColor}60`,
-          transition: "width 0.8s cubic-bezier(0.4,0,0.2,1)",
-        }}
-      />
+    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+      <div className="h-full rounded-full transition-[width] duration-700 ease-out" style={{ width: `${pct}%`, background: color }} />
     </div>
   );
 }
@@ -1684,29 +1666,13 @@ function MasteryBar({ current, target }: { current: number; target: number }) {
 
 function TopicChain({ chain }: { chain: string[] }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#2a3050" }}>
-        Fix this → unlocks
-      </span>
-      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/30">Fix this → unlocks</span>
+      <div className="flex items-center gap-1.5 flex-wrap">
         {chain.map((topic, i) => (
-          <div key={topic} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            {i > 0 && (
-              <span className="material-symbols-outlined" style={{ fontSize: 11, color: "#2a3050" }}>arrow_forward</span>
-            )}
-            <span
-              style={{
-                padding: "3px 10px",
-                borderRadius: 8,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "rgba(0,210,253,0.08)",
-                color: "#67e8f9",
-                border: "1px solid rgba(0,210,253,0.18)",
-              }}
-            >
-              {topic}
-            </span>
+          <div key={topic} className="flex items-center gap-1.5">
+            {i > 0 && <ArrowRight className="w-3 h-3 text-muted-foreground/30" />}
+            <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-muted border border-border text-muted-foreground">{topic}</span>
           </div>
         ))}
       </div>
@@ -1718,60 +1684,23 @@ function TopicChain({ chain }: { chain: string[] }) {
 
 function WhyThisMatters({ text, urgency, isRelapse }: { text: string; urgency?: string; isRelapse?: boolean }) {
   const [open, setOpen] = useState(false);
-
-  const accentColor =
-    urgency === "critical" ? "#f87171" :
-    urgency === "high"     ? "#fb923c" :
-    urgency === "medium"   ? "#facc15" :
-                             "#4ade80";
+  const accentColor = urgencyColor(urgency);
 
   return (
-    <div
-      style={{
-        borderRadius: 12,
-        overflow: "hidden",
-        border: `1px solid ${accentColor}20`,
-        background: `${accentColor}08`,
-      }}
-    >
-      <button
-        onClick={() => setOpen(p => !p)}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "10px 14px",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 16, color: accentColor, flexShrink: 0 }}>
-          {isRelapse ? "history" : "lightbulb"}
-        </span>
-        <p style={{ flex: 1, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: `${accentColor}cc`, margin: 0 }}>
+    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${accentColor}20`, background: `${accentColor}08` }}>
+      <button onClick={() => setOpen(p => !p)} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 bg-transparent border-none cursor-pointer text-left">
+        {isRelapse
+          ? <History className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
+          : <Lightbulb className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
+        }
+        <p className="flex-1 text-[10px] font-bold uppercase tracking-widest m-0" style={{ color: `${accentColor}cc` }}>
           {isRelapse ? "You had this — why it slipped" : "Why this topic right now"}
         </p>
-        <span
-          className="material-symbols-outlined"
-          style={{
-            fontSize: 16,
-            color: `${accentColor}80`,
-            flexShrink: 0,
-            transition: "transform 0.2s",
-            transform: open ? "rotate(180deg)" : "none",
-          }}
-        >
-          expand_more
-        </span>
+        <ChevronDown className="w-4 h-4 flex-shrink-0 transition-transform" style={{ color: `${accentColor}80`, transform: open ? "rotate(180deg)" : "none" }} />
       </button>
       {open && (
-        <div style={{ padding: "0 14px 14px", borderTop: `1px solid ${accentColor}12` }}>
-          <p style={{ fontSize: 13, lineHeight: 1.65, color: "#94a3b8", paddingTop: 10, margin: 0 }}>
-            {text}
-          </p>
+        <div className="px-3.5 pb-3.5" style={{ borderTop: `1px solid ${accentColor}12` }}>
+          <p className="text-sm leading-relaxed text-muted-foreground pt-2.5 m-0">{text}</p>
         </div>
       )}
     </div>
@@ -1782,35 +1711,13 @@ function WhyThisMatters({ text, urgency, isRelapse }: { text: string; urgency?: 
 
 function CalibrationPulse({ text }: { text: string }) {
   return (
-    <div
-      style={{
-        borderRadius: 14,
-        padding: "13px 16px",
-        background: "rgba(251,146,60,0.07)",
-        border: "1px solid rgba(251,146,60,0.2)",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-      }}
-    >
-      <div style={{ flexShrink: 0, paddingTop: 4 }}>
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "#fb923c",
-            animation: "pulse-ring 1.6s ease-out infinite",
-          }}
-        />
+    <div className="rounded-xl px-4 py-3 bg-orange-500/10 border border-orange-500/20 flex items-start gap-3">
+      <div className="flex-shrink-0 mt-1">
+        <div className="w-2 h-2 rounded-full bg-orange-400" style={{ animation: "pulse-ring 1.6s ease-out infinite" }} />
       </div>
       <div>
-        <p style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "#fb923c", marginBottom: 6, margin: "0 0 6px" }}>
-          Calibration alert
-        </p>
-        <p style={{ fontSize: 13, lineHeight: 1.6, color: "#fed7aa", margin: 0 }}>
-          {text}
-        </p>
+        <p className="text-[10px] font-extrabold uppercase tracking-widest text-orange-400 mb-1.5 m-0">Calibration alert</p>
+        <p className="text-sm leading-relaxed text-orange-200/80 m-0">{text}</p>
       </div>
     </div>
   );
@@ -1820,48 +1727,20 @@ function CalibrationPulse({ text }: { text: string }) {
 
 function CheckInBanner({ text, daysAway }: { text: string; daysAway?: number | null }) {
   const [dismissed, setDismissed] = useState(false);
-  const displayDaysAway = typeof daysAway === "number" && Number.isFinite(daysAway) ? daysAway : undefined;
+  const displayDays = typeof daysAway === "number" && Number.isFinite(daysAway) ? daysAway : undefined;
   if (dismissed) return null;
 
   return (
-    <div
-      style={{
-        borderRadius: 12,
-        padding: "10px 14px",
-        background: "rgba(100,116,139,0.07)",
-        border: "1px solid rgba(100,116,139,0.14)",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-      }}
-    >
-      <span className="material-symbols-outlined" style={{ fontSize: 15, color: "#475569", flexShrink: 0 }}>schedule</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#475569", marginRight: 8 }}>
-          {displayDaysAway != null ? `${displayDaysAway}d away` : "Welcome back"}
+    <div className="rounded-xl px-3.5 py-2.5 bg-card border border-border/50 flex items-center gap-2.5">
+      <Clock className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40 mr-2">
+          {displayDays != null ? `${displayDays}d away` : "Welcome back"}
         </span>
-        <span style={{ fontSize: 12, color: "#64748b" }}>{text}</span>
+        <span className="text-xs text-muted-foreground/60">{text}</span>
       </div>
-      <button
-        onClick={() => setDismissed(true)}
-        style={{
-          flexShrink: 0,
-          width: 28,
-          height: 28,
-          borderRadius: 8,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          color: "#334155",
-          transition: "color 0.15s",
-        }}
-        onMouseEnter={e => (e.currentTarget.style.color = "#64748b")}
-        onMouseLeave={e => (e.currentTarget.style.color = "#334155")}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+      <button onClick={() => setDismissed(true)} className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground/30 hover:text-muted-foreground transition-colors">
+        <X className="w-3.5 h-3.5" />
       </button>
     </div>
   );
@@ -1869,69 +1748,19 @@ function CheckInBanner({ text, daysAway }: { text: string; daysAway?: number | n
 
 // ── QuickReplies ──────────────────────────────────────────────────────────────
 
-const QUICK_REPLIES: Record<string, string[]> = {
-  practice_questions:       ["Start now →", "What am I getting wrong?", "Make it harder"],
-  review_topic:             ["Explain it simply", "Most tested concept?", "3 things I must know"],
-  misconception_correction: ["What's my exact mistake?", "Give me a fixed example", "How common is this?"],
-  spaced_review:            ["When do I review again?", "How fast do I forget?", "Quick refresher"],
-  confidence_building:      ["How do I know I know it?", "Show me my progress", "What does 80% feel like?"],
-  exam_strategy:            ["How does this appear on exams?", "What traps exist?", "Give me an exam question"],
-  off_topic:                ["What should I study today?", "How am I doing?", "Show my weak spots"],
-};
-
-function QuickReplies({
-  action,
-  topicFocus,
-  onSelect,
-}: {
-  action: string;
-  topicFocus?: string | null;
-  onSelect: (text: string) => void;
+function QuickReplies({ action, topicFocus, onSelect }: {
+  action: string; topicFocus?: string | null; onSelect: (text: string) => void;
 }) {
   const base = QUICK_REPLIES[action] ?? QUICK_REPLIES["off_topic"];
   const replies = base.map(r => (topicFocus ? r.replace(/\bthis\b/gi, topicFocus) : r));
 
   return (
-    <div
-      className="momentum-scroll"
-      style={{
-        display: "flex",
-        gap: 7,
-        overflowX: "auto",
-        paddingBottom: 4,
-        paddingTop: 2,
-        scrollbarWidth: "none",
-        msOverflowStyle: "none",
-      }}
-    >
+    <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
       {replies.map((reply, i) => (
         <button
           key={i}
           onClick={() => onSelect(reply)}
-          style={{
-            flexShrink: 0,
-            padding: "7px 15px",
-            borderRadius: 999,
-            fontSize: 12,
-            fontWeight: 500,
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.09)",
-            color: "#64748b",
-            whiteSpace: "nowrap",
-            cursor: "pointer",
-            transition: "all 0.18s",
-            fontFamily: "inherit",
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = "rgba(123,47,255,0.1)";
-            e.currentTarget.style.borderColor = "rgba(123,47,255,0.35)";
-            e.currentTarget.style.color = "#c4b5fd";
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)";
-            e.currentTarget.style.color = "#64748b";
-          }}
+          className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium bg-card border border-border/50 text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground hover:border-border hover:bg-muted/30 transition-all font-[inherit]"
         >
           {reply}
         </button>
@@ -1940,10 +1769,16 @@ function QuickReplies({
   );
 }
 
-export default function CoachPage() {
+// ── Page export ────────────────────────────────────────────────────────────────
+
+export default function CoachPage({ initialConvId }: { initialConvId?: string } = {}) {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-background"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" /></div>}>
-      <CoachPageInner />
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+      </div>
+    }>
+      <CoachPageInner initialConvId={initialConvId} />
     </Suspense>
   );
 }

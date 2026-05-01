@@ -17,6 +17,7 @@ import {
   type UserOut,
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { StepNav } from "@/components/step-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowLeft, Info, Loader2 } from "lucide-react";
@@ -204,16 +205,18 @@ function BillingContent() {
   return (
     <div className="relative min-h-screen bg-background text-foreground">
       <div className="grain-overlay" />
-      <header className="fixed top-0 w-full flex items-center px-6 py-4 bg-card/80 backdrop-blur-xl z-50 border-b border-border/50 gap-4">
-        <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <span className="text-lg font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">
-          Credits &amp; Usage
-        </span>
+      <header className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border/50">
+        <div className="max-w-7xl mx-auto flex h-14 items-center px-4 sm:px-6 gap-3">
+          <Link href="/dashboard" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <span className="text-xl font-bold text-foreground">cortexQ</span>
+          <span className="text-sm text-muted-foreground">· Credits &amp; Usage</span>
+        </div>
+        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Credits & Usage" }]} />
       </header>
 
-      <main className="pt-24 pb-16 px-4 max-w-2xl mx-auto space-y-px">
+      <main className="pt-8 pb-16 px-4 max-w-2xl mx-auto space-y-px">
         {banner === "success" && (
           <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
             Payment received — credits will appear in your balance within a minute.

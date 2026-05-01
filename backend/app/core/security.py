@@ -4,13 +4,23 @@ import bcrypt
 from jose import JWTError, jwt
 from app.core.config import settings
 
+BCRYPT_ROUNDS = 6
+
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+
+
+def needs_rehash(hashed_password: str) -> bool:
+    try:
+        cost = int(hashed_password.split("$")[2])
+        return cost > BCRYPT_ROUNDS
+    except (IndexError, ValueError):
+        return False
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

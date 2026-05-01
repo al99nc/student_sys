@@ -2,6 +2,8 @@ import Link from "next/link"
 import { Sparkles } from "lucide-react"
 
 const footerLinks = [
+  { label: "About", href: "/about" },
+  { label: "About", href: "/about" },
   { label: "Privacy", href: "#" },
   { label: "Terms", href: "#" },
   { label: "Twitter", href: "#" },
@@ -25,15 +27,22 @@ export function Footer() {
 
           {/* Links */}
           <nav className="flex flex-wrap items-center justify-center gap-6">
-            {footerLinks.map((link) => (
-              <Link
-                key={link.label}
-                href={link.href}
-                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {link.label}
-              </Link>
-            ))}
+  {footerLinks.map((link) => {
+    const isButton = link.label === "About";
+    return (
+      <Link
+        key={link.label}
+        href={link.href}
+        className={
+          isButton
+            ? "text-sm bg-primary text-foreground px-3 py-1.5 rounded-md hover:bg-primary-600"
+            : "text-sm text-muted-foreground transition-colors hover:text-foreground"
+        }
+      >
+        {link.label}
+      </Link>
+    );
+  })}
           </nav>
 
           {/* Copyright */}

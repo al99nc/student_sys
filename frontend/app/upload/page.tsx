@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import {
   uploadLecture,
   uploadText,
@@ -15,13 +14,14 @@ import {
 import CustomizeBar from "@/components/customize-bar";
 import { isAuthenticated } from "@/lib/auth";
 import { useTelegram } from "@/lib/useTelegram";
+import { AppHeader } from "@/components/app-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  ArrowLeft, CloudUpload, FileText, Loader2, CheckCircle2,
-  BookOpen, Medal, Brain, Layers, Home, Plus, BarChart3,
+  CloudUpload, FileText, Loader2, CheckCircle2,
+  BookOpen, Medal, Brain, Layers,
   Camera, ClipboardPaste, RotateCcw, Image as ImageIcon,
   AlignLeft, ImagePlus, XCircle, ScanLine,
 } from "lucide-react";
@@ -92,6 +92,105 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+// ── Telegram tip announcement (shown once, forced 25s read) ──────────────────
+function TelegramAnnouncement() {
+  const [visible, setVisible] = useState(false);
+  const [seconds, setSeconds] = useState(25);
+  const done = seconds === 0;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!localStorage.getItem("cortexq_upload_tip_v1")) setVisible(true);
+  }, []);
+
+  useEffect(() => {
+    if (!visible || done) return;
+    const t = setInterval(() => setSeconds((s) => {
+      if (s <= 1) { clearInterval(t); return 0; }
+      return s - 1;
+    }), 1000);
+    return () => clearInterval(t);
+  }, [visible, done]);
+
+  const dismiss = () => {
+    localStorage.setItem("cortexq_upload_tip_v1", "1");
+    setVisible(false);
+  };
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-background/85 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+
+        {/* Progress bar */}
+        <div className="h-1 bg-muted w-full overflow-hidden">
+          <div
+            className="h-full bg-foreground"
+            style={{
+              width: `${((25 - seconds) / 25) * 100}%`,
+              transition: seconds < 25 ? "width 1s linear" : "none",
+            }}
+          />
+        </div>
+
+        <div className="p-7 sm:p-9">
+          <div className="flex items-center justify-between mb-7">
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+              one sec bestie
+            </span>
+            <span className="text-xs font-mono tabular-nums text-muted-foreground">
+              {done ? "✓ ok now you can go" : `${seconds}s`}
+            </span>
+          </div>
+
+          <div className="space-y-5 mb-8">
+            <h2 className="text-2xl font-bold text-foreground leading-snug">
+              heyyy omg wait wait WAIT —
+            </h2>
+
+            <p className="text-sm text-foreground/85 leading-relaxed">
+              okay so you're literally about to go digging through your files app looking for that PDF... babe we've been there. scrolling past 847 files all named{" "}
+              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">document_final_v3_ACTUAL_FINAL.pdf</span>
+              {" "}is NOT the vibe and we refuse to let you suffer like that 💀
+            </p>
+
+            <p className="text-sm text-foreground/85 leading-relaxed">
+              <span className="font-bold text-foreground">real talk:</span> we have a Telegram bot. you open it, you forward your PDF (or image or whatever), it shows up here automatically ready to cook. zero file app, zero chaos, zero stress. fr it takes like 5 seconds.
+            </p>
+
+            <p className="text-sm text-foreground/85 leading-relaxed">
+              just tap the button → forward your file in telegram → come back here. we got you 🍳✨
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a
+              href="https://t.me/cortexqbot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-foreground text-background text-sm font-bold hover:opacity-90 transition-opacity"
+            >
+              take me to the bot →
+            </a>
+            <button
+              onClick={done ? dismiss : undefined}
+              disabled={!done}
+              className={`flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                done
+                  ? "border-border text-foreground hover:bg-muted cursor-pointer"
+                  : "border-border/25 text-muted-foreground/35 cursor-not-allowed select-none"
+              }`}
+            >
+              {done ? "nah I'll find my files" : `wait ${seconds}s…`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -584,28 +683,11 @@ function UploadContent() {
   // ── Main upload page ───────────────────────────────────────────────────────
   return (
     <div className="relative min-h-screen bg-background text-foreground flex flex-col">
-      <div className="grain-overlay" />
+      <TelegramAnnouncement />
 
-      {/* Header */}
-      {!isInTelegram && (
-        <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-card/80 backdrop-blur-xl z-50 border-b border-border/50">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <Link href="/dashboard" className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">
-              cortexQ
-            </Link>
-          </div>
-          <nav className="hidden md:flex items-center gap-8">
-            <span className="text-primary font-bold text-sm tracking-wide">+ Upload</span>
-            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium">Dashboard</Link>
-            <Link href="/analytics" className="text-muted-foreground hover:text-foreground transition-colors text-sm font-medium">Analytics</Link>
-          </nav>
-        </header>
-      )}
+      {!isInTelegram && <AppHeader activePage="Upload" />}
 
-      <main className={`flex-grow flex flex-col items-center justify-center px-4 sm:px-6 max-w-5xl mx-auto w-full ${isInTelegram ? "pt-6 pb-24" : "pt-24 pb-32"}`}>
+      <main className={`flex-grow flex flex-col items-center justify-center px-4 sm:px-6 max-w-5xl mx-auto w-full ${isInTelegram ? "pt-6 pb-24" : "pt-8 pb-32"}`}>
         <section className="w-full text-center space-y-8">
 
           {/* Heading */}
@@ -786,134 +868,178 @@ function UploadContent() {
 
             {/* ── CAMERA ───────────────────────────────────────────────── */}
             {inputMode === "camera" && (
-              <div className="relative group">
-                <div className="absolute -inset-1 synapse-gradient rounded-xl blur opacity-10 group-hover:opacity-20 transition duration-500" />
-                <div className="relative rounded-xl overflow-hidden border border-border/40 bg-black min-h-[300px] flex flex-col items-center justify-center">
+              <div className="w-full rounded-2xl overflow-hidden border border-border/50 bg-black">
 
-                  {capturedImage ? (
-                    /* ── Preview ── */
-                    <div className="w-full flex flex-col items-center gap-4 p-6">
-                      <div className="relative w-full max-w-md rounded-xl overflow-hidden border border-emerald-500/30">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={capturedImage} alt="Captured" className="w-full object-contain max-h-64" />
-                        <div className="absolute top-2 right-2 bg-emerald-500/20 border border-emerald-500/40 rounded-full px-3 py-1 flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-400 text-xs font-semibold">Captured</span>
-                        </div>
+                {capturedImage ? (
+                  /* ── Preview ── */
+                  <div className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={capturedImage}
+                      alt="Captured"
+                      className="w-full object-contain max-h-[480px]"
+                    />
+                    {/* Top bar */}
+                    <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/70 to-transparent">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-white" />
+                        <span className="text-white text-sm font-medium">Photo captured</span>
                       </div>
+                      <button
+                        onClick={resetCamera}
+                        className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-medium transition-colors"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Retake
+                      </button>
+                    </div>
+                    {/* Bottom bar */}
+                    <div className="absolute bottom-0 left-0 right-0 px-4 py-4 bg-gradient-to-t from-black/80 to-transparent">
                       <ValidationBadge v={capturedValidation} />
                       {capturedValidation?.valid && (
-                        <p className="text-sm text-muted-foreground">AI will extract text from this image</p>
+                        <p className="text-white/60 text-xs mt-1">AI will extract the text from this image</p>
                       )}
-                      <Button variant="outline" size="sm" onClick={resetCamera} className="gap-2">
-                        <RotateCcw className="w-4 h-4" />Retake
-                      </Button>
+                    </div>
+                  </div>
+
+                ) : cameraActive ? (
+                  /* ── Live feed ── */
+                  <div className="relative">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full object-cover max-h-[480px]"
+                    />
+
+                    {/* Corner frame overlay */}
+                    <div className="absolute inset-6 pointer-events-none">
+                      {([
+                        "top-0 left-0 border-t-2 border-l-2",
+                        "top-0 right-0 border-t-2 border-r-2",
+                        "bottom-0 left-0 border-b-2 border-l-2",
+                        "bottom-0 right-0 border-b-2 border-r-2",
+                      ] as const).map((cls, i) => (
+                        <div key={i} className={`absolute w-8 h-8 border-white/80 rounded-sm ${cls}`} />
+                      ))}
+
+                      {/* Scan line */}
+                      <div
+                        className="absolute left-0 right-0 h-px pointer-events-none"
+                        style={{
+                          top: `${scanLine}%`,
+                          background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.6) 50%, transparent 100%)",
+                        }}
+                      />
                     </div>
 
-                  ) : cameraActive ? (
-                    /* ── Live feed ── */
-                    <div className="w-full flex flex-col items-center gap-3 p-4">
-                      <div className="relative w-full max-w-md rounded-xl overflow-hidden bg-black">
-                        <video ref={videoRef} autoPlay playsInline muted className="w-full object-contain max-h-72" />
-
-                        {/* Document frame overlay */}
-                        <div className="absolute inset-4 pointer-events-none">
-                          {/* Corner brackets */}
-                          {[
-                            "top-0 left-0 border-t-2 border-l-2 rounded-tl",
-                            "top-0 right-0 border-t-2 border-r-2 rounded-tr",
-                            "bottom-0 left-0 border-b-2 border-l-2 rounded-bl",
-                            "bottom-0 right-0 border-b-2 border-r-2 rounded-br",
-                          ].map((cls, i) => (
-                            <div key={i} className={`absolute w-6 h-6 border-white ${cls}`} />
-                          ))}
-
-                          {/* Scanning line */}
-                          <div
-                            className="absolute left-0 right-0 h-[2px] pointer-events-none transition-none"
-                            style={{
-                              top: `${scanLine}%`,
-                              background: "linear-gradient(90deg, transparent, rgba(0,210,253,0.8), transparent)",
-                              boxShadow: "0 0 8px rgba(0,210,253,0.6)",
-                            }}
-                          />
-
-                          {/* Status badge */}
-                          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/60 rounded-full px-3 py-1">
-                            <ScanLine className="w-3.5 h-3.5 text-cyan-400" />
-                            <span className="text-cyan-400 text-xs font-semibold">
-                              {autoCapturing ? "Hold steady…" : "Align document in frame"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-muted-foreground">Position your notes to fill the frame, then capture</p>
-
-                      <div className="flex gap-3">
-                        <Button onClick={capturePhoto} className="synapse-gradient text-white gap-2 rounded-xl px-6">
-                          <Camera className="w-4 h-4" />Capture
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={stopCamera}>Cancel</Button>
+                    {/* Top hint */}
+                    <div className="absolute top-0 left-0 right-0 flex items-center justify-center pt-4 pb-8 bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
+                      <div className="flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full px-4 py-1.5">
+                        <ScanLine className="w-3.5 h-3.5 text-white/80" />
+                        <span className="text-white/80 text-xs font-medium">
+                          {autoCapturing ? "Hold steady…" : "Align document within the frame"}
+                        </span>
                       </div>
                     </div>
 
-                  ) : (
-                    /* ── Start screen ── */
-                    <div className="flex flex-col items-center gap-5 p-10">
-                      {cameraError ? (
-                        <div className="flex flex-col items-center gap-3">
-                          <XCircle className="w-10 h-10 text-destructive" />
-                          <p className="text-sm text-destructive text-center max-w-xs">{cameraError}</p>
+                    {/* Bottom controls */}
+                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-6 pb-6 pt-12 bg-gradient-to-t from-black/80 to-transparent">
+                      <button
+                        onClick={stopCamera}
+                        className="text-white/60 hover:text-white text-sm font-medium transition-colors w-20 text-left"
+                      >
+                        Cancel
+                      </button>
+
+                      {/* Shutter button */}
+                      <button
+                        onClick={capturePhoto}
+                        className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center hover:scale-95 active:scale-90 transition-transform"
+                      >
+                        <div className="w-12 h-12 rounded-full bg-white" />
+                      </button>
+
+                      <div className="w-20" />
+                    </div>
+                  </div>
+
+                ) : (
+                  /* ── Start screen ── */
+                  <div className="flex flex-col items-center justify-center gap-6 px-8 py-16">
+                    {cameraError ? (
+                      <>
+                        <div className="w-16 h-16 rounded-2xl bg-destructive/20 flex items-center justify-center">
+                          <XCircle className="w-8 h-8 text-destructive" />
                         </div>
-                      ) : (
-                        <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center shadow-lg shadow-primary/20">
-                          <Camera className="w-10 h-10 text-white" />
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-foreground mb-1">Camera access denied</p>
+                          <p className="text-xs text-muted-foreground max-w-xs">{cameraError}</p>
                         </div>
-                      )}
-                      <div className="text-center">
-                        <h3 className="text-xl font-bold text-foreground mb-1">Snap Your Notes</h3>
-                        <p className="text-sm text-muted-foreground max-w-xs">
-                          Take a photo of handwritten notes, a textbook page, or a whiteboard — AI extracts the text.
-                        </p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
-                        <Button onClick={startCamera} className="synapse-gradient text-white gap-2 rounded-xl flex-1">
-                          <Camera className="w-4 h-4" />Open Camera
-                        </Button>
-                        {/* Phone gallery fallback */}
                         <Button
                           variant="outline"
-                          className="gap-2 rounded-xl flex-1"
-                          onClick={() => galleryInputRef.current?.click()}
+                          onClick={startCamera}
+                          className="gap-2"
                         >
-                          <ImagePlus className="w-4 h-4" />From Gallery
+                          <RotateCcw className="w-4 h-4" />
+                          Try again
                         </Button>
-                        <input
-                          ref={galleryInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (!f) return;
-                            const v = validateImage(f);
-                            if (!v.valid) { setError(v.error!); return; }
-                            setError("");
-                            const reader = new FileReader();
-                            reader.onload = (ev) => {
-                              const dataUrl = ev.target?.result as string;
-                              setCapturedImage(dataUrl);
-                              setCapturedValidation(v);
-                            };
-                            reader.readAsDataURL(f);
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <canvas ref={canvasRef} className="hidden" />
-                </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-16 h-16 rounded-full border-2 border-white/20 flex items-center justify-center">
+                          <Camera className="w-8 h-8 text-white/70" />
+                        </div>
+                        <div className="text-center">
+                          <h3 className="text-lg font-semibold text-white mb-1">Snap your notes</h3>
+                          <p className="text-sm text-white/50 max-w-xs leading-relaxed">
+                            Point at any handwritten notes, textbook page, or whiteboard — AI reads it for you
+                          </p>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+                          <button
+                            onClick={startCamera}
+                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors"
+                          >
+                            <Camera className="w-4 h-4" />
+                            Open Camera
+                          </button>
+                          <button
+                            onClick={() => galleryInputRef.current?.click()}
+                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-white/20 text-white/80 hover:bg-white/10 text-sm font-medium transition-colors"
+                          >
+                            <ImagePlus className="w-4 h-4" />
+                            From Gallery
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    <input
+                      ref={galleryInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const v = validateImage(f);
+                        if (!v.valid) { setError(v.error!); return; }
+                        setError("");
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const dataUrl = ev.target?.result as string;
+                          setCapturedImage(dataUrl);
+                          setCapturedValidation(v);
+                        };
+                        reader.readAsDataURL(f);
+                      }}
+                    />
+                  </div>
+                )}
+
+                <canvas ref={canvasRef} className="hidden" />
               </div>
             )}
 
@@ -1044,26 +1170,6 @@ function UploadContent() {
         </section>
       </main>
 
-      {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center py-3 px-4 bg-card/95 backdrop-blur-lg rounded-t-3xl border-t border-border/50">
-        <Link href="/dashboard" className="flex flex-col items-center text-muted-foreground">
-          <Home className="w-6 h-6" />
-          <span className="text-[10px] uppercase tracking-widest mt-1">Home</span>
-        </Link>
-        <div className="flex flex-col items-center text-primary scale-110 -translate-y-2">
-          <div className="w-12 h-12 rounded-full synapse-gradient flex items-center justify-center shadow-lg shadow-primary/30">
-            <Plus className="w-7 h-7 text-white" />
-          </div>
-        </div>
-        <Link href="/analytics" className="flex flex-col items-center text-muted-foreground">
-          <BarChart3 className="w-6 h-6" />
-          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
-        </Link>
-      </nav>
-
-      {/* Blobs */}
-      <div className="fixed top-1/4 -left-20 w-80 h-80 bg-primary/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed bottom-1/4 -right-20 w-80 h-80 bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
     </div>
   );
 }

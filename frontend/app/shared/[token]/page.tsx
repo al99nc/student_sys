@@ -530,36 +530,23 @@ export default function SharedPage() {
             <div className="glass-panel p-8 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.15)] relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary-container/10 blur-3xl rounded-full -mr-16 -mt-16" />
               <div className="relative z-10">
-                <p className="text-secondary font-bold uppercase tracking-[0.2em] text-xs mb-2">Your Score</p>
-                <div className="flex items-baseline gap-2 mb-6">
-                  <span className="text-6xl font-black text-white">{score}</span>
-                  <span className="text-2xl font-bold text-on-surface-variant">/ {totalCount}</span>
-                </div>
+                <p className="text-secondary font-bold uppercase tracking-[0.2em] text-xs mb-3">Progress</p>
                 <div className="h-3 w-full bg-surface-container-highest rounded-full mb-4 overflow-hidden">
                   <div
                     className="h-full synapse-gradient rounded-full transition-all duration-500"
-                    style={{ width: `${totalCount > 0 ? (score / totalCount) * 100 : 0}%` }}
+                    style={{ width: `${totalCount > 0 ? (answeredCount / totalCount) * 100 : 0}%` }}
                   />
                 </div>
-                {answeredCount > 0 && (
-                  <p className="text-sm text-on-surface-variant mb-2">
-                    {scorePercent}% accuracy · {answeredCount}/{totalCount} answered
-                  </p>
-                )}
-                {isLoggedIn && retakeCount > 0 && (
-                  <p className="text-xs text-on-surface-variant/60 mb-2">
-                    <span className="material-symbols-outlined text-xs align-middle mr-1">history</span>
-                    {retakeCount} retake{retakeCount !== 1 ? "s" : ""} completed
-                  </p>
-                )}
-                {(answeredCount === 0 && retakeCount === 0) && <div className="mb-6" />}
+                <p className="text-sm text-on-surface-variant mb-4">
+                  {answeredCount}/{totalCount} answered
+                </p>
                 {confirmRetake ? (
                   <div className="bg-error/10 border border-error/30 rounded-xl p-4 mb-3">
                     <p className="text-sm font-bold text-white mb-1">Clear all answers?</p>
-                    <p className="text-xs text-on-surface-variant mb-3">Your current progress will be lost and a new retake will be recorded.</p>
+                    <p className="text-xs text-on-surface-variant mb-3">Your current progress will be lost.</p>
                     <div className="flex gap-2">
                       <button onClick={handleReset} className="flex-1 py-2 bg-error text-white font-bold rounded-lg text-sm hover:bg-error/80 transition-colors">
-                        Yes, retake
+                        Yes, clear
                       </button>
                       <button onClick={() => setConfirmRetake(false)} className="flex-1 py-2 glass-panel text-on-surface-variant font-bold rounded-lg text-sm hover:text-white transition-colors">
                         Cancel
@@ -568,7 +555,7 @@ export default function SharedPage() {
                   </div>
                 ) : null}
 
-                {/* Feature 6: guest retake gate */}
+                {/* Guest retake gate */}
                 {guestRetakeBlocked ? (
                   <div className="border border-secondary/30 rounded-xl p-4 bg-secondary/5">
                     <p className="text-sm font-bold text-white mb-1">Sign up to retake</p>
@@ -647,15 +634,8 @@ export default function SharedPage() {
             )}
 
             {answeredCount === totalCount && totalCount > 0 && activeTab === "mcqs" && (
-              <div className={`rounded-xl p-6 flex items-center justify-between glass-panel border-l-4 ${scorePercent >= 70 ? "border-green-500/50" : "border-tertiary/50"}`}>
-                <div>
-                  <p className="font-bold text-white text-lg">
-                    {scorePercent >= 70 ? "🎉 Great work!" : "📖 Keep studying!"} — {score}/{totalCount} ({scorePercent}%)
-                  </p>
-                  <p className="text-on-surface-variant text-sm mt-1">
-                    {scorePercent >= 70 ? "You're well-prepared for this topic." : "Review the explanations for questions you missed."}
-                  </p>
-                </div>
+              <div className="rounded-xl p-6 flex items-center justify-between glass-panel border-l-4 border-primary-container/30">
+                <p className="font-bold text-white text-lg">All questions answered!</p>
                 <button onClick={() => setConfirmRetake(true)} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
                   Retake
                 </button>

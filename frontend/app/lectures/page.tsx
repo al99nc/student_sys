@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getResults, getLectures, getMe, getQuizSession, getSolvedLectures } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { AppHeader } from "@/components/app-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -138,94 +139,78 @@ export default function LecturesPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-8">
-      {/* Main Header */}
-      <div className="sticky top-0 z-40 border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="px-4 py-3 md:px-8 md:py-4 max-w-5xl mx-auto">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <BookOpen className="w-5 h-5 md:w-6 md:h-6 text-primary flex-shrink-0" />
-              <div className="min-w-0">
-                <h1 className="text-base md:text-xl font-bold truncate">MCQ Library</h1>
-                <p className="text-xs text-muted-foreground truncate hidden md:block">
-                  All your study questions
+      <AppHeader activePage="Lectures" />
+
+      <main className="max-w-5xl mx-auto px-4 py-6 md:px-8 md:py-10">
+        <section className="rounded-[2rem] border border-border/70 bg-background/95 p-6 shadow-lg shadow-slate-950/10 mb-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 space-y-4">
+              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.32em] text-primary">
+                <BookOpen className="w-3.5 h-3.5" />
+                Lecture hub
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-3xl sm:text-4xl font-semibold text-foreground">Your MCQ library</h1>
+                <p className="max-w-2xl text-sm text-muted-foreground">
+                  {userName}, review your uploaded lectures, rediscover answered questions, and track your accuracy over time.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Link href="/dashboard" prefetch={false}>
-                <Button variant="outline" size="sm" className="h-9 md:h-10 text-xs md:text-sm">
-                  Back
-                </Button>
-              </Link>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-3xl border border-border/60 bg-slate-950/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Answered</p>
+                <p className="mt-3 text-3xl font-bold text-foreground">{totalMCQs}</p>
+              </div>
+              <div className="rounded-3xl border border-border/60 bg-slate-950/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Lectures</p>
+                <p className="mt-3 text-3xl font-bold text-foreground">{totalLectures}</p>
+              </div>
+              <div className="rounded-3xl border border-border/60 bg-slate-950/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Accuracy</p>
+                <p className="mt-3 text-3xl font-bold text-foreground text-emerald-500">
+                  {totalMCQs > 0 ? `${Math.round((correctCount / totalMCQs) * 100)}%` : "—"}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      {/* Main Content */}
-      <div className="px-4 py-5 md:px-8 md:py-8 max-w-5xl mx-auto">
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 mb-6">
-          <Card>
-            <CardHeader className="pb-1 px-4 pt-4 md:px-5 md:pt-5">
-              <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
-                Total Questions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 md:px-5 md:pb-5">
-              <p className="text-3xl md:text-4xl font-bold">{totalMCQs}</p>
-              <p className="text-xs text-muted-foreground mt-1">MCQs</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-1 px-4 pt-4 md:px-5 md:pt-5">
-              <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
-                Lectures
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 md:px-5 md:pb-5">
-              <p className="text-3xl md:text-4xl font-bold">{totalLectures}</p>
-              <p className="text-xs text-muted-foreground mt-1">Uploaded</p>
-            </CardContent>
-          </Card>
-
-          <Card className="col-span-2 md:col-span-1">
-            <CardHeader className="pb-1 px-4 pt-4 md:px-5 md:pt-5">
-              <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">Score</CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 md:px-5 md:pb-5">
-              <p className="text-3xl md:text-4xl font-bold text-green-500">
-                {totalMCQs > 0 ? `${Math.round((correctCount / totalMCQs) * 100)}%` : "—"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">{correctCount}/{totalMCQs} correct</p>
-            </CardContent>
-          </Card>
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground">Study overview</p>
+            <h2 className="text-2xl font-semibold text-foreground">Discover your lectures</h2>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/upload" prefetch={false}>
+              <Button size="sm">Upload lecture</Button>
+            </Link>
+            <Link href="/quiz/solved" prefetch={false}>
+              <Button variant="outline" size="sm">Review sessions</Button>
+            </Link>
+          </div>
         </div>
 
-        {/* Search */}
         <div className="mb-5 md:mb-6">
-          <div className="relative">
+          <div className="relative max-w-2xl">
             <Search className="absolute left-3.5 top-3 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search questions or lectures…"
-              className="w-full pl-10 pr-4 py-2.5 md:py-3 text-sm md:text-base rounded-xl border border-border bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="Search lectures or answered questions…"
+              className="w-full pl-10 pr-4 py-3 text-sm md:text-base rounded-2xl border border-border bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </div>
 
-        {/* Tabs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
-          <TabsList className="w-full grid grid-cols-2 h-11 md:h-12 mb-5 md:mb-6">
+          <TabsList className="w-full grid grid-cols-2 h-12 mb-5 md:mb-6 gap-2">
             <TabsTrigger value="all" className="text-sm md:text-base">
-              All ({totalMCQs})
+              All answers ({totalMCQs})
             </TabsTrigger>
             <TabsTrigger value="uploaded" className="text-sm md:text-base">
-              By Lecture ({totalLectures})
+              By lecture ({totalLectures})
             </TabsTrigger>
           </TabsList>
 
@@ -253,7 +238,7 @@ export default function LecturesPage() {
                   <BookOpen className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-40" />
                   <h3 className="font-semibold mb-2">No answered questions yet</h3>
                   <p className="text-sm text-muted-foreground mb-5">
-                    Take a quiz first — only solved questions appear here
+                    Take a quiz first — only solved questions appear here.
                   </p>
                   <Link href="/upload" prefetch={false}>
                     <Button size="sm">
@@ -264,42 +249,54 @@ export default function LecturesPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3 md:space-y-4">
+              <div className="space-y-4">
                 {allMCQs.map((mcq) => {
                   const correct = mcq.answer;
                   const userPick = mcq.userLetter;
                   const isRight = userPick === correct;
                   return (
-                    <Card key={mcq.key}>
-                      <CardContent className="px-4 py-4 md:px-5 md:py-5 space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium leading-snug">{mcq.question}</p>
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${isRight ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"}`}>
-                            {isRight ? "✓" : "✗"}
+                    <Card key={mcq.key} className="overflow-hidden">
+                      <CardContent className="space-y-4 px-4 py-5 md:px-5 md:py-6">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-base font-semibold text-foreground">{mcq.question}</p>
+                            <p className="mt-2 text-xs text-muted-foreground">{mcq.lectureTitle}</p>
+                          </div>
+                          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${isRight ? "bg-emerald-500/15 text-emerald-500" : "bg-rose-500/15 text-rose-500"}`}>
+                            {isRight ? "Correct" : "Incorrect"}
                           </span>
                         </div>
-                        <div className="space-y-1.5">
+
+                        <div className="grid gap-2 sm:grid-cols-2">
                           {mcq.options.map((opt, i) => {
-                            const letter = ["A","B","C","D"][i];
+                            const letter = ["A", "B", "C", "D"][i];
                             const isCorrect = letter === correct;
                             const isUser = letter === userPick;
-                            let cls = "text-xs px-3 py-2 rounded-lg border ";
-                            if (isCorrect) cls += "border-green-500/40 bg-green-500/10 text-green-300";
-                            else if (isUser && !isCorrect) cls += "border-red-500/40 bg-red-500/10 text-red-300";
-                            else cls += "border-border/30 text-muted-foreground";
+                            const base = "text-sm rounded-2xl border px-4 py-3 transition-colors";
+                            const statusClass = isCorrect
+                              ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+                              : isUser && !isCorrect
+                              ? "border-rose-400/40 bg-rose-500/10 text-rose-300"
+                              : "border-border/30 bg-background text-muted-foreground";
                             return (
-                              <div key={letter} className={cls}>
-                                <span className="font-semibold mr-2">{letter}.</span>{opt}
-                                {isCorrect && <span className="ml-2 text-green-400 text-xs">✓ correct</span>}
-                                {isUser && !isCorrect && <span className="ml-2 text-red-400 text-xs">your answer</span>}
+                              <div key={letter} className={`${base} ${statusClass}`}>
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="font-semibold">{letter}.</span>
+                                  {isCorrect && <span className="text-[11px] font-semibold uppercase text-emerald-400">Correct</span>}
+                                  {isUser && !isCorrect && <span className="text-[11px] font-semibold uppercase text-rose-400">Your answer</span>}
+                                </div>
+                                <p className="mt-2 text-sm leading-6">{opt}</p>
                               </div>
                             );
                           })}
                         </div>
+
                         {mcq.explanation && (
-                          <p className="text-xs text-muted-foreground border-t border-border/30 pt-2">{mcq.explanation}</p>
+                          <div className="rounded-2xl border border-border/50 bg-muted/10 p-4 text-sm text-muted-foreground">
+                            <p className="font-semibold text-sm text-foreground">Explanation</p>
+                            <p className="mt-2">{mcq.explanation}</p>
+                          </div>
                         )}
-                        <p className="text-xs text-muted-foreground/50">{mcq.lectureTitle}</p>
                       </CardContent>
                     </Card>
                   );
@@ -320,7 +317,7 @@ export default function LecturesPage() {
                   <BookOpen className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-40" />
                   <h3 className="font-semibold mb-2">No processed lectures</h3>
                   <p className="text-sm text-muted-foreground mb-5">
-                    Upload a lecture and generate study materials to see it here
+                    Upload a lecture and generate study materials to see it here.
                   </p>
                   <Link href="/upload" prefetch={false}>
                     <Button size="sm">
@@ -331,30 +328,30 @@ export default function LecturesPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3 md:space-y-4">
+              <div className="space-y-4">
                 {filteredSolved.map((lecture) => (
                   <Link key={lecture.id} href={`/quiz/solved/${lecture.id}`}>
-                    <Card className="cursor-pointer hover:border-primary/40 hover:bg-muted/20 active:scale-[0.99] transition-all duration-150 touch-manipulation">
-                      <CardContent className="px-4 md:px-6 py-4 md:py-5">
-                        <div className="flex items-center gap-4">
-                          <div className="w-11 h-11 md:w-12 md:h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                            <BookOpen className="w-5 h-5 text-primary" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm md:text-base truncate">{lecture.title}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              {lecture.has_essays && !lecture.mcq_count ? (
-                                <Badge variant="outline" className="text-xs text-violet-400 border-violet-400/40">
-                                  Essay
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary" className="text-xs">
-                                  {lecture.mcq_count} MCQs
-                                </Badge>
-                              )}
-                              <span className="text-xs text-muted-foreground">
-                                {new Date(lecture.created_at).toLocaleDateString()}
-                              </span>
+                    <Card className="cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-all duration-150 touch-manipulation">
+                      <CardContent className="px-4 md:px-6 py-5">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 rounded-3xl bg-primary/10 flex items-center justify-center text-primary">
+                              <BookOpen className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm md:text-base truncate">{lecture.title}</p>
+                              <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted-foreground">
+                                <span>{new Date(lecture.created_at).toLocaleDateString()}</span>
+                                {lecture.has_essays && !lecture.mcq_count ? (
+                                  <Badge variant="outline" className="text-xs text-violet-400 border-violet-400/40">
+                                    Essay
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {lecture.mcq_count} MCQs
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <ChevronRight className="w-5 h-5 text-muted-foreground flex-shrink-0" />
@@ -367,7 +364,7 @@ export default function LecturesPage() {
             )}
           </TabsContent>
         </Tabs>
-      </div>
+      </main>
     </div>
   );
 }

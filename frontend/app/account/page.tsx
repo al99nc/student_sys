@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isAuthenticated, logout } from "@/lib/auth";
 import { getMe, saveOnboarding, UserOut } from "@/lib/api";
+import { StepNav } from "@/components/step-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -122,16 +123,10 @@ export default function AccountPage() {
             <span className="hidden sm:inline">Dashboard</span>
           </Link>
         </div>
+        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Account" }]} />
       </header>
 
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
-          <span>/</span>
-          <span className="text-foreground">Account</span>
-        </nav>
-
         <h1 className="text-2xl font-bold mb-8">Account Settings</h1>
 
         {/* Profile picture + name */}

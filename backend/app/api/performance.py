@@ -25,6 +25,7 @@ from app.models.performance import (
     AnswerTimeline,
     LearningPattern,
     StudentAiInsight,
+    FsrsCard,
 )
 from app.schemas.performance import (
     StartSessionRequest,
@@ -41,6 +42,8 @@ from app.schemas.performance import (
     WeeklyQuizResponse,
     AiInsightResponse,
     NextBestActionResponse,
+    NextSessionResponse,
+    StudyScheduleResponse,
 )
 
 from app.utils.helpers import sanitize_nulls  # noqa: E402
@@ -49,6 +52,112 @@ router = APIRouter(prefix="/api/v1/performance", tags=["performance"])
 
 MASTERY_THRESHOLD = 0.8
 RELAPSE_THRESHOLD = 0.6
+
+# FSRS forgetting-curve constants (FSRS v5 formula)
+_FSRS_DECAY  = -0.5
+_FSRS_FACTOR = 0.9 ** (1.0 / _FSRS_DECAY) - 1  # ≈ 0.2346
+
+
+def _ensure_tz(dt: datetime | None) -> datetime | None:
+    """Return dt with UTC tzinfo; handles naive datetimes from SQLite."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _fsrs_retention(elapsed_days: float, stability: float) -> float:
+    """Estimated recall probability using the FSRS v5 forgetting curve."""
+    if stability <= 0:
+        return 0.0
+    return (1.0 + _FSRS_FACTOR * elapsed_days / stability) ** _FSRS_DECAY
+
+
+def _get_fsrs_rating(is_correct: bool, pre_answer_confidence: int | None):
+    """
+    Map answer outcome → FSRS Rating.
+    Correct + certain  → Easy  (consolidates memory faster)
+    Correct otherwise  → Good
+    Wrong              → Again (triggers relearning)
+    """
+    try:
+        from fsrs import Rating
+    except ImportError:
+        return None
+
+    if is_correct:
+        return Rating.Easy if pre_answer_confidence == 3 else Rating.Good
+    return Rating.Again
+
+
+def _update_fsrs_card(
+    db: Session,
+    student_id: str,
+    question_id: str,
+    is_correct: bool,
+    pre_answer_confidence: int | None,
+    now: datetime,
+) -> None:
+    """
+    Upsert the FsrsCard for (student, question) using py-fsrs.
+    Called synchronously inside submit_answer before db.commit().
+    Silently skips if py-fsrs is not installed.
+    """
+    try:
+        from fsrs import FSRS, Card, State as FsrsState
+    except ImportError:
+        return
+
+    rating = _get_fsrs_rating(is_correct, pre_answer_confidence)
+    if rating is None:
+        return
+
+    scheduler = FSRS()
+    existing = db.query(FsrsCard).filter(
+        FsrsCard.student_id == student_id,
+        FsrsCard.question_id == question_id,
+    ).first()
+
+    if existing:
+        card = Card(
+            due=_ensure_tz(existing.due_date),
+            stability=existing.stability or 0.0,
+            difficulty=existing.difficulty or 0.0,
+            elapsed_days=existing.elapsed_days,
+            scheduled_days=existing.scheduled_days,
+            reps=existing.reps,
+            lapses=existing.lapses,
+            state=FsrsState(existing.state),
+            last_review=_ensure_tz(existing.last_review_date),
+        )
+        updated, _ = scheduler.review_card(card, rating, now=now)
+        existing.stability      = updated.stability
+        existing.difficulty     = updated.difficulty
+        existing.due_date       = updated.due
+        existing.last_review_date = now
+        existing.state          = updated.state.value
+        existing.reps           = updated.reps
+        existing.lapses         = updated.lapses
+        existing.elapsed_days   = updated.elapsed_days
+        existing.scheduled_days = updated.scheduled_days
+        existing.updated_at     = now
+    else:
+        card = Card()
+        updated, _ = scheduler.review_card(card, rating, now=now)
+        db.add(FsrsCard(
+            id=str(uuid4()),
+            student_id=student_id,
+            question_id=question_id,
+            stability=updated.stability,
+            difficulty=updated.difficulty,
+            due_date=updated.due,
+            last_review_date=now,
+            state=updated.state.value,
+            reps=updated.reps,
+            lapses=updated.lapses,
+            elapsed_days=updated.elapsed_days,
+            scheduled_days=updated.scheduled_days,
+            updated_at=now,
+        ))
 
 
 # ── POST /sessions/start ──────────────────────────────────────────────────────
@@ -284,6 +393,12 @@ def submit_answer(
         )
         db.add(timeline)
 
+    # Update FSRS card state — wrapped so a missing/broken py-fsrs never kills answer submission
+    try:
+        _update_fsrs_card(db, current_user.id, body.question_id, is_correct, body.pre_answer_confidence, now)
+    except Exception:
+        logging.getLogger(__name__).exception("FSRS card update failed for question %s", body.question_id)
+
     db.commit()
 
     # Weekly quiz trigger: fire if 3+ flagged weak points and no pending assignment this week
@@ -468,6 +583,142 @@ def record_quiz_result(
     db.add(session)
     db.commit()
     return {"session_id": session.id, "correct": correct, "total": total}
+
+
+# ── GET /next-session ────────────────────────────────────────────────────────
+
+@router.get("/next-session", response_model=NextSessionResponse)
+def get_next_session(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns all FSRS cards due for review today, grouped by topic and sorted
+    by priority (critical → high → normal). The frontend uses this to build
+    a focused study session from overdue questions.
+    """
+    now = datetime.now(timezone.utc)
+
+    due_rows = (
+        db.query(FsrsCard, McqQuestion)
+        .join(McqQuestion, FsrsCard.question_id == McqQuestion.id)
+        .filter(
+            FsrsCard.student_id == current_user.id,
+            FsrsCard.due_date <= now,
+        )
+        .order_by(FsrsCard.due_date.asc())
+        .all()
+    )
+
+    topic_map: dict = {}
+    for card, q in due_rows:
+        if q.topic not in topic_map:
+            topic_map[q.topic] = {"questions": [], "max_lapses": 0, "max_overdue": 0}
+
+        card_due = _ensure_tz(card.due_date)
+        days_overdue = max(0, (now - card_due).days) if card_due else 0
+
+        topic_map[q.topic]["questions"].append({
+            "id": q.id,
+            "question_text": q.question_text,
+            "topic": q.topic,
+            "days_overdue": days_overdue,
+            "lapses": card.lapses,
+            "state": card.state,
+        })
+        topic_map[q.topic]["max_lapses"] = max(topic_map[q.topic]["max_lapses"], card.lapses)
+        topic_map[q.topic]["max_overdue"] = max(topic_map[q.topic]["max_overdue"], days_overdue)
+
+    _priority_order = {"critical": 0, "high": 1, "normal": 2}
+    topics = []
+    for topic, data in topic_map.items():
+        if data["max_lapses"] >= 2:
+            priority = "critical"
+        elif data["max_lapses"] >= 1 or data["max_overdue"] >= 3:
+            priority = "high"
+        else:
+            priority = "normal"
+
+        topics.append({
+            "topic": topic,
+            "due_count": len(data["questions"]),
+            "priority": priority,
+            "questions": data["questions"][:5],  # cap per-topic to avoid overwhelming response
+        })
+
+    topics.sort(key=lambda x: (_priority_order[x["priority"]], -x["due_count"]))
+
+    return NextSessionResponse(due_count=len(due_rows), topics=topics)
+
+
+# ── GET /study-schedule ───────────────────────────────────────────────────────
+
+@router.get("/study-schedule", response_model=StudyScheduleResponse)
+def get_study_schedule(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Per-topic retention % and upcoming due dates for the dashboard.
+    Retention is estimated using the FSRS v5 forgetting curve:
+      R(t, S) = (1 + FACTOR * t / S) ^ DECAY
+    Topics are sorted worst-retention first so the dashboard highlights gaps.
+    """
+    now = datetime.now(timezone.utc)
+
+    rows = (
+        db.query(FsrsCard, McqQuestion.topic)
+        .join(McqQuestion, FsrsCard.question_id == McqQuestion.id)
+        .filter(FsrsCard.student_id == current_user.id)
+        .all()
+    )
+
+    topic_data: dict = {}
+    for card, topic in rows:
+        if topic not in topic_data:
+            topic_data[topic] = {"cards": [], "due_count": 0, "next_due": None}
+
+        topic_data[topic]["cards"].append(card)
+
+        card_due = _ensure_tz(card.due_date)
+        if card_due and card_due <= now:
+            topic_data[topic]["due_count"] += 1
+        if card_due and (topic_data[topic]["next_due"] is None or card_due < topic_data[topic]["next_due"]):
+            topic_data[topic]["next_due"] = card_due
+
+    result = []
+    for topic, data in topic_data.items():
+        cards_list = data["cards"]
+
+        retentions = []
+        for card in cards_list:
+            if card.stability and card.stability > 0 and card.last_review_date:
+                lr = _ensure_tz(card.last_review_date)
+                elapsed = (now - lr).days
+                retentions.append(_fsrs_retention(elapsed, card.stability))
+
+        avg_retention = sum(retentions) / len(retentions) if retentions else 0.0
+        avg_stability = sum(c.stability or 0.0 for c in cards_list) / len(cards_list)
+
+        result.append({
+            "topic": topic,
+            "retention_pct": round(avg_retention * 100, 1),
+            "due_count": data["due_count"],
+            "next_due": data["next_due"],
+            "avg_stability_days": round(avg_stability, 1),
+            "total_cards": len(cards_list),
+        })
+
+    result.sort(key=lambda x: x["retention_pct"])  # worst retention first
+
+    total_due = sum(d["due_count"] for d in result)
+    total_cards = sum(d["total_cards"] for d in result)
+
+    return StudyScheduleResponse(
+        topics=result,
+        total_due_today=total_due,
+        total_cards=total_cards,
+    )
 
 
 # ── GET /students/me/weak-points ─────────────────────────────────────────────

@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getDashboard, getLectures, getMySharedSessions, getNextBestAction } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
+import { AppHeader } from "@/components/app-header";
+import { StepNav } from "@/components/step-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -107,62 +109,11 @@ export default function DashboardPage() {
     }
   };
 
-  const userInitial = userName.charAt(0).toUpperCase();
-
   return (
     <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
-            cortexQ
-          </Link>
-
-          <nav className="hidden md:flex items-center gap-1">
-            {[
-              { label: "Dashboard", href: "/dashboard", active: true },
-              { label: "Lectures", href: "/lectures" },
-              { label: "Analytics", href: "/analytics" },
-              { label: "Coach", href: "/coach" },
-              { label: "Credits", href: "/billing" },
-            ].map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                prefetch={false}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  item.active
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/upload" prefetch={false}>
-                <Upload className="h-4 w-4 mr-1.5" />
-                Upload
-              </Link>
-            </Button>
-            <Link href="/account" prefetch={false} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm hover:opacity-80 transition-opacity">
-              {userInitial}
-            </Link>
-          </div>
-        </div>
-      </header>
+      <AppHeader activePage="Dashboard" />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link href="/dashboard" prefetch={false} className="hover:text-foreground transition-colors">Home</Link>
-          <span>/</span>
-          <span className="text-foreground font-medium">Dashboard</span>
-        </nav>
-
         {/* Title */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div>
@@ -464,25 +415,6 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-2 bg-background/95 backdrop-blur border-t border-border" style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))" }}>
-        <Link href="/dashboard" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-primary">
-          <BarChart3 className="w-[22px] h-[22px]" />
-          <span className="text-[10px] font-semibold">Home</span>
-        </Link>
-        <Link href="/upload" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
-          <Upload className="w-[22px] h-[22px]" />
-          <span className="text-[10px] font-semibold">Upload</span>
-        </Link>
-        <Link href="/coach" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
-          <Bot className="w-[22px] h-[22px]" />
-          <span className="text-[10px] font-semibold">Coach</span>
-        </Link>
-        <Link href="/analytics" prefetch={false} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground">
-          <TrendingUp className="w-[22px] h-[22px]" />
-          <span className="text-[10px] font-semibold">Analytics</span>
-        </Link>
-      </nav>
     </div>
   );
 }

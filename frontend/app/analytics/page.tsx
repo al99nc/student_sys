@@ -1,21 +1,13 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
 import { getDashboard, getAnalyticsTimeline } from "@/lib/api";
+import { AppHeader } from "@/components/app-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import {
-  ArrowLeft,
-  TrendingUp,
-  Target,
-  BarChart3,
-  Home,
-  Upload,
-  Bot,
-} from "lucide-react";
+import { BarChart3, Target, TrendingUp, Flame, AlertTriangle } from "lucide-react";
 
 interface Overview {
   total_sessions: number;
@@ -57,10 +49,8 @@ export default function AnalyticsPage() {
   const [coFailures, setCoFailures] = useState<CoFailure[]>([]);
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(true);
-  // Tracks whether initial load has run so the days-change effect skips mount.
   const isInitialLoad = useRef(true);
 
-  // Single call on mount — replaces 5 separate analytics endpoint calls.
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/auth");
@@ -106,8 +96,6 @@ export default function AnalyticsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  // Re-fetch only the timeline when the user changes the day range.
-  // Skips on mount because the initial load already fetched it.
   useEffect(() => {
     if (isInitialLoad.current) return;
     if (!isAuthenticated()) return;
@@ -126,6 +114,7 @@ export default function AnalyticsPage() {
 
   const safeTimeline = Array.isArray(timeline) ? timeline : [];
   const maxAccuracy = Math.max(...safeTimeline.map((d) => d.accuracy || 0), 1);
+  const hasData = safeTimeline.some((d) => d.accuracy > 0);
 
   if (loading) {
     return (
@@ -135,70 +124,35 @@ export default function AnalyticsPage() {
     );
   }
 
+  const stats = overview
+    ? [
+        { label: "Sessions", value: overview.total_sessions, icon: BarChart3 },
+        { label: "Questions", value: overview.total_questions_answered, icon: Target },
+        { label: "Accuracy", value: `${Math.round(overview.overall_accuracy)}%`, icon: TrendingUp },
+        { label: "Streak", value: `${overview.current_streak}d`, icon: Flame },
+      ]
+    : [];
+
   return (
     <div className="min-h-screen bg-background text-foreground pb-20 md:pb-0">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
-            cortexQ
-          </Link>
-
-          <nav className="hidden md:flex items-center gap-1">
-            {[
-              { label: "Dashboard", href: "/dashboard" },
-              { label: "Upload", href: "/upload" },
-              { label: "Coach", href: "/coach" },
-              { label: "Analytics", href: "/analytics", active: true },
-            ].map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                prefetch={false}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  item.active
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          <Link
-            href="/dashboard"
-            prefetch={false}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Dashboard</span>
-          </Link>
-        </div>
-      </header>
+      <AppHeader activePage="Analytics" />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link href="/dashboard" prefetch={false} className="hover:text-foreground transition-colors">Dashboard</Link>
-          <span>/</span>
-          <span className="text-foreground">Analytics</span>
-        </nav>
-
-        <div className="flex items-center justify-between mb-8">
+        {/* Page title + day filter */}
+        <div className="flex items-start justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
-            <p className="text-sm text-muted-foreground mt-1">Your performance across all study sessions</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Your performance across all study sessions</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 p-1 bg-muted rounded-lg">
             {[7, 14, 30].map((d) => (
               <button
                 key={d}
                 onClick={() => setDays(d)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                   days === d
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:text-foreground"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {d}d
@@ -207,175 +161,203 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Overview stats */}
+        {/* Stats row */}
         {overview && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-            {[
-              { label: "Total Sessions", value: overview.total_sessions, icon: BarChart3 },
-              { label: "Questions Answered", value: overview.total_questions_answered, icon: Target },
-              { label: "Overall Accuracy", value: `${Math.round(overview.overall_accuracy)}%`, icon: TrendingUp },
-              { label: "Current Streak", value: `${overview.current_streak}d`, icon: TrendingUp },
-            ].map(({ label, value, icon: Icon }) => (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {stats.map(({ label, value, icon: Icon }) => (
               <Card key={label}>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">{label}</p>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+                    <Icon className="w-4 h-4 text-muted-foreground/50" />
                   </div>
-                  <p className="text-xl font-bold text-foreground">{value}</p>
+                  <p className="text-2xl font-bold text-foreground tabular-nums">{value}</p>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
 
+        {/* Accuracy timeline — full width */}
+        <Card className="mb-6">
+          <CardHeader className="pb-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold">Accuracy Timeline</CardTitle>
+              {hasData && (
+                <span className="text-xs text-muted-foreground">
+                  peak {Math.round(maxAccuracy)}%
+                </span>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {!hasData ? (
+              <div className="flex flex-col items-center justify-center h-40 gap-2">
+                <BarChart3 className="w-8 h-8 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No quiz activity in this period</p>
+              </div>
+            ) : (
+              <>
+                {/* Y-axis guide lines */}
+                <div className="relative h-48">
+                  {[100, 75, 50, 25].map((pct) => (
+                    <div
+                      key={pct}
+                      className="absolute left-0 right-0 border-t border-border/30 flex items-center"
+                      style={{ top: `${100 - pct}%` }}
+                    >
+                      <span className="text-[10px] text-muted-foreground/50 pr-2 leading-none -mt-2.5">{pct}</span>
+                    </div>
+                  ))}
+                  {/* Bars */}
+                  <div className="absolute inset-0 pl-6 flex items-end gap-1">
+                    {safeTimeline.map((d) => {
+                      const pct = maxAccuracy > 0 ? (d.accuracy / maxAccuracy) * 100 : 0;
+                      return (
+                        <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end">
+                          <div
+                            className="absolute -top-7 left-1/2 -translate-x-1/2 bg-popover border text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none"
+                          >
+                            {Math.round(d.accuracy)}%
+                            {d.questions_answered > 0 && (
+                              <span className="text-muted-foreground ml-1">· {d.questions_answered}q</span>
+                            )}
+                          </div>
+                          <div
+                            className={`w-full rounded-t transition-all ${
+                              d.accuracy > 0 ? "bg-foreground/80 hover:bg-foreground" : "bg-muted/20"
+                            }`}
+                            style={{ height: `${d.accuracy > 0 ? Math.max(pct, 6) : 2}%` }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* X-axis labels */}
+                <div className="flex pl-6 mt-2">
+                  {safeTimeline.map((d) => (
+                    <span key={d.date} className="flex-1 text-center text-[10px] text-muted-foreground truncate">
+                      {new Date(d.date).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Bottom row: Confidence + Weak topics + Co-failures */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left column */}
-          <div className="lg:col-span-4 space-y-6">
-            {/* Confidence calibration */}
-            {confidence.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Confidence vs Accuracy</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {confidence.map((c) => (
-                    <div key={c.confidence_level}>
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-muted-foreground capitalize">Level {c.confidence_level}</span>
-                        <span className="font-medium text-foreground tabular-nums">
-                          {Math.round(c.accuracy)}% ({c.count})
-                        </span>
-                      </div>
-                      <Progress value={c.accuracy} className="h-1.5" />
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Co-failures */}
-            {coFailures.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Co-Failing Topics</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {coFailures.slice(0, 5).map((cf, i) => (
-                    <div key={i} className="border rounded-lg p-3 space-y-1">
-                      <div className="flex items-center gap-2 text-xs flex-wrap">
-                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{cf.topic_a}</Badge>
-                        <span className="text-muted-foreground">+</span>
-                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{cf.topic_b}</Badge>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">Failed together {cf.co_fail_count}×</p>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Right column */}
-          <div className="lg:col-span-8 space-y-6">
-            {/* Accuracy timeline */}
-            <Card>
+          {/* Confidence calibration */}
+          <div className="lg:col-span-4">
+            <Card className="h-full">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold">Accuracy Timeline</CardTitle>
+                <CardTitle className="text-sm font-semibold">Confidence vs Accuracy</CardTitle>
               </CardHeader>
               <CardContent>
-                {safeTimeline.length === 0 || safeTimeline.every((d) => d.accuracy === 0) ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">No data for this period.</p>
+                {confidence.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No confidence data yet</p>
                 ) : (
-                  <>
-                    <div className="flex items-end gap-1.5 h-40">
-                      {safeTimeline.map((d) => {
-                        const pct = maxAccuracy > 0 ? (d.accuracy / maxAccuracy) * 100 : 0;
-                        return (
-                          <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative">
-                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-popover border text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                              {Math.round(d.accuracy)}%
-                            </div>
-                            <div
-                              className={`w-full rounded-t transition-colors ${d.accuracy > 0 ? "bg-primary/70 hover:bg-primary" : "bg-muted/30"}`}
-                              style={{ height: `${d.accuracy > 0 ? Math.max(pct, 8) : 2}%` }}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
-                      {safeTimeline.map((d) => (
-                        <span key={d.date} className="flex-1 text-center truncate">
-                          {new Date(d.date).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })}
-                        </span>
-                      ))}
-                    </div>
-                  </>
+                  <div className="space-y-4">
+                    {confidence.map((c) => (
+                      <div key={c.confidence_level}>
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <span className="text-muted-foreground">Level {c.confidence_level}</span>
+                          <span className="font-semibold text-foreground tabular-nums">
+                            {Math.round(c.accuracy)}%
+                            <span className="text-muted-foreground font-normal ml-1">({c.count})</span>
+                          </span>
+                        </div>
+                        <Progress value={c.accuracy} className="h-1.5" />
+                      </div>
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>
+          </div>
 
-            {/* Weak topics */}
-            {weakTopics.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Weak Topics</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {weakTopics.map((t) => (
-                    <div key={t.topic}>
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-foreground font-medium line-clamp-1 flex-1 mr-4">{t.topic}</span>
-                        <span className="tabular-nums text-muted-foreground shrink-0">
-                          {Math.round(t.accuracy * 100)}% · {t.attempts} attempts
-                        </span>
+          {/* Weak topics */}
+          <div className="lg:col-span-5">
+            <Card className="h-full">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">Weak Topics</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {weakTopics.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No weak topics identified yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {weakTopics.slice(0, 6).map((t) => {
+                      const pct = Math.round(t.accuracy * 100);
+                      const isWeak = pct < 50;
+                      const isMid = pct >= 50 && pct < 70;
+                      return (
+                        <div key={t.topic}>
+                          <div className="flex items-center justify-between text-xs mb-1.5">
+                            <span className="text-foreground font-medium line-clamp-1 flex-1 mr-4">{t.topic}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isWeak && <AlertTriangle className="w-3 h-3 text-destructive" />}
+                              <span className={`tabular-nums font-semibold ${isWeak ? "text-destructive" : isMid ? "text-yellow-500" : "text-foreground"}`}>
+                                {pct}%
+                              </span>
+                              <span className="text-muted-foreground">· {t.attempts}</span>
+                            </div>
+                          </div>
+                          <Progress
+                            value={pct}
+                            className={`h-1 ${isWeak ? "[&>div]:bg-destructive" : isMid ? "[&>div]:bg-yellow-500" : ""}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Co-failing topics */}
+          <div className="lg:col-span-3">
+            <Card className="h-full">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">Co-Failing Topics</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {coFailures.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">None found</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {coFailures.slice(0, 5).map((cf, i) => (
+                      <div key={i} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{cf.topic_a}</Badge>
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{cf.topic_b}</Badge>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Failed together {cf.co_fail_count}×
+                        </p>
                       </div>
-                      <Progress
-                        value={t.accuracy * 100}
-                        className={`h-1.5 ${t.accuracy < 0.5 ? "[&>div]:bg-destructive" : t.accuracy < 0.7 ? "[&>div]:bg-yellow-500" : ""}`}
-                      />
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Empty state */}
-            {!overview && weakTopics.length === 0 && timeline.length === 0 && (
-              <Card>
-                <CardContent className="py-16 text-center">
-                  <BarChart3 className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm font-medium text-foreground">No analytics yet</p>
-                  <p className="text-xs text-muted-foreground mt-1">Complete some quizzes to see your performance data.</p>
-                </CardContent>
-              </Card>
-            )}
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
+
+        {/* Full empty state */}
+        {!overview && weakTopics.length === 0 && timeline.length === 0 && (
+          <Card className="mt-6">
+            <CardContent className="py-20 text-center">
+              <BarChart3 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
+              <p className="text-sm font-semibold text-foreground">No analytics yet</p>
+              <p className="text-xs text-muted-foreground mt-1">Complete some quizzes to see your performance data here.</p>
+            </CardContent>
+          </Card>
+        )}
       </main>
-
-      {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex justify-around items-center py-2 px-4">
-          <Link href="/dashboard" prefetch={false} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
-            <Home className="w-5 h-5" />
-            <span className="text-[10px]">Home</span>
-          </Link>
-          <Link href="/upload" prefetch={false} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
-            <Upload className="w-5 h-5" />
-            <span className="text-[10px]">Upload</span>
-          </Link>
-          <Link href="/coach" prefetch={false} className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors py-1">
-            <Bot className="w-5 h-5" />
-            <span className="text-[10px]">Coach</span>
-          </Link>
-          <div className="flex flex-col items-center gap-0.5 text-foreground py-1">
-            <BarChart3 className="w-5 h-5" />
-            <span className="text-[10px]">Analytics</span>
-          </div>
-        </div>
-      </nav>
     </div>
   );
 }

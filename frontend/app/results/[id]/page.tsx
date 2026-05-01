@@ -10,8 +10,9 @@ import {
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { StepNav } from "@/components/step-nav";
 import {
-  Clock, Eye, Users, Share2, Shuffle, RefreshCw, Check, X,
+  Share2, Shuffle, RefreshCw, Check, X,
   ChevronRight, Home, BarChart3, Zap, BookOpen, Lightbulb,
   Brain, Target, TrendingUp, AlertTriangle, Calendar,
   CheckCircle2, XCircle, Cloud, CloudOff, Loader2,
@@ -996,84 +997,19 @@ export default function ResultsPage() {
             {!isMobile && <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>CortexQ</span>}
           </Link>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {/* Timer */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 11px", borderRadius: 9, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-              <Clock size={13} style={{ color: "#64748b" }} />
-              <TimerDisplay startRef={sessionStartRef} />
-            </div>
-
-            {/* Viewers */}
-            {shareToken && (totalViews > 0 || activeViewers > 0) && !isMobile && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 11px", borderRadius: 9, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                {totalViews > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#64748b" }}><Eye size={12} />{totalViews}</span>}
-                {activeViewers > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "#4ade80" }}><Users size={12} />{activeViewers} live</span>}
-              </div>
-            )}
-
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {/* Save status */}
-            {!isMobile && (
-              <div style={{ display: "flex", alignItems: "center" }}>
-                {saveStatus === "saving" && <Loader2 size={13} style={{ color: "#64748b", animation: "spin 0.8s linear infinite" }} />}
-                {saveStatus === "saved"  && <Cloud    size={13} style={{ color: "#4ade80" }} />}
-                {saveStatus === "idle"   && <CloudOff size={13} style={{ color: "#3a3f60" }} />}
-              </div>
-            )}
-
-            {/* Quiz Mode */}
-            <Link
-              href={`/quiz/${lectureId}`}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 10, background: "rgba(123,47,255,0.12)", border: "1px solid rgba(123,47,255,0.25)", color: "#a78bfa", fontSize: 12, fontWeight: 600, textDecoration: "none", transition: "opacity 0.15s" }}
-              onMouseEnter={e => (e.currentTarget.style.opacity = "0.75")}
-              onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
-            >
-              <Zap size={13} />
-              {!isMobile && "Quiz Mode"}
-            </Link>
-
-            {/* Share */}
-            <button
-              onClick={shareToken ? handleCopyLink : handleShare}
-              disabled={sharing}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 10, background: copied ? "linear-gradient(135deg,#7B2FFF,#00D2FD)" : "rgba(255,255,255,0.05)", border: `1px solid ${copied ? "transparent" : "rgba(255,255,255,0.1)"}`, color: copied ? "white" : "#64748b", fontSize: 12, fontWeight: 600, cursor: sharing ? "not-allowed" : "pointer", opacity: sharing ? 0.6 : 1, fontFamily: "inherit", transition: "all 0.18s" }}
-            >
-              {copied ? <Check size={13} /> : <Share2 size={13} />}
-              {!isMobile && (copied ? "Copied!" : "Share")}
-            </button>
-
-            {/* Shuffle */}
-            <button
-              onClick={handleToggleShuffle}
-              title={shuffleMode ? "Sectioned view" : "Shuffle questions"}
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 10, background: shuffleMode ? "linear-gradient(135deg,#7B2FFF,#00D2FD)" : "rgba(255,255,255,0.05)", border: `1px solid ${shuffleMode ? "transparent" : "rgba(255,255,255,0.1)"}`, color: shuffleMode ? "white" : "#64748b", cursor: "pointer", fontFamily: "inherit", transition: "all 0.18s" }}
-            >
-              <Shuffle size={14} />
-            </button>
-
-            {/* Reprocess */}
-            <button
-              onClick={handleProcess}
-              disabled={processing}
-              title="Reprocess lecture"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#64748b", cursor: processing ? "not-allowed" : "pointer", opacity: processing ? 0.6 : 1, fontFamily: "inherit" }}
-            >
-              <RefreshCw size={14} style={{ animation: processing ? "spin 0.8s linear infinite" : "none" }} />
-            </button>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+              {saveStatus === "saving" && <Loader2 size={16} style={{ color: "#94a3b8", animation: "spin 0.8s linear infinite" }} />}
+              {saveStatus === "saved"  && <Cloud    size={18} style={{ color: "#4ade80" }} />}
+              {saveStatus === "idle"   && <CloudOff size={18} style={{ color: "#64748b" }} />}
+            </div>
           </div>
         </div>
+        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: `Lecture #${lectureId}` }]} />
       </header>
 
       <main style={{ maxWidth: 1280, margin: "0 auto", padding: isMobile ? "20px 14px" : "28px 20px" }}>
-
-        {/* Breadcrumb */}
-        <nav style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 22 }}>
-          <Link href="/dashboard" style={{ color: "#64748b", textDecoration: "none", transition: "color 0.15s" }}
-            onMouseEnter={e => (e.currentTarget.style.color = "#94a3b8")}
-            onMouseLeave={e => (e.currentTarget.style.color = "#64748b")}
-          >Dashboard</Link>
-          <ChevronRight size={13} style={{ color: "#3a3f60" }} />
-          <span style={{ color: "#94a3b8" }}>Lecture #{lectureId}</span>
-        </nav>
 
         {/* Title */}
         <div style={{ marginBottom: 24 }}>

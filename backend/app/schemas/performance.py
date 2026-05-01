@@ -178,3 +178,43 @@ class NextQuestionResponse(BaseModel):
     question: Optional[McqQuestionOut] = None
     reason: str
     # 'weak_topic' | 'dangerous_misconception' | 'co_failure_topic' | 'standard' | 'session_complete'
+
+
+# ── FSRS next session ─────────────────────────────────────────────────────────
+
+class FsrsDueQuestion(BaseModel):
+    id: str
+    question_text: str
+    topic: str
+    days_overdue: int
+    lapses: int
+    state: int  # 0=New,1=Learning,2=Review,3=Relearning
+
+
+class FsrsDueTopic(BaseModel):
+    topic: str
+    due_count: int
+    priority: str   # "critical" | "high" | "normal"
+    questions: List[FsrsDueQuestion]
+
+
+class NextSessionResponse(BaseModel):
+    due_count: int
+    topics: List[FsrsDueTopic]
+
+
+# ── FSRS study schedule ───────────────────────────────────────────────────────
+
+class TopicRetentionInfo(BaseModel):
+    topic: str
+    retention_pct: float        # 0–100, current estimated memory retention
+    due_count: int              # cards overdue right now
+    next_due: Optional[datetime] = None
+    avg_stability_days: float   # average FSRS stability across cards in this topic
+    total_cards: int
+
+
+class StudyScheduleResponse(BaseModel):
+    topics: List[TopicRetentionInfo]
+    total_due_today: int
+    total_cards: int

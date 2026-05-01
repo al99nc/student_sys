@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { getResults, recordQuizResult, coachGeneratePractice, FreshMCQ } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { StepNav } from "@/components/step-nav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -170,18 +171,10 @@ export default function QuizPage() {
               {fromConvId ? "Back to Coach" : "Back to Results"}
             </Link>
           </div>
+          <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Results", href: `/results/${lectureId}` }, { label: "Quiz Complete" }]} />
         </header>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          {/* Breadcrumb */}
-          <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-            <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
-            <span>/</span>
-            <Link href={`/results/${lectureId}`} className="hover:text-foreground transition-colors">Results</Link>
-            <span>/</span>
-            <span className="text-foreground">Quiz Complete</span>
-          </nav>
-
           {/* Score */}
           <div className="flex flex-col items-center justify-center py-12 gap-6">
             <Badge variant="outline" className="text-xs font-medium tracking-wider uppercase">
@@ -276,20 +269,12 @@ export default function QuizPage() {
             </Link>
           </div>
         </div>
-        {/* Progress bar — sits flush under the header border */}
+        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Results", href: `/results/${lectureId}` }, { label: "Quiz" }]} />
+        {/* Quiz progress bar */}
         <Progress value={progress} className="h-0.5 rounded-none" />
       </header>
 
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-8">
-          <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
-          <span>/</span>
-          <Link href={`/results/${lectureId}`} className="hover:text-foreground transition-colors">Results</Link>
-          <span>/</span>
-          <span className="text-foreground">Quiz</span>
-        </nav>
-
         {/* Question */}
         <h1 className="text-xl sm:text-2xl font-bold text-foreground leading-snug tracking-tight mb-8">
           {q.question}

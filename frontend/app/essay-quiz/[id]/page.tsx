@@ -5,16 +5,18 @@ import Link from "next/link";
 import {
   getEssayResults,
   gradeEssayAnswer,
+  createShareLink,
   EssayQuestion,
   EssayGradeResult,
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { StepNav } from "@/components/step-nav";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   ArrowLeft, Brain, CheckCircle2, XCircle, Loader2,
-  ChevronRight, Home, BarChart3, BookOpen, Target,
+  ChevronRight, Home, BarChart3, BookOpen, Target, Share2, Check,
 } from "lucide-react";
 
 interface GradedAnswer {
@@ -57,6 +59,9 @@ export default function EssayQuizPage() {
   const [gradedAnswers, setGradedAnswers] = useState<(GradedAnswer | null)[]>([]);
   const [showIdeal, setShowIdeal]   = useState(false);
   const [done, setDone]             = useState(false);
+  const [sharing, setSharing]       = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [copied, setCopied]         = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
@@ -98,6 +103,23 @@ export default function EssayQuizPage() {
       setGradeError("");
     } else {
       setDone(true);
+    }
+  };
+
+  const handleShare = async () => {
+    setSharing(true);
+    try {
+      let token = shareToken;
+      if (!token) {
+        const res = await createShareLink(lectureId);
+        token = res.data.share_token;
+        setShareToken(token);
+      }
+      await navigator.clipboard.writeText(`${window.location.origin}/shared/${token}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch { /* silent */ } finally {
+      setSharing(false);
     }
   };
 
@@ -171,12 +193,16 @@ export default function EssayQuizPage() {
             </div>
 
             <div className="flex gap-3 pt-2">
-              <Link href="/lectures" className="flex-1">
-                <Button variant="outline" className="w-full gap-2">
-                  <BookOpen className="w-4 h-4" />View MCQs
-                </Button>
-              </Link>
-              <Link href="/lectures" className="flex-1">
+              <Button
+                variant="outline"
+                className="flex-1 gap-2"
+                onClick={handleShare}
+                disabled={sharing}
+              >
+                {copied ? <Check className="w-4 h-4 text-green-400" /> : <Share2 className="w-4 h-4" />}
+                {copied ? "Copied!" : sharing ? "…" : "Share"}
+              </Button>
+              <Link href="/dashboard" className="flex-1">
                 <Button className="w-full synapse-gradient text-white gap-2">
                   <Home className="w-4 h-4" />Dashboard
                 </Button>
@@ -194,23 +220,24 @@ export default function EssayQuizPage() {
       <div className="grain-overlay" />
 
       {/* Header */}
-      <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-card/80 backdrop-blur-xl z-50 border-b border-border/50">
-        <div className="flex items-center gap-4">
-          <Link href="/lectures" className="text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <span className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">
-            cortexQ
-          </span>
+      <header className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border/50">
+        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <Link href="/lectures" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <span className="text-xl font-bold text-foreground">cortexQ</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Brain className="w-4 h-4 text-violet-400" />
+            <span className="font-semibold text-violet-400">Essay Mode</span>
+            <span>· Q{current + 1}/{questions.length}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Brain className="w-4 h-4 text-violet-400" />
-          <span className="font-semibold text-violet-400">Essay Mode</span>
-          <span>· Q{current + 1}/{questions.length}</span>
-        </div>
+        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Lectures", href: "/lectures" }, { label: "Essay Quiz" }]} />
       </header>
 
-      <main className="flex-grow flex flex-col items-center justify-start px-4 sm:px-6 max-w-3xl mx-auto w-full pt-24 pb-32 space-y-6">
+      <main className="flex-grow flex flex-col items-center justify-start px-4 sm:px-6 max-w-3xl mx-auto w-full pt-8 pb-32 space-y-6">
 
         {/* Progress bar */}
         <div className="w-full space-y-1">
