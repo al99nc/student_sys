@@ -40,7 +40,7 @@ API_HASH     = os.environ["TELEGRAM_API_HASH"]
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "")   # e.g. "cortexq_bot" (no @)
 PHONE        = os.environ.get("TELEGRAM_PHONE", "")  # e.g. "+1234567890"
 
-SESSION_FILE = os.path.join(os.path.dirname(__file__), "owner")
+SESSION_FILE = os.path.join(os.path.dirname(__file__), "sessions", "owner")
 
 
 def _extract_invite(link: str):
