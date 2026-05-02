@@ -22,6 +22,13 @@ services:
       - CHECKOUT_CURRENCY=${CHECKOUT_CURRENCY:-usd}
       - CREDIT_COST_MCQ_PROCESS=${CREDIT_COST_MCQ_PROCESS:-1}
       - CREDIT_COST_COACH_MESSAGE=${CREDIT_COST_COACH_MESSAGE:-1}
+      - open_rout_PAID_API_KEY=${open_rout_PAID_API_KEY}
+      - open_rout_PAID_MODEL=${open_rout_PAID_MODEL:-google/gemini-2.5-flash}
+      - CHAT_AI_MODEL=${CHAT_AI_MODEL:-llama-3.1-8b-instant}
+      - CHAT_AI_API_KEY=${CHAT_AI_API_KEY}
+      - WAYL_API_KEY=${WAYL_API_KEY}
+      - WAYL_API_BASE_URL=${WAYL_API_BASE_URL:-https://api.thewayl.com}
+      - CREDIT_PRICE_IQD=${CREDIT_PRICE_IQD:-250}
 
   bot:
     build: ./bot
