@@ -61,7 +61,9 @@ function isValid(value: unknown): boolean {
 export default function DashboardPage() {
   const router = useRouter();
   const [lectures, setLectures] = useState<Lecture[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingLectures, setLoadingLectures] = useState(true);
+  const [loadingDash, setLoadingDash] = useState(true);
+  const [loadingNextAction, setLoadingNextAction] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [stats, setStats] = useState({ total_lectures: 0, processed_lectures: 0, total_mcqs_answered: 0, avg_score: 0 });
@@ -84,29 +86,28 @@ export default function DashboardPage() {
     fetchData();
   }, [router]);
 
-  const fetchData = async () => {
-    try {
-      // getDashboard() replaces the previous separate getStats() + getMe() calls.
-      // getLectures, getMySharedSessions, getNextBestAction still run in parallel.
-      const [dashRes, lecturesRes, sharedRes, nextActionRes] = await Promise.all([
-        getDashboard(),
-        getLectures(),
-        getMySharedSessions(),
-        getNextBestAction(),
-      ]);
-      if (dashRes.data.user.name) setUserName(dashRes.data.user.name);
-      setStats(dashRes.data.lecture_stats);
-      setLectures(lecturesRes.data);
-      setSharedSessions(sharedRes.data);
-      setNextAction(nextActionRes.data);
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { status?: number } };
-      if (axiosErr?.response?.status !== 404) {
-        setError("Failed to load dashboard data");
-      }
-    } finally {
-      setLoading(false);
-    }
+  const fetchData = () => {
+    getDashboard()
+      .then((res) => {
+        if (res.data.user.name) setUserName(res.data.user.name);
+        setStats(res.data.lecture_stats);
+      })
+      .catch(() => setError("Failed to load dashboard data"))
+      .finally(() => setLoadingDash(false));
+
+    getLectures()
+      .then((res) => setLectures(res.data))
+      .catch(() => setError("Failed to load lectures"))
+      .finally(() => setLoadingLectures(false));
+
+    getMySharedSessions()
+      .then((res) => setSharedSessions(res.data))
+      .catch(() => {});
+
+    getNextBestAction()
+      .then((res) => setNextAction(res.data))
+      .catch(() => {})
+      .finally(() => setLoadingNextAction(false));
   };
 
   return (
@@ -149,10 +150,10 @@ export default function DashboardPage() {
                 <p className="text-sm font-medium text-muted-foreground mb-4">Overview</p>
                 <div className="space-y-4">
                   {[
-                    { label: "Total Uploads", icon: FileText, value: loading ? "—" : String(stats.total_lectures) },
-                    { label: "Processed", icon: CheckCircle2, value: loading ? "—" : String(stats.processed_lectures) },
-                    { label: "MCQs Answered", icon: Target, value: loading ? "—" : String(stats.total_mcqs_answered) },
-                    { label: "Avg. Score", icon: BarChart3, value: loading ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—%" },
+                    { label: "Total Uploads", icon: FileText, value: loadingDash ? "—" : String(stats.total_lectures) },
+                    { label: "Processed", icon: CheckCircle2, value: loadingDash ? "—" : String(stats.processed_lectures) },
+                    { label: "MCQs Answered", icon: Target, value: loadingDash ? "—" : String(stats.total_mcqs_answered) },
+                    { label: "Avg. Score", icon: BarChart3, value: loadingDash ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—%" },
                   ].map((s) => (
                     <div key={s.label} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -186,7 +187,7 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Next action */}
-                <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 mb-4">
+                <div className={`rounded-xl bg-primary/5 border border-primary/20 p-4 mb-4 transition-opacity ${loadingNextAction ? "animate-pulse opacity-60" : ""}`}>
                   <p className="text-xs font-medium text-primary mb-1">
                     {nextAction?.action_type?.replace(/_/g, " ") || "Exploration Mode"}
                   </p>
@@ -341,7 +342,7 @@ export default function DashboardPage() {
                 </Button>
               </CardHeader>
               <CardContent className="p-6">
-                {loading ? (
+                {loadingLectures ? (
                   <div className="flex items-center justify-center py-12">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
                   </div>

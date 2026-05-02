@@ -89,8 +89,14 @@ export default function LecturesPage() {
         .filter((lecture: any) => lecture.is_processed)
         .map((lecture: any) =>
           Promise.all([
-            getResults(lecture.id).catch(() => null),
-            getQuizSession(lecture.id).catch(() => null),
+            getResults(lecture.id).catch((e: unknown) => {
+              if ((e as { response?: { status?: number } })?.response?.status === 404) return null;
+              throw e;
+            }),
+            getQuizSession(lecture.id).catch((e: unknown) => {
+              if ((e as { response?: { status?: number } })?.response?.status === 404) return null;
+              throw e;
+            }),
           ]).then(([resResult, sessionResult]) => {
             const mcqs = resResult?.data?.mcqs || [];
             const rawAnswers: Record<string, any> = sessionResult?.data?.answers || {};

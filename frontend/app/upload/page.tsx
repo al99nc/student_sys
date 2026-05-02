@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   uploadLecture,
@@ -22,13 +22,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   CloudUpload, FileText, Loader2, CheckCircle2,
   BookOpen, Medal, Brain, Layers,
-  Camera, ClipboardPaste, RotateCcw, Image as ImageIcon,
-  AlignLeft, ImagePlus, XCircle, ScanLine,
+  ClipboardPaste, Image as ImageIcon,
+  AlignLeft, ImagePlus, XCircle,
 } from "lucide-react";
 
 type Tab = "study" | "exam";
 type Mode = "highyield" | "exam" | "harder";
-type InputMode = "file" | "camera" | "paste";
+type InputMode = "file" | "paste";
 
 // ── Validation types ─────────────────────────────────────────────────────────
 interface ValidationResult {
@@ -193,6 +193,83 @@ function TelegramAnnouncement() {
   );
 }
 
+// ── Telegram in-app announcement (shown once when opening upload inside Telegram) ──
+function TelegramInAppAnnouncement({ onDismiss }: { onDismiss: () => void }) {
+  const [seconds, setSeconds] = useState(10);
+  const done = seconds === 0;
+  const { webApp } = useTelegram();
+
+  useEffect(() => {
+    if (done) return;
+    const t = setInterval(() => setSeconds((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [done]);
+
+  const save = () => localStorage.setItem("cortexq_tg_upload_tip_v1", "1");
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-background/85 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        <div className="h-1 bg-muted w-full overflow-hidden">
+          <div
+            className="h-full bg-foreground"
+            style={{
+              width: `${((10 - seconds) / 10) * 100}%`,
+              transition: seconds < 10 ? "width 1s linear" : "none",
+            }}
+          />
+        </div>
+        <div className="p-7 sm:p-9">
+          <div className="flex items-center justify-between mb-7">
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+              wait real quick
+            </span>
+            <span className="text-xs font-mono tabular-nums text-muted-foreground">
+              {done ? "✓ ok now go" : `${seconds}s`}
+            </span>
+          </div>
+          <div className="space-y-5 mb-8">
+            <h2 className="text-2xl font-bold text-foreground leading-snug">
+              bro you found the mini app 💀
+            </h2>
+            <p className="text-sm text-foreground/85 leading-relaxed">
+              okay real talk — you&apos;re already in telegram and you&apos;re trying to upload from HERE?? bestie we literally made this easier for you and you chose chaos 😭
+            </p>
+            <p className="text-sm text-foreground/85 leading-relaxed">
+              <span className="font-bold text-foreground">the actual move:</span> close this window, go to the bot chat, and just{" "}
+              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">forward your file</span>{" "}
+              directly. it pops up here automatically. zero digging through your files app. we did the work bestie ✨
+            </p>
+            <p className="text-sm text-foreground/85 leading-relaxed">
+              close this → go to bot → forward file → come back. that&apos;s it. that&apos;s the whole thing 🍳
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={done ? () => { save(); webApp?.close(); } : undefined}
+              disabled={!done}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-foreground text-background text-sm font-bold transition-opacity ${done ? "hover:opacity-90 cursor-pointer" : "opacity-50 cursor-not-allowed"}`}
+            >
+              close &amp; forward files →
+            </button>
+            <button
+              onClick={done ? () => { save(); onDismiss(); } : undefined}
+              disabled={!done}
+              className={`flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                done
+                  ? "border-border text-foreground hover:bg-muted cursor-pointer"
+                  : "border-border/25 text-muted-foreground/35 cursor-not-allowed select-none"
+              }`}
+            >
+              {done ? "nah I'll upload here" : `wait ${seconds}s…`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 function UploadContent() {
   const router = useRouter();
@@ -201,12 +278,14 @@ function UploadContent() {
 
   const fileInputRef    = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
-  const videoRef        = useRef<HTMLVideoElement>(null);
-  const canvasRef       = useRef<HTMLCanvasElement>(null);
-  const streamRef       = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { isInTelegram, mainButton } = useTelegram();
+  const [showTgAnnouncement, setShowTgAnnouncement] = useState(false);
+  useEffect(() => {
+    if (isInTelegram && !localStorage.getItem("cortexq_tg_upload_tip_v1")) {
+      setShowTgAnnouncement(true);
+    }
+  }, [isInTelegram]);
 
   // ── User entitlements (for Smart Context gate) ───────────────────────────
   const [userPlan, setUserPlan]             = useState<"free" | "pro" | "enterprise">("free");
@@ -236,16 +315,7 @@ function UploadContent() {
   const [tgFileLoading, setTgFileLoading] = useState(false);
   const [tgFileReady, setTgFileReady]   = useState(false);
 
-  // ── Camera state ─────────────────────────────────────────────────────────
-  const [cameraActive, setCameraActive]       = useState(false);
-  const [capturedImage, setCapturedImage]     = useState<string | null>(null);
-  const [capturedValidation, setCapturedValidation] = useState<ValidationResult | null>(null);
   const [extractingText, setExtractingText]   = useState(false);
-  const [cameraError, setCameraError]         = useState("");
-  // Scan animation — pulses the frame when camera is live
-  const [scanLine, setScanLine]               = useState(0); // 0–100 position %
-  const [steadyCount, setSteadyCount]         = useState(0);
-  const [autoCapturing, setAutoCapturing]     = useState(false);
 
   // ── Paste state ──────────────────────────────────────────────────────────
   const [pasteText, setPasteText]           = useState("");
@@ -320,23 +390,6 @@ function UploadContent() {
         .finally(() => setTgFileLoading(false));
     }
   }, [processId, router, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Cleanup on unmount ────────────────────────────────────────────────────
-  useEffect(() => () => { stopCamera(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Scan line animation when camera active ────────────────────────────────
-  useEffect(() => {
-    if (!cameraActive) { setScanLine(0); return; }
-    let pos = 0;
-    let dir = 1;
-    scanIntervalRef.current = setInterval(() => {
-      pos += dir * 2;
-      if (pos >= 100) dir = -1;
-      if (pos <= 0)   dir = 1;
-      setScanLine(pos);
-    }, 16);
-    return () => { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); };
-  }, [cameraActive]);
 
   // ── Global paste listener ─────────────────────────────────────────────────
   useEffect(() => {
@@ -414,8 +467,6 @@ function UploadContent() {
     } else if (inputMode === "paste" && !pastedImage && !galleryImage) {
       const v = validateText(pasteText);
       if (!v.valid) { setError(v.error!); return; }
-    } else if (inputMode === "camera" && !capturedImage) {
-      setError("Please capture a photo first"); return;
     }
 
     setUploading(true);
@@ -451,22 +502,6 @@ function UploadContent() {
           lectureId = res.data.id;
         }
 
-      } else if (inputMode === "camera" && capturedImage) {
-        const imageFile = dataURLtoFile(capturedImage, "camera.jpg");
-        const imgV = validateImage(imageFile);
-        if (!imgV.valid) { setError(imgV.error!); setUploading(false); return; }
-        setExtractingText(true);
-        let extracted = "";
-        try {
-          const extRes = await extractImageText(imageFile);
-          extracted = extRes.data.text;
-        } finally { setExtractingText(false); }
-        if (!extracted || extracted.trim().length < 50) {
-          setError("Couldn't read enough text from the photo. Try better lighting or a closer shot.");
-          setUploading(false); return;
-        }
-        const res = await uploadText(extracted, "Camera capture");
-        lectureId = res.data.id;
       } else {
         setError("No content to process"); setUploading(false); return;
       }
@@ -516,64 +551,10 @@ function UploadContent() {
     reader.readAsDataURL(selected);
   };
 
-  // ── Camera ────────────────────────────────────────────────────────────────
-  const startCamera = useCallback(async () => {
-    setCameraError("");
-    setCapturedImage(null);
-    setCapturedValidation(null);
-    setSteadyCount(0);
-    setAutoCapturing(false);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-      setCameraActive(true);
-    } catch {
-      setCameraError("Camera access denied. Allow camera permission and try again.");
-    }
-  }, []);
-
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setCameraActive(false);
-    if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
-  }, []);
-
-  const capturePhoto = useCallback(() => {
-    const video  = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")?.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
-    setCapturedImage(dataUrl);
-    // Validate the captured image
-    const f = dataURLtoFile(dataUrl, "capture.jpg");
-    setCapturedValidation(validateImage(f));
-    stopCamera();
-  }, [stopCamera]);
-
-  const resetCamera = useCallback(() => {
-    setCapturedImage(null);
-    setCapturedValidation(null);
-    setError("");
-    startCamera();
-  }, [startCamera]);
-
   // ── Input mode switch ──────────────────────────────────────────────────────
   const switchInputMode = (m: InputMode) => {
-    if (inputMode === "camera") stopCamera();
     setInputMode(m);
     setError("");
-    setCapturedImage(null);
-    setCapturedValidation(null);
     setPastedImage(null);
     setGalleryImage(null);
     setGalleryValidation(null);
@@ -586,8 +567,7 @@ function UploadContent() {
       (!!pastedImage && (pasteValidation?.valid ?? true)) ||
       (!!galleryImage && (galleryValidation?.valid ?? true)) ||
       (pasteText.trim().length >= 100 && (pasteValidation?.valid ?? false))
-    )) ||
-    (inputMode === "camera" && !!capturedImage && (capturedValidation?.valid ?? true))
+    ))
   );
 
   const submitLabel = extractingText ? "Extracting text from image…"
@@ -684,6 +664,9 @@ function UploadContent() {
   return (
     <div className="relative min-h-screen bg-background text-foreground flex flex-col">
       {!isInTelegram && <TelegramAnnouncement />}
+      {isInTelegram && showTgAnnouncement && (
+        <TelegramInAppAnnouncement onDismiss={() => setShowTgAnnouncement(false)} />
+      )}
 
       {!isInTelegram && <AppHeader activePage="Upload" />}
 
@@ -696,7 +679,7 @@ function UploadContent() {
               Expand Your Intelligence
             </h1>
             <p className="text-muted-foreground max-w-xl mx-auto text-lg font-medium leading-relaxed">
-              Upload a PDF, snap a photo, or paste your notes — AI converts them into exam-ready MCQs.
+              Upload a PDF or paste your notes — AI converts them into exam-ready MCQs.
             </p>
             <div className="flex justify-center pt-1">
               <a
@@ -812,9 +795,8 @@ function UploadContent() {
           <div className="w-full max-w-3xl mx-auto">
             <div className="flex gap-2 justify-center mb-6">
               {([
-                { id: "file",   icon: CloudUpload,    label: "PDF File" },
-                { id: "camera", icon: Camera,         label: "Camera"   },
-                { id: "paste",  icon: ClipboardPaste, label: "Paste"    },
+                { id: "file",  icon: CloudUpload,    label: "PDF File" },
+                { id: "paste", icon: ClipboardPaste, label: "Paste"    },
               ] as { id: InputMode; icon: React.ElementType; label: string }[]).map(({ id, icon: Icon, label }) => (
                 <button key={id} onClick={() => switchInputMode(id)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
@@ -876,183 +858,6 @@ function UploadContent() {
                     </>
                   )}
                 </div>
-              </div>
-            )}
-
-            {/* ── CAMERA ───────────────────────────────────────────────── */}
-            {inputMode === "camera" && (
-              <div className="w-full rounded-2xl overflow-hidden border border-border/50 bg-black">
-
-                {capturedImage ? (
-                  /* ── Preview ── */
-                  <div className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={capturedImage}
-                      alt="Captured"
-                      className="w-full object-contain max-h-[480px]"
-                    />
-                    {/* Top bar */}
-                    <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/70 to-transparent">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-white" />
-                        <span className="text-white text-sm font-medium">Photo captured</span>
-                      </div>
-                      <button
-                        onClick={resetCamera}
-                        className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-medium transition-colors"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Retake
-                      </button>
-                    </div>
-                    {/* Bottom bar */}
-                    <div className="absolute bottom-0 left-0 right-0 px-4 py-4 bg-gradient-to-t from-black/80 to-transparent">
-                      <ValidationBadge v={capturedValidation} />
-                      {capturedValidation?.valid && (
-                        <p className="text-white/60 text-xs mt-1">AI will extract the text from this image</p>
-                      )}
-                    </div>
-                  </div>
-
-                ) : cameraActive ? (
-                  /* ── Live feed ── */
-                  <div className="relative">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full object-cover max-h-[480px]"
-                    />
-
-                    {/* Corner frame overlay */}
-                    <div className="absolute inset-6 pointer-events-none">
-                      {([
-                        "top-0 left-0 border-t-2 border-l-2",
-                        "top-0 right-0 border-t-2 border-r-2",
-                        "bottom-0 left-0 border-b-2 border-l-2",
-                        "bottom-0 right-0 border-b-2 border-r-2",
-                      ] as const).map((cls, i) => (
-                        <div key={i} className={`absolute w-8 h-8 border-white/80 rounded-sm ${cls}`} />
-                      ))}
-
-                      {/* Scan line */}
-                      <div
-                        className="absolute left-0 right-0 h-px pointer-events-none"
-                        style={{
-                          top: `${scanLine}%`,
-                          background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.6) 50%, transparent 100%)",
-                        }}
-                      />
-                    </div>
-
-                    {/* Top hint */}
-                    <div className="absolute top-0 left-0 right-0 flex items-center justify-center pt-4 pb-8 bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
-                      <div className="flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full px-4 py-1.5">
-                        <ScanLine className="w-3.5 h-3.5 text-white/80" />
-                        <span className="text-white/80 text-xs font-medium">
-                          {autoCapturing ? "Hold steady…" : "Align document within the frame"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Bottom controls */}
-                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-6 pb-6 pt-12 bg-gradient-to-t from-black/80 to-transparent">
-                      <button
-                        onClick={stopCamera}
-                        className="text-white/60 hover:text-white text-sm font-medium transition-colors w-20 text-left"
-                      >
-                        Cancel
-                      </button>
-
-                      {/* Shutter button */}
-                      <button
-                        onClick={capturePhoto}
-                        className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center hover:scale-95 active:scale-90 transition-transform"
-                      >
-                        <div className="w-12 h-12 rounded-full bg-white" />
-                      </button>
-
-                      <div className="w-20" />
-                    </div>
-                  </div>
-
-                ) : (
-                  /* ── Start screen ── */
-                  <div className="flex flex-col items-center justify-center gap-6 px-8 py-16">
-                    {cameraError ? (
-                      <>
-                        <div className="w-16 h-16 rounded-2xl bg-destructive/20 flex items-center justify-center">
-                          <XCircle className="w-8 h-8 text-destructive" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm font-medium text-foreground mb-1">Camera access denied</p>
-                          <p className="text-xs text-muted-foreground max-w-xs">{cameraError}</p>
-                        </div>
-                        <Button
-                          variant="outline"
-                          onClick={startCamera}
-                          className="gap-2"
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                          Try again
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-16 h-16 rounded-full border-2 border-white/20 flex items-center justify-center">
-                          <Camera className="w-8 h-8 text-white/70" />
-                        </div>
-                        <div className="text-center">
-                          <h3 className="text-lg font-semibold text-white mb-1">Snap your notes</h3>
-                          <p className="text-sm text-white/50 max-w-xs leading-relaxed">
-                            Point at any handwritten notes, textbook page, or whiteboard — AI reads it for you
-                          </p>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
-                          <button
-                            onClick={startCamera}
-                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors"
-                          >
-                            <Camera className="w-4 h-4" />
-                            Open Camera
-                          </button>
-                          <button
-                            onClick={() => galleryInputRef.current?.click()}
-                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-white/20 text-white/80 hover:bg-white/10 text-sm font-medium transition-colors"
-                          >
-                            <ImagePlus className="w-4 h-4" />
-                            From Gallery
-                          </button>
-                        </div>
-                      </>
-                    )}
-
-                    <input
-                      ref={galleryInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        const v = validateImage(f);
-                        if (!v.valid) { setError(v.error!); return; }
-                        setError("");
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          const dataUrl = ev.target?.result as string;
-                          setCapturedImage(dataUrl);
-                          setCapturedValidation(v);
-                        };
-                        reader.readAsDataURL(f);
-                      }}
-                    />
-                  </div>
-                )}
-
-                <canvas ref={canvasRef} className="hidden" />
               </div>
             )}
 

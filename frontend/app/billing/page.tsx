@@ -62,7 +62,7 @@ function BillingContent() {
       setUser(meRes.data);
       setEnt(entRes.data);
     } catch {
-      // best-effort
+      setError("Could not refresh balance. Please reload the page.");
     } finally {
       setRefreshing(false);
     }
@@ -82,7 +82,10 @@ function BillingContent() {
         if (checkout === "success" && waylRef) {
           try {
             await verifyWaylPayment(waylRef);
-          } catch { /* already credited or not complete yet — ignore */ }
+          } catch (e: unknown) {
+            const status = (e as { response?: { status?: number } })?.response?.status;
+            if (!status || status >= 500) throw e;
+          }
           sessionStorage.removeItem("wayl_ref");
         }
 

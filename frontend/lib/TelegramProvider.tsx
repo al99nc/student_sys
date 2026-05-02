@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useEffect, useRef, useState, ReactNode } from "react";
+import { useRouter, usePathname } from "next/navigation";
 
 // ── Telegram WebApp type declarations ─────────────────────────────────────
 
@@ -122,32 +123,99 @@ async function loginWithTelegram(initData: string): Promise<void> {
   localStorage.setItem("token", data.access_token);
 }
 
+// Pages where no back button should appear
+const ROOT_PAGES = new Set(["/", "/auth", "/dashboard"]);
+
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [webApp, setWebApp] = useState<TelegramWebApp | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
 
-  // Block the iOS/iPad left-edge swipe-back gesture globally.
-  // touchstart is passive (no lag); touchmove is non-passive so we can preventDefault.
+  // Keep a stable router ref so touch handlers don't need router in their dep array
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; }, [router]);
+
+  // History stack: track pages visited within this session so we know when
+  // to show the back button and what to fall back to if history is empty.
+  const historyStack = useRef<string[]>([]);
+  useEffect(() => {
+    const stack = historyStack.current;
+    if (stack.length === 0 || stack[stack.length - 1] !== pathname) {
+      stack.push(pathname);
+    }
+  }, [pathname]);
+
+  // Show/hide Telegram's native back button and wire it to navigation.
+  useEffect(() => {
+    if (!webApp?.BackButton) return;
+
+    if (ROOT_PAGES.has(pathname)) {
+      webApp.BackButton.hide();
+      return;
+    }
+
+    webApp.BackButton.show();
+
+    const handleBack = () => {
+      historyStack.current.pop();
+      if (window.history.length > 1) {
+        routerRef.current.back();
+      } else {
+        routerRef.current.push("/dashboard");
+      }
+    };
+
+    webApp.BackButton.onClick(handleBack);
+    return () => { webApp.BackButton.offClick(handleBack); };
+  }, [pathname, webApp]);
+
+  // Left-edge swipe gesture: prevent OS default, then navigate back on release.
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
       swipeStartX.current = e.touches[0].clientX;
       swipeStartY.current = e.touches[0].clientY;
     };
+
     const onTouchMove = (e: TouchEvent) => {
       if (!e.cancelable) return;
       const dx = e.touches[0].clientX - swipeStartX.current;
       const dy = e.touches[0].clientY - swipeStartY.current;
-      // Swipe starting within 30px of left edge, moving right, more horizontal than vertical
+      // Block the native iOS swipe-back so we can handle it ourselves
       if (swipeStartX.current < 30 && dx > 8 && Math.abs(dx) > Math.abs(dy)) {
         e.preventDefault();
       }
     };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - swipeStartX.current;
+      const dy = e.changedTouches[0].clientY - swipeStartY.current;
+      const isEdgeSwipeBack =
+        swipeStartX.current < 30 &&
+        dx > 60 &&
+        Math.abs(dx) > Math.abs(dy) * 1.5;
+
+      if (isEdgeSwipeBack) {
+        const currentPath = window.location.pathname;
+        if (!ROOT_PAGES.has(currentPath)) {
+          historyStack.current.pop();
+          if (window.history.length > 1) {
+            routerRef.current.back();
+          } else {
+            routerRef.current.push("/dashboard");
+          }
+        }
+      }
+    };
+
     document.addEventListener("touchstart", onTouchStart, { passive: true });
     document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
     };
   }, []);
 
