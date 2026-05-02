@@ -35,6 +35,12 @@ class User(Base):
     stripe_customer_id = Column(String(255), nullable=True)
     # Allow spending credits to keep using AI features when limits are hit
     extra_usage_enabled = Column(Integer, default=1, server_default="1", nullable=False)
+    # Monthly credit spend cap (NULL = unlimited). Auto-disables toggle when reached.
+    monthly_credit_limit = Column(Integer, nullable=True)
+    # Credits spent this calendar month (resets lazily on first spend of a new month)
+    monthly_credits_used = Column(Integer, default=0, server_default="0", nullable=False)
+    # "YYYY-MM" of the last monthly reset — used to detect a new month
+    monthly_reset_month = Column(String(7), nullable=True)
     # Admin flag — only set via direct DB update, never via API
     is_admin = Column(Integer, default=0, server_default="0", nullable=False)
     # IP address at signup — used to prevent trial abuse

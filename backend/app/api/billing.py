@@ -62,6 +62,10 @@ class WaylCheckoutOut(BaseModel):
     reference_id: str
 
 
+class MonthlyLimitBody(BaseModel):
+    limit: int | None = Field(None, ge=1, le=10_000, description="Monthly credit spend cap. None to remove the limit.")
+
+
 class EntitlementsOut(BaseModel):
     plan: str
     premium: bool
@@ -77,6 +81,8 @@ class EntitlementsOut(BaseModel):
     credit_cost_mcq_process: float       # actual credits (3.0)
     credit_cost_coach_message: float      # actual credits (0.5)
     extra_usage_enabled: bool
+    monthly_credit_limit: int | None     # None = unlimited
+    monthly_credits_used: int
     # Capability flags — false for free, true for pro/enterprise
     has_coach_memory: bool
     has_analytics: bool
@@ -184,6 +190,8 @@ def get_entitlements(
         credit_cost_mcq_process=settings.CREDIT_COST_MCQ_PROCESS / 2.0,
         credit_cost_coach_message=settings.CREDIT_COST_COACH_MESSAGE / 2.0,
         extra_usage_enabled=bool(current_user.extra_usage_enabled),
+        monthly_credit_limit=current_user.monthly_credit_limit,
+        monthly_credits_used=current_user.monthly_credits_used or 0,
         has_coach_memory=ent.has_coach_memory,
         has_analytics=ent.has_analytics,
         has_exam_simulator=ent.has_exam_simulator,
@@ -220,6 +228,21 @@ def toggle_extra_usage(
         current_user.plan = "pro"
     db.commit()
     return {"extra_usage_enabled": turning_on}
+
+
+@router.put("/monthly-limit", status_code=200)
+def set_monthly_limit(
+    body: MonthlyLimitBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear the monthly credit spend cap. None removes the limit."""
+    current_user.monthly_credit_limit = body.limit
+    db.commit()
+    return {
+        "monthly_credit_limit": body.limit,
+        "monthly_credits_used": current_user.monthly_credits_used or 0,
+    }
 
 
 @router.post("/checkout-session", response_model=CheckoutSessionOut)

@@ -16,6 +16,8 @@ import {
   Loader2,
   Search,
   ChevronRight,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 
 interface MCQ {
@@ -45,6 +47,14 @@ interface SolvedLecture {
   has_essays: boolean;
 }
 
+interface RawLecture {
+  id: number;
+  title: string;
+  created_at: string;
+  is_processed: boolean;
+  has_essays: boolean;
+}
+
 type Tab = "all" | "uploaded";
 
 export default function LecturesPage() {
@@ -55,8 +65,8 @@ export default function LecturesPage() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [allUploads, setAllUploads] = useState<RawLecture[]>([]);
   const [userName, setUserName] = useState("Lecturer");
-
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -71,6 +81,7 @@ export default function LecturesPage() {
       setLoading(true);
       const [meRes, lecturesRes, solvedRes] = await Promise.all([getMe(), getLectures(), getSolvedLectures()]);
       setUserName(meRes.data.name || "Lecturer");
+      setAllUploads(lecturesRes.data);
 
       // Only fetch results/sessions for processed lectures — unprocessed ones
       // will never have either, so calling those endpoints just generates 404s.
@@ -175,6 +186,45 @@ export default function LecturesPage() {
             </div>
           </div>
         </section>
+
+        {/* Continue studying — all uploads with status */}
+        {!loading && allUploads.length > 0 && (
+          <div className="mb-8">
+            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground mb-1">Your uploads</p>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">Continue studying</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {allUploads.map((upload) => {
+                const isReady = upload.is_processed;
+                const href = isReady ? `/results/${upload.id}` : `/upload`;
+                return (
+                  <Link key={upload.id} href={href} prefetch={false}>
+                    <div className="flex items-center gap-3 p-4 rounded-xl border hover:border-primary/40 hover:bg-muted/20 transition-all duration-150">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isReady ? "bg-emerald-500/10" : "bg-amber-500/10"}`}>
+                        {isReady ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <Clock className="w-4 h-4 text-amber-500" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-foreground truncate">{upload.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(upload.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`flex-shrink-0 ${isReady ? "text-emerald-500 border-emerald-500/30 bg-emerald-500/10" : "text-amber-500 border-amber-500/30"}`}
+                      >
+                        {isReady ? "Ready" : "Processing"}
+                      </Badge>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
           <div>

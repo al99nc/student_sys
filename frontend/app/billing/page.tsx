@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -11,6 +11,7 @@ import {
   getBillingConfig,
   getEntitlements,
   toggleExtraUsage,
+  setMonthlyLimit,
   getMe,
   type BillingConfig,
   type Entitlements,
@@ -20,7 +21,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { StepNav } from "@/components/step-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Info, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 
 function formatMoney(cents: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
@@ -28,6 +29,14 @@ function formatMoney(cents: number, currency: string): string {
     currency: currency.toUpperCase(),
   }).format(cents / 100);
 }
+
+const LIMIT_PRESETS: Array<{ label: string; value: number | null }> = [
+  { label: "No limit", value: null },
+  { label: "10", value: 10 },
+  { label: "25", value: 25 },
+  { label: "50", value: 50 },
+  { label: "100", value: 100 },
+];
 
 function BillingContent() {
   const router = useRouter();
@@ -43,21 +52,21 @@ function BillingContent() {
   const [banner, setBanner] = useState<"success" | "canceled" | null>(null);
   const [ent, setEnt] = useState<Entitlements | null>(null);
   const [togglingUsage, setTogglingUsage] = useState(false);
-  const [monthlyLimit, setMonthlyLimit] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("cortexq_monthly_limit");
-      if (saved) return Math.max(1, parseInt(saved, 10));
+  const [savingLimit, setSavingLimit] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refreshEntitlements = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const [meRes, entRes] = await Promise.all([getMe(), getEntitlements()]);
+      setUser(meRes.data);
+      setEnt(entRes.data);
+    } catch {
+      // best-effort
+    } finally {
+      setRefreshing(false);
     }
-    return 1000;
-  });
-  const [editingLimit, setEditingLimit] = useState(false);
-  const [limitInput, setLimitInput] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("cortexq_monthly_limit");
-      if (saved) return saved;
-    }
-    return "1000";
-  });
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -69,7 +78,6 @@ function BillingContent() {
 
     (async () => {
       try {
-        // Auto-verify Wayl payment if returning from checkout
         const waylRef = sessionStorage.getItem("wayl_ref");
         if (checkout === "success" && waylRef) {
           try {
@@ -104,9 +112,12 @@ function BillingContent() {
       : 1;
 
   const balance = user?.credit_balance ?? 0;
-  // derive a "spent" figure — credits consumed relative to monthly limit
-  const spentCredits = Math.max(0, monthlyLimit - balance);
-  const usedPct = monthlyLimit > 0 ? Math.min(100, Math.round((spentCredits / monthlyLimit) * 100)) : 0;
+  const monthlyLimit = ent?.monthly_credit_limit ?? null;
+  const monthlyUsed = ent?.monthly_credits_used ?? 0;
+  const usedPct =
+    monthlyLimit != null && monthlyLimit > 0
+      ? Math.min(100, Math.round((monthlyUsed / monthlyLimit) * 100))
+      : 0;
 
   const handlePay = async () => {
     setError("");
@@ -185,12 +196,36 @@ function BillingContent() {
     setTogglingUsage(true);
     setError("");
     try {
-      const res = await toggleExtraUsage();
-      setEnt((e) => e ? { ...e, extra_usage_enabled: res.data.extra_usage_enabled } : e);
+      await toggleExtraUsage();
+      // Re-fetch authoritative state — the toggle may have been auto-disabled
+      // by the monthly limit on the server side.
+      await refreshEntitlements();
     } catch {
       setError("Could not update credit usage setting.");
     } finally {
       setTogglingUsage(false);
+    }
+  };
+
+  const handleSetLimit = async (value: number | null) => {
+    setSavingLimit(true);
+    setError("");
+    try {
+      const res = await setMonthlyLimit(value);
+      // Update state immediately from the server response — no polling needed.
+      setEnt((e) =>
+        e
+          ? {
+              ...e,
+              monthly_credit_limit: res.data.monthly_credit_limit,
+              monthly_credits_used: res.data.monthly_credits_used,
+            }
+          : e,
+      );
+    } catch {
+      setError("Could not update monthly limit.");
+    } finally {
+      setSavingLimit(false);
     }
   };
 
@@ -237,7 +272,6 @@ function BillingContent() {
                 Allow the app to spend from your credit balance when you reach the free tier limit.
               </p>
             </div>
-            {/* Toggle */}
             <button
               type="button"
               role="switch"
@@ -269,14 +303,30 @@ function BillingContent() {
                 )}
               </p>
             </div>
-            <p className="text-sm text-muted-foreground tabular-nums">{usedPct}% used</p>
+            {monthlyLimit != null ? (
+              <p className="text-sm text-muted-foreground tabular-nums">
+                {monthlyUsed} / {monthlyLimit} credits used
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">No monthly cap</p>
+            )}
           </div>
-          <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] transition-all"
-              style={{ width: `${usedPct}%` }}
-            />
-          </div>
+
+          {monthlyLimit != null && (
+            <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  usedPct >= 100
+                    ? "bg-destructive"
+                    : usedPct >= 80
+                    ? "bg-amber-400"
+                    : "bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD]"
+                }`}
+                style={{ width: `${usedPct}%` }}
+              />
+            </div>
+          )}
+
           {ent && (
             <div className="mt-3 flex gap-6 text-xs text-muted-foreground">
               <span>
@@ -287,71 +337,72 @@ function BillingContent() {
               </span>
             </div>
           )}
-          <button
-            type="button"
-            onClick={handleSyncWayl}
-            disabled={syncing}
-            className="mt-3 text-xs text-[#00D2FD] hover:underline disabled:opacity-50"
-          >
-            {syncing ? "Syncing…" : "↻ Sync Wayl payments"}
-          </button>
+
+          <div className="mt-3 flex items-center gap-4">
+            <button
+              type="button"
+              onClick={handleSyncWayl}
+              disabled={syncing}
+              className="text-xs text-[#00D2FD] hover:underline disabled:opacity-50"
+            >
+              {syncing ? "Syncing…" : "↻ Sync Wayl payments"}
+            </button>
+            <button
+              type="button"
+              onClick={refreshEntitlements}
+              disabled={refreshing}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
-        {/* ── Section: Monthly limit ── */}
-        <div className="bg-card border-x border-border/60 px-6 py-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <p className="text-base font-semibold tabular-nums">{monthlyLimit} credits</p>
-                <Info className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
-              <p className="text-sm text-muted-foreground">Monthly spend limit</p>
-            </div>
-            {editingLimit ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  value={limitInput}
-                  onChange={(e) => setLimitInput(e.target.value)}
-                  className="w-24 h-9 tabular-nums text-sm"
-                />
-                <Button
-                  size="sm"
-                  className="h-9 px-3 text-sm font-medium"
-                  onClick={() => {
-                    const v = Math.max(1, Math.floor(Number(limitInput) || 1));
-                    setMonthlyLimit(v);
-                    setLimitInput(String(v));
-                    localStorage.setItem("cortexq_monthly_limit", String(v));
-                    setEditingLimit(false);
-                  }}
-                >
-                  Save
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-9 px-3 text-sm"
-                  onClick={() => {
-                    setLimitInput(String(monthlyLimit));
-                    setEditingLimit(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 px-4 text-sm font-medium rounded-xl"
-                onClick={() => setEditingLimit(true)}
-              >
-                Adjust limit
-              </Button>
-            )}
+        {/* ── Section: Monthly spend limit ── */}
+        <div className="bg-card border-x border-border/60 px-6 py-5 space-y-3">
+          <div>
+            <p className="text-base font-semibold">Monthly spend limit</p>
+            <p className="text-sm text-muted-foreground">
+              Stop charging credits once you hit this amount. The toggle turns off automatically when the limit is reached.
+            </p>
           </div>
+
+          <div className="grid grid-cols-5 gap-2">
+            {LIMIT_PRESETS.map(({ label, value }) => {
+              const isSelected = monthlyLimit === value;
+              return (
+                <button
+                  key={String(value)}
+                  type="button"
+                  disabled={savingLimit}
+                  onClick={() => handleSetLimit(value)}
+                  className={`rounded-xl py-2.5 text-sm font-semibold transition-all border disabled:opacity-50 ${
+                    isSelected
+                      ? "border-[#7B2FFF] bg-[#7B2FFF]/20 text-white"
+                      : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground"
+                  }`}
+                >
+                  {savingLimit && isSelected ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" />
+                  ) : (
+                    label
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {monthlyLimit != null && (
+            <p className="text-xs text-muted-foreground">
+              {monthlyUsed} of {monthlyLimit} credits used this month
+              {usedPct >= 100 && (
+                <span className="ml-2 text-destructive font-medium">
+                  · Limit reached — toggle auto-disabled
+                </span>
+              )}
+            </p>
+          )}
         </div>
 
         {/* ── Section: Buy credits ── */}
@@ -367,7 +418,6 @@ function BillingContent() {
             </div>
           </div>
 
-          {/* Preset + custom */}
           <div className="grid grid-cols-4 gap-2">
             {[10, 25, 50, 100].map((p) => (
               <button

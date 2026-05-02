@@ -159,6 +159,8 @@ export interface Entitlements {
   credit_cost_mcq_process: number;
   credit_cost_coach_message: number;
   extra_usage_enabled: boolean;
+  monthly_credit_limit: number | null;
+  monthly_credits_used: number;
 }
 
 export const getEntitlements = () =>
@@ -166,6 +168,9 @@ export const getEntitlements = () =>
 
 export const toggleExtraUsage = () =>
   api.post<{ extra_usage_enabled: boolean }>("/billing/extra-usage/toggle");
+
+export const setMonthlyLimit = (limit: number | null) =>
+  api.put<{ monthly_credit_limit: number | null; monthly_credits_used: number }>("/billing/monthly-limit", { limit });
 
 export const createCheckoutSession = (credits: number) =>
   api.post<{ checkout_url: string }>("/billing/checkout-session", { credits });

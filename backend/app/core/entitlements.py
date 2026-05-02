@@ -309,8 +309,10 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
     Pro/Enterprise subscribers always return True without touching the balance —
     their plan covers quota-included actions. Credits on paid plans are overflow
     capacity managed separately.
-    
+
     If extra_usage_enabled is False, return True without spending (action allowed free).
+    Monthly limit enforcement: when monthly_credits_used would exceed
+    monthly_credit_limit, the toggle is auto-disabled and False is returned.
     """
     if amount <= 0:
         return True
@@ -318,9 +320,39 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
         return True  # plan covers this action — no credit charge
     if not user.extra_usage_enabled:
         return True
+
+    # Lazy monthly reset — if it's a new calendar month, clear the counter
+    from datetime import datetime, timezone
+    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    if (user.monthly_reset_month or "") != current_month:
+        db.execute(
+            text(
+                "UPDATE users SET monthly_credits_used = 0, monthly_reset_month = :month "
+                "WHERE id = :id"
+            ),
+            {"month": current_month, "id": user.id},
+        )
+        db.flush()
+        db.refresh(user)
+
+    # Pre-check: would this spend exceed the monthly limit?
+    limit = user.monthly_credit_limit
+    if limit is not None and (user.monthly_credits_used or 0) + amount > limit:
+        # Auto-disable the toggle and downgrade
+        db.execute(
+            text("UPDATE users SET extra_usage_enabled = 0, plan = 'free' WHERE id = :id"),
+            {"id": user.id},
+        )
+        db.commit()
+        db.refresh(user)
+        return False
+
+    # Atomically deduct balance and increment monthly spend in one statement
     res = db.execute(
         text(
-            "UPDATE users SET credit_balance = credit_balance - :amt "
+            "UPDATE users "
+            "SET credit_balance = credit_balance - :amt, "
+            "    monthly_credits_used = COALESCE(monthly_credits_used, 0) + :amt "
             "WHERE id = :id AND credit_balance >= :amt"
         ),
         {"amt": amount, "id": user.id},
@@ -337,6 +369,15 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
             if commit:
                 db.commit()
             db.refresh(user)
+        # Auto-disable toggle if the monthly limit is now exactly hit or exceeded
+        if limit is not None and (user.monthly_credits_used or 0) >= limit:
+            db.execute(
+                text("UPDATE users SET extra_usage_enabled = 0, plan = 'free' WHERE id = :id"),
+                {"id": user.id},
+            )
+            if commit:
+                db.commit()
+            db.refresh(user)
     return ok
 
 
@@ -349,7 +390,12 @@ def refund_credits(db: Session, user: User, amount: int, *, commit: bool = True)
     if not user.extra_usage_enabled:
         return
     db.execute(
-        text("UPDATE users SET credit_balance = credit_balance + :amt WHERE id = :id"),
+        text(
+            "UPDATE users "
+            "SET credit_balance = credit_balance + :amt, "
+            "    monthly_credits_used = MAX(0, COALESCE(monthly_credits_used, 0) - :amt) "
+            "WHERE id = :id"
+        ),
         {"amt": amount, "id": user.id},
     )
     if commit:
