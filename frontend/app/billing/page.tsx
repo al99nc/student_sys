@@ -188,7 +188,7 @@ function BillingContent() {
       const res = await toggleExtraUsage();
       setEnt((e) => e ? { ...e, extra_usage_enabled: res.data.extra_usage_enabled } : e);
     } catch {
-      setError("Could not toggle extra usage setting.");
+      setError("Could not update credit usage setting.");
     } finally {
       setTogglingUsage(false);
     }
@@ -228,13 +228,13 @@ function BillingContent() {
           </div>
         )}
 
-        {/* ── Section: Extra usage toggle ── */}
+        {/* ── Section: Use credits toggle ── */}
         <div className="rounded-t-2xl bg-card border border-border/60 px-6 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold mb-1">Extra usage</h2>
+              <h2 className="text-base font-semibold mb-1">Use credits</h2>
               <p className="text-sm text-muted-foreground">
-                Turn on extra usage to keep using the AI features if you hit a limit.
+                Allow the app to spend from your credit balance when you reach the free tier limit.
               </p>
             </div>
             {/* Toggle */}
@@ -439,7 +439,7 @@ function BillingContent() {
 
           {!(ent?.extra_usage_enabled ?? false) && (
             <p className="text-xs text-muted-foreground text-center">
-              Turn on extra usage above to purchase credits.
+              Enable credit usage above to buy credits.
             </p>
           )}
 

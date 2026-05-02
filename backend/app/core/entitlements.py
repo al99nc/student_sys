@@ -28,11 +28,16 @@ from app.models.models import CoachPerformanceUsage, Lecture, User
 # ── Plan tier ─────────────────────────────────────────────────────────────────
 
 def plan_tier(user: User | None) -> str:
-    """Return "free" | "pro" | "enterprise". Reads directly from user.plan — source of truth."""
+    """Return "free" | "pro" | "enterprise"."""
     if user is None:
         return "free"
     p = (user.plan or "free").lower()
-    return p if p in ("pro", "enterprise") else "free"
+    if p in ("pro", "enterprise"):
+        return p
+    # Credits + toggle on = pro access even if user.plan wasn't updated
+    if bool(user.extra_usage_enabled) and (user.credit_balance or 0) > 0:
+        return "pro"
+    return "free"
 
 
 def is_premium(user: User | None) -> bool:

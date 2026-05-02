@@ -685,6 +685,8 @@ def wayl_verify_payment(
     if current_user.credit_balance is None:
         current_user.credit_balance = 0
     current_user.credit_balance += credits
+    if (current_user.plan or "free") == "free" and bool(current_user.extra_usage_enabled):
+        current_user.plan = "pro"
     db.commit()
 
     logger.info("Wayl manual verify: credited %s credits to user %s (ref %s)", credits, current_user.id, reference_id)
@@ -747,6 +749,8 @@ def wayl_sync_payments(
         total_credits += credits
 
     if credited > 0:
+        if (current_user.plan or "free") == "free" and bool(current_user.extra_usage_enabled):
+            current_user.plan = "pro"
         db.commit()
 
     logger.info("Wayl sync: credited %s credits across %s payments for user %s", total_credits, credited, uid)

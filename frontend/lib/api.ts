@@ -161,7 +161,8 @@ export interface Entitlements {
   extra_usage_enabled: boolean;
 }
 
-export const getEntitlements = () => api.get<Entitlements>("/billing/entitlements");
+export const getEntitlements = () =>
+  api.get<Entitlements>("/billing/entitlements", { params: { _t: Date.now() } });
 
 export const toggleExtraUsage = () =>
   api.post<{ extra_usage_enabled: boolean }>("/billing/extra-usage/toggle");
