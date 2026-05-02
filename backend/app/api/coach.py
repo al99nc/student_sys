@@ -883,43 +883,51 @@ async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list
     _mcq_model = settings.PREMIUM_CHAT_MODEL if premium else settings.FREE_CHAT_MODEL
     _timeout = settings.PREMIUM_CHAT_TIMEOUT_S if premium else settings.FREE_CHAT_TIMEOUT_S
     _chat_url = "https://api.groq.com/openai/v1/chat/completions"
-    _chat_key = settings.CHAT_AI_API_KEY
+    # Free tier: build a key rotation pool from CHAT_AI_API_KEY + AI_API_KEYS
+    _free_keys: list[str] = []
+    if settings.CHAT_AI_API_KEY:
+        _free_keys.append(settings.CHAT_AI_API_KEY)
+    _free_keys += [k for k in settings.get_all_api_keys() if k != settings.CHAT_AI_API_KEY]
+    _chat_key = _free_keys[0] if _free_keys else ""
     if premium and settings.open_rout_PAID_API_KEY:
         _chat_url = "https://openrouter.ai/api/v1/chat/completions"
         _chat_key = settings.open_rout_PAID_API_KEY
         _mcq_model = settings.open_rout_PAID_MODEL
+        _free_keys = []  # single key for premium — no rotation
     elif premium and settings.GEMINI_PAID_API_KEY:
         _chat_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
         _chat_key = settings.GEMINI_PAID_API_KEY
         _mcq_model = settings.GEMINI_PAID_MODEL
+        _free_keys = []
     print(f"[MODEL] coach MCQ generation using: {_mcq_model} (premium={premium})", flush=True)
 
-    try:
-        async with httpx.AsyncClient(timeout=_timeout) as client:
-            resp = await client.post(
-                _chat_url,
-                headers={
-                    "Authorization": f"Bearer {_chat_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _mcq_model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user",   "content": user_prompt},
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 3000,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-            resp.raise_for_status()
+    payload = {
+        "model": _mcq_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ],
+        "temperature": 0.8,
+        "max_tokens": 3000,
+        "response_format": {"type": "json_object"},
+    }
+
+    keys_to_try = _free_keys if _free_keys else [_chat_key]
+    last_exc: Exception = RuntimeError("No API keys configured")
+    for attempt_key in keys_to_try:
+        try:
+            async with httpx.AsyncClient(timeout=_timeout) as client:
+                resp = await client.post(
+                    _chat_url,
+                    headers={"Authorization": f"Bearer {attempt_key}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+                resp.raise_for_status()
             raw = resp.json()["choices"][0]["message"]["content"]
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
             parsed = json.loads(raw)
             questions = parsed.get("questions", [])
-            # Validate each question has required fields
             valid = []
             for q in questions:
                 if (
@@ -934,9 +942,19 @@ async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list
             if not valid:
                 raise ValueError("AI returned no valid questions")
             return valid
-    except Exception as exc:
-        _log.error("_generate_fresh_mcqs failed for topic=%r: %s", topic, exc)
-        raise HTTPException(status_code=502, detail=f"Failed to generate questions: {exc}")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                _log.warning("_generate_fresh_mcqs 429 on key ...%s, rotating", attempt_key[-6:])
+                last_exc = exc
+                continue
+            _log.error("_generate_fresh_mcqs HTTP error for topic=%r: %s", topic, exc)
+            raise HTTPException(status_code=502, detail=f"Failed to generate questions: {exc}")
+        except Exception as exc:
+            _log.error("_generate_fresh_mcqs failed for topic=%r: %s", topic, exc)
+            raise HTTPException(status_code=502, detail=f"Failed to generate questions: {exc}")
+
+    _log.error("_generate_fresh_mcqs: all keys rate-limited for topic=%r", topic)
+    raise HTTPException(status_code=502, detail=f"Failed to generate questions: {last_exc}")
 
 
 # ── Vision AI call (Groq llama-3.2-vision) ────────────────────────────────────

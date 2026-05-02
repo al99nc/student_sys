@@ -532,7 +532,9 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
 
       setPracticeModal(prev => prev ? { ...prev, questions, generating: false } : null);
     } catch (e: unknown) {
-      setPracticeModal(prev => prev ? { ...prev, generating: false, error: (e as Error)?.message || "Generation failed" } : null);
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const msg = detail || (e as Error)?.message || "Generation failed";
+      setPracticeModal(prev => prev ? { ...prev, generating: false, error: msg } : null);
     }
   }, [activeId]);
 
