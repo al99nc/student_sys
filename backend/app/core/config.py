@@ -171,7 +171,10 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     class Config:
-        env_file = ("../.env", ".env")
+        # Absolute path so it works regardless of the server's working directory
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _root = os.path.normpath(os.path.join(_here, "../../../"))
+        env_file = (os.path.join(_root, ".env"), "../.env", ".env")
         extra = "ignore"
 
 
