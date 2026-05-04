@@ -121,6 +121,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # Prevent Cloudflare (and any CDN/proxy) from caching API responses.
+        # Without this, Cloudflare serves the first user's /auth/me and credit
+        # data to every subsequent request, breaking auth and admin updates.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        response.headers["Pragma"] = "no-cache"
         return response
 
 
