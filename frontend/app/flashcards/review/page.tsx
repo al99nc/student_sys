@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
 import { getDueFlashcards, reviewFlashcard, FlashcardOut } from "@/lib/api";
@@ -23,7 +23,7 @@ const CARD_TYPE_COLORS: Record<string, string> = {
   clinical: "bg-red-500/20 text-red-300 border-red-500/30",
 };
 
-export default function FlashcardReviewPage() {
+function FlashcardReviewContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const documentId = searchParams.get("document_id")
@@ -282,5 +282,17 @@ export default function FlashcardReviewPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function FlashcardReviewPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center text-white/40">
+        Loading...
+      </div>
+    }>
+      <FlashcardReviewContent />
+    </Suspense>
   );
 }
