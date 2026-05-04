@@ -16,6 +16,7 @@ from app.api import auth, lectures, telegram
 from app.api import coach as coach_api
 from app.api import performance
 from app.api import content as content_api
+from app.api import flashcards as flashcards_api
 from app.api.telegram import bot_router
 from app.core.config import settings
 from app.core.global_token_guard import (
@@ -32,6 +33,7 @@ import app.models.coach        # noqa: F401
 import app.models.ai_tools     # noqa: F401
 import app.models.models       # noqa: F401  # User, CheckoutPayment on Base.metadata
 import app.models.content      # noqa: F401  # SiteContent for dynamic pages
+import app.models.flashcards   # noqa: F401  # Flashcard, FlashcardFsrsCard, FlashcardReview
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,7 @@ app.include_router(ai_tools.router)
 app.include_router(analytics.router)
 app.include_router(billing.router)
 app.include_router(content_api.router)
+app.include_router(flashcards_api.router)
 
 
 @app.get("/")

@@ -12,7 +12,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session
-from app.db.database import get_db
+from app.db.database import get_db, SessionLocal
 from datetime import datetime, timezone
 from app.models.models import Lecture, Result, QuizSession
 from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave, SolvedLectureOut, SolvedEssayOut, SolvedEssayQuestion, SolvedOut, SolvedMCQ
@@ -322,6 +322,7 @@ async def estimate_lecture_processing(
 @router.post("/process/{lecture_id}", response_model=ProcessStatus)
 async def process_lecture(
     lecture_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     mode: str = Query("highyield", pattern="^(highyield|exam|harder|custom|essay|essay_custom)$"),
@@ -409,6 +410,17 @@ async def process_lecture(
         )
         db.add(result)
         db.commit()
+
+    # Auto-generate flashcards in background whenever MCQs are generated
+    if not is_essay_mode:
+        from app.services.flashcard_service import generate_and_save_flashcards
+        fc_mode = mode if mode in ("highyield", "exam", "revision") else "highyield"
+        background_tasks.add_task(
+            generate_and_save_flashcards,
+            document_id=lecture_id,
+            mode=fc_mode,
+            db_session_factory=SessionLocal,
+        )
 
     return ProcessStatus(
         status="success",

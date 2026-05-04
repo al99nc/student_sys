@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getMe } from "@/lib/api";
-import { Home, Upload, Bot, BarChart3, BookOpen, CreditCard } from "lucide-react";
+import { Home, Upload, Bot, BarChart3, BookOpen, CreditCard, Layers } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Upload", href: "/upload" },
   { label: "Lectures", href: "/lectures" },
+  { label: "Flashcards", href: "/flashcards" },
   { label: "Coach", href: "/coach" },
   { label: "Analytics", href: "/analytics" },
 ];
@@ -16,6 +17,7 @@ const MOBILE_NAV = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Upload", href: "/upload", icon: Upload },
   { label: "Lectures", href: "/lectures", icon: BookOpen },
+  { label: "Flashcards", href: "/flashcards", icon: Layers },
   { label: "Coach", href: "/coach", icon: Bot },
   { label: "Analytics", href: "/analytics", icon: BarChart3 },
 ];
@@ -78,9 +80,9 @@ export function AppHeader({ activePage }: { activePage: string }) {
         </div>
       </header>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — scrollable so all items fit on small screens */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex justify-around items-center py-2 px-4">
+        <div className="flex overflow-x-auto scrollbar-none py-2 px-2 gap-1">
           {MOBILE_NAV.map((item) => {
             const active = activePage === item.label || (item.label === "Home" && activePage === "Dashboard");
             return (
@@ -88,8 +90,8 @@ export function AppHeader({ activePage }: { activePage: string }) {
                 key={item.label}
                 href={item.href}
                 prefetch={false}
-                className={`flex flex-col items-center gap-0.5 py-1 transition-colors ${
-                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-lg transition-colors shrink-0 ${
+                  active ? "text-foreground bg-muted" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <item.icon className="w-5 h-5" />

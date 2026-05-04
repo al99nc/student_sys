@@ -1009,6 +1009,7 @@ def get_questions_for_document(
 @router.post("/questions/save", response_model=SaveQuestionsResponse)
 def save_questions(
     body: SaveQuestionsRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1081,6 +1082,18 @@ def save_questions(
         saved.append(q)
 
     db.commit()
+
+    # Auto-generate flashcards in background after questions are saved
+    if saved:
+        from app.services.flashcard_service import generate_and_save_flashcards
+        from app.db.database import SessionLocal
+        fc_mode = mode if mode in ("highyield", "exam", "revision") else "highyield"
+        background_tasks.add_task(
+            generate_and_save_flashcards,
+            document_id=body.document_id,
+            mode=fc_mode,
+            db_session_factory=SessionLocal,
+        )
 
     return SaveQuestionsResponse(
         saved_count=len(saved),
@@ -1252,6 +1265,24 @@ def get_next_question(
             co_failure_topics.add(cf.topic_a)
             co_failure_topics.add(cf.topic_b)
 
+    # Cross-system: topics where the student has flashcard lapses >= 2 get +8 boost
+    flashcard_weak_topics: set[str] = set()
+    try:
+        from app.models.flashcards import FlashcardFsrsCard as _FC, Flashcard as _F
+        fc_lapse_rows = (
+            db.query(_F.topic)
+            .join(_FC, _FC.flashcard_id == _F.id)
+            .filter(
+                _FC.student_id == current_user.id,
+                _FC.lapses >= 2,
+            )
+            .distinct()
+            .all()
+        )
+        flashcard_weak_topics = {row[0] for row in fc_lapse_rows}
+    except Exception:
+        pass
+
     def score_question(q: McqQuestion) -> float:
         score = 0.0
         if q.topic in dangerous_topics:
@@ -1260,6 +1291,8 @@ def get_next_question(
             score += 10.0
         elif q.topic in co_failure_topics:
             score += 5.0
+        if q.topic in flashcard_weak_topics and q.topic not in weak_topics:
+            score += 8.0    # flashcard struggles boost MCQ priority
         if q.difficulty_type == "analysis":
             score += 2.0
         elif q.difficulty_type == "application":
@@ -2508,6 +2541,48 @@ def set_exam_date(
 
 # ── AI helpers ────────────────────────────────────────────────────────────────
 
+def _build_flashcard_summary(student_id: str, db: Session) -> dict:
+    """Summarize flashcard performance for the AI coach context."""
+    try:
+        from app.models.flashcards import FlashcardFsrsCard as _FC, Flashcard as _F, FlashcardReview as _FR
+        now = datetime.now(timezone.utc)
+
+        total_cards = db.query(func.count(_FC.id)).filter(
+            _FC.student_id == student_id
+        ).scalar() or 0
+
+        due_today = db.query(func.count(_FC.id)).filter(
+            _FC.student_id == student_id,
+            _FC.due_date <= now,
+        ).scalar() or 0
+
+        mastered = db.query(func.count(_FC.id)).filter(
+            _FC.student_id == student_id,
+            _FC.state == 2,
+            _FC.stability >= 7.0,
+        ).scalar() or 0
+
+        # Topic with most lapses
+        worst = (
+            db.query(_F.topic, func.sum(_FC.lapses).label("total_lapses"))
+            .join(_FC, _FC.flashcard_id == _F.id)
+            .filter(_FC.student_id == student_id)
+            .group_by(_F.topic)
+            .order_by(func.sum(_FC.lapses).desc())
+            .first()
+        )
+        weakest_topic = worst[0] if worst and worst[1] and worst[1] > 0 else None
+
+        return {
+            "total_cards": total_cards,
+            "due_today": due_today,
+            "mastered": mastered,
+            "weakest_topic": weakest_topic,
+        }
+    except Exception:
+        return {"total_cards": 0, "due_today": 0, "mastered": 0, "weakest_topic": None}
+
+
 def _build_student_context(student_id: int, db: Session) -> dict:
     """
     Builds the complete student profile sent to the AI.
@@ -2637,6 +2712,8 @@ def _build_student_context(student_id: int, db: Session) -> dict:
         },
 
         "personal_memories": personal_memories,  # facts saved by AI across all conversations
+
+        "flashcard_summary": _build_flashcard_summary(student_id, db),
     }
 
 

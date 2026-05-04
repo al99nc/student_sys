@@ -528,6 +528,84 @@ export const gradeEssayAnswer = (
     { timeout: 60_000 },
   );
 
+// ── Flashcards ────────────────────────────────────────────────────────────────
+
+export interface FlashcardOut {
+  id: string;
+  document_id: number;
+  topic: string;
+  front: string;
+  back: string;
+  memory_tip: string | null;
+  card_type: string;
+  difficulty: string;
+  fsrs_state: number | null;
+  days_overdue: number | null;
+  lapses: number | null;
+}
+
+export interface DueCardsResponse {
+  due_count: number;
+  cards: FlashcardOut[];
+}
+
+export interface ReviewResponse {
+  next_due: string;
+  interval_days: number;
+  state: number;
+  new_stability: number | null;
+}
+
+export interface FlashcardStats {
+  total_cards_seen: number;
+  total_reviews: number;
+  cards_due_today: number;
+  cards_mastered: number;
+  avg_rating: number | null;
+  topic_breakdown: { topic: string; total: number; mastered: number; due: number }[];
+  streak_days: number;
+}
+
+export interface FlashcardScheduleTopic {
+  topic: string;
+  retention_pct: number;
+  due_count: number;
+  next_due: string | null;
+  total_cards: number;
+}
+
+export const generateFlashcards = (documentId: number, mode = "highyield") =>
+  api.post<{ generated_count: number; card_ids: string[] }>(
+    `/api/v1/flashcards/generate/${documentId}`,
+    { mode },
+    { timeout: 120_000 },
+  );
+
+export const getDueFlashcards = (documentId?: number, limit = 20) =>
+  api.get<DueCardsResponse>("/api/v1/flashcards/due", {
+    params: { ...(documentId ? { document_id: documentId } : {}), limit },
+  });
+
+export const reviewFlashcard = (flashcardId: string, rating: number, timeSpentSeconds?: number) =>
+  api.post<ReviewResponse>(`/api/v1/flashcards/${flashcardId}/review`, {
+    rating,
+    ...(timeSpentSeconds != null ? { time_spent_seconds: timeSpentSeconds } : {}),
+  });
+
+export const getDocumentFlashcards = (
+  documentId: number,
+  filters?: { topic?: string; card_type?: string; difficulty?: string },
+) =>
+  api.get<FlashcardOut[]>(`/api/v1/flashcards/document/${documentId}`, {
+    params: filters,
+  });
+
+export const getFlashcardStats = () =>
+  api.get<FlashcardStats>("/api/v1/flashcards/stats");
+
+export const getFlashcardSchedule = () =>
+  api.get<{ topics: FlashcardScheduleTopic[] }>("/api/v1/flashcards/schedule");
+
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
 export interface AdminStats {
