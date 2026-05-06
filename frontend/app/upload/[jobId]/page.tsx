@@ -25,7 +25,6 @@ export default function JobWaitingRoom() {
   const [progress, setProgress] = useState(0);
   const [label, setLabel] = useState("Starting up...");
   const [remaining, setRemaining] = useState<number | null>(null);
-  const [lectureId, setLectureId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,7 +45,6 @@ export default function JobWaitingRoom() {
         setLabel(data.progress_label ?? "");
         setRemaining(data.estimated_seconds_remaining ?? null);
         setStatus(data.status as JobStatus);
-        if (data.lecture_id) setLectureId(data.lecture_id);
 
         if (data.status === "done") {
           setTimeout(() => {

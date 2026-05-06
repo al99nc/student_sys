@@ -43,13 +43,16 @@ export default function QuizPage() {
 
   const [questions, setQuestions] = useState<QuizMCQ[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [phase, setPhase] = useState<"quiz" | "result">("quiz");
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [score, setScore] = useState(0);
   const [sessionTime, setSessionTime] = useState(0);
+  const [redirectCancelled, setRedirectCancelled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -57,10 +60,20 @@ export default function QuizPage() {
       return;
     }
 
+    loadTimeoutRef.current = setTimeout(() => {
+      setLoadError(true);
+      setLoading(false);
+    }, 12000);
+
+    const clearLoadTimeout = () => {
+      if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+    };
+
     if (freshMode && freshTopic) {
       const count = questionLimit ?? 5;
       coachGeneratePractice(freshTopic, count)
         .then((res) => {
+          clearLoadTimeout();
           const qs: QuizMCQ[] = (res.data.questions as FreshMCQ[]).map((q) => ({
             question: q.question,
             options: q.options,
@@ -74,15 +87,17 @@ export default function QuizPage() {
         .catch(() => {
           getResults(lectureId)
             .then((res) => {
+              clearLoadTimeout();
               const all: QuizMCQ[] = res.data.mcqs || [];
               setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
             })
-            .catch(() => router.push(`/results/${lectureId}`));
+            .catch(() => { clearLoadTimeout(); setLoadError(true); });
         })
         .finally(() => setLoading(false));
     } else {
       getResults(lectureId)
         .then((res) => {
+          clearLoadTimeout();
           const all: QuizMCQ[] = (res.data.mcqs || []).map((q: QuizMCQ & { distractors?: Record<string, string> }) => ({
             question: q.question,
             options: q.options,
@@ -93,9 +108,11 @@ export default function QuizPage() {
           }));
           setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
         })
-        .catch(() => router.push(`/results/${lectureId}`))
+        .catch(() => { clearLoadTimeout(); setLoadError(true); })
         .finally(() => setLoading(false));
     }
+
+    return () => clearLoadTimeout();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lectureId, router, freshMode, freshTopic]);
 
@@ -108,17 +125,7 @@ export default function QuizPage() {
     };
   }, [phase]);
 
-  // Auto-redirect to coach
-  useEffect(() => {
-    if (phase === "result" && fromConvId) {
-      const timer = setTimeout(() => {
-        const pct = Math.round((score / questions.length) * 100);
-        const topicParam = freshTopic ? `&quiz_topic=${encodeURIComponent(freshTopic)}` : "";
-        router.push(`/coach/${fromConvId}?quiz_score=${score}&quiz_total=${questions.length}&quiz_pct=${pct}${topicParam}`);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [phase, fromConvId, score, questions.length, router, freshTopic]);
+  // No auto-redirect — user must click "Back to Coach with Results" (S-16)
 
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -143,8 +150,27 @@ export default function QuizPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <p className="text-sm text-muted-foreground">Loading quiz…</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-foreground px-4 text-center">
+        <XCircle className="w-10 h-10 text-destructive" />
+        <p className="text-lg font-bold">Failed to load quiz</p>
+        <p className="text-sm text-muted-foreground max-w-xs">This could be a network issue or the lecture may not be processed yet.</p>
+        <div className="flex gap-3">
+          <Button onClick={() => { setLoadError(false); setLoading(true); window.location.reload(); }} variant="outline">
+            Retry
+          </Button>
+          <Button asChild>
+            <Link href={backHref}>Go back</Link>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -205,9 +231,6 @@ export default function QuizPage() {
               </CardContent>
             </Card>
 
-            {fromConvId && (
-              <p className="text-xs text-muted-foreground animate-pulse">Returning to coach in 2 seconds…</p>
-            )}
 
             <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
               <Button

@@ -11,7 +11,7 @@ import {
   CustomContext,
 } from "@/lib/api";
 import CustomizeBar from "@/components/customize-bar";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, getToken } from "@/lib/auth";
 import { useTelegram } from "@/lib/useTelegram";
 import { AppHeader } from "@/components/app-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -344,7 +344,6 @@ function UploadContent() {
   // ── Active job check — redirect if a generation is already running ────────
   useEffect(() => {
     const checkActiveJob = async () => {
-      const { getToken } = await import("@/lib/auth");
       const token = getToken();
       if (!token) return;
       try {
@@ -442,8 +441,6 @@ function UploadContent() {
     setTab(newTab);
     setMode(newTab === "study" ? "highyield" : "exam");
   };
-
-  const modeLabel = mode === "harder" ? "Harder Mode" : mode === "exam" ? "Exam Mode" : "High Yield";
 
   // ── Processing pipeline ───────────────────────────────────────────────────
   const handleProcess = async (id: number) => {
@@ -853,8 +850,14 @@ function UploadContent() {
                 ) : (
                   /* Text area */
                   <div className="relative rounded-xl border border-border/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors">
-                    <div className="absolute top-3 right-3 text-xs text-muted-foreground pointer-events-none">
-                      {pasteText.length > 0 ? `${pasteText.length.toLocaleString()} chars` : "Ctrl+V to paste"}
+                    <div className="absolute top-3 right-3 text-xs pointer-events-none">
+                      {pasteText.length > 0 ? (
+                        pasteText.trim().length < 100
+                          ? <span className="text-amber-500">{pasteText.length.toLocaleString()} / 100 min chars</span>
+                          : <span className="text-muted-foreground">{pasteText.length.toLocaleString()} chars</span>
+                      ) : (
+                        <span className="text-muted-foreground">Ctrl+V to paste</span>
+                      )}
                     </div>
                     <textarea
                       value={pasteText}

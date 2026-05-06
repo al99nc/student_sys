@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/next'
 import Script from 'next/script'
 import { TelegramProvider } from '@/lib/TelegramProvider'
 import { MaterialSymbolsFont } from '@/components/material-symbols-font'
+import { ErrorBoundary } from '@/components/error-boundary'
 import './globals.css'
 
 const plusJakarta = localFont({
@@ -40,9 +41,11 @@ export default function RootLayout({
 
       <body className="font-sans antialiased bg-background min-h-screen">
         <MaterialSymbolsFont />
-        <TelegramProvider>
-          {children}
-        </TelegramProvider>
+        <ErrorBoundary>
+          <TelegramProvider>
+            {children}
+          </TelegramProvider>
+        </ErrorBoundary>
         {process.env.NODE_ENV === 'production' && <Analytics />}
         {/* Must be in body, not head — afterInteractive requires body context */}
         <Script

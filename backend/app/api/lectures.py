@@ -3,7 +3,6 @@ import json
 import time
 import base64
 import secrets
-import secrets as _secrets
 import string as _string
 import shutil
 import threading
@@ -37,7 +36,7 @@ from app.core.entitlements import (
 def _generate_job_id() -> str:
     """Generate an 11-character URL-safe job ID (YouTube-style)."""
     alphabet = _string.ascii_letters + _string.digits + "-_"
-    return "".join(_secrets.choice(alphabet) for _ in range(11))
+    return "".join(secrets.choice(alphabet) for _ in range(11))
 
 
 async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost: int) -> None:
@@ -79,6 +78,10 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
         try:
             text = extract_text_from_pdf(lecture.file_path)
         except Exception as e:
+            if spent and cost > 0:
+                user = db.query(User).filter(User.id == job.user_id).first()
+                if user:
+                    refund_credits(db, user, cost, commit=True)
             job.status = "failed"
             job.error_message = f"Could not read PDF: {str(e)}"
             job.completed_at = datetime.now(timezone.utc)

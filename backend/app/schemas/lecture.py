@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 class LectureOut(BaseModel):
     id: int
@@ -24,6 +24,7 @@ class MCQ(BaseModel):
     answer: str
     explanation: Optional[str] = None  # e.g. "Glutamate is excitatory; GABA is inhibitory"
     topic: Optional[str] = None         # e.g. "Basal Ganglia"
+    distractors: Optional[Dict[str, str]] = None  # wrong-option letter → why it's wrong
 
 class ResultOut(BaseModel):
     id: int
@@ -72,6 +73,7 @@ class SolvedMCQ(BaseModel):
     answer: str
     explanation: Optional[str] = None
     topic: Optional[str] = None
+    distractors: Optional[Dict[str, str]] = None
 
 class SolvedOut(BaseModel):
     lecture_id: int

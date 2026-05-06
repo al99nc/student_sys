@@ -47,14 +47,16 @@ const STEP_ICONS = ["person", "school", "domain", "military_tech"];
 export default function AuthPage() {
   const router = useRouter();
   const { isInTelegram } = useTelegram();
-  const [mode, setMode]                 = useState<"login" | "signup">("login");
-  const [email, setEmail]               = useState("");
-  const [password, setPassword]         = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe]     = useState(false);
-  const [error, setError]               = useState("");
-  const [success, setSuccess]           = useState("");
-  const [loading, setLoading]           = useState(false);
+  const [mode, setMode]                         = useState<"login" | "signup">("login");
+  const [email, setEmail]                       = useState("");
+  const [password, setPassword]                 = useState("");
+  const [confirmPassword, setConfirmPassword]   = useState("");
+  const [showPassword, setShowPassword]         = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [rememberMe, setRememberMe]             = useState(false);
+  const [error, setError]                       = useState("");
+  const [success, setSuccess]                   = useState("");
+  const [loading, setLoading]                   = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -87,6 +89,11 @@ export default function AuthPage() {
     setError(""); setSuccess(""); setLoading(true);
     try {
       if (mode === "signup") {
+        if (password !== confirmPassword) {
+          setError("Passwords do not match.");
+          setLoading(false);
+          return;
+        }
         await signup(email, password);
         const isBro = email.split("@")[0].toLowerCase().endsWith("-fromali");
         setSuccess(isBro ? "yo bro 👊 welcome — 100 free credits dropped for you!" : "Account created! Signing you in…");
@@ -117,7 +124,7 @@ export default function AuthPage() {
   };
 
   const switchMode = (m: "login" | "signup") => {
-    setMode(m); setError(""); setSuccess(""); setPassword(""); setShowPassword(false);
+    setMode(m); setError(""); setSuccess(""); setPassword(""); setConfirmPassword(""); setShowPassword(false); setShowConfirmPassword(false);
   };
 
   const advance = async () => {
@@ -475,6 +482,37 @@ export default function AuthPage() {
               )}
             </div>
 
+            {/* Confirm Password — signup only */}
+            {mode === "signup" && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-muted-foreground">Confirm Password</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                    placeholder="Re-enter your password"
+                    className={cn(inputClass, "pr-10", confirmPassword && confirmPassword !== password ? "border-destructive/60 focus:ring-destructive/30" : "")}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {confirmPassword && confirmPassword !== password && (
+                  <p className="text-[11px] text-destructive">Passwords do not match</p>
+                )}
+                {confirmPassword && confirmPassword === password && (
+                  <p className="text-[11px] text-emerald-500 flex items-center gap-1"><Check className="w-3 h-3" /> Passwords match</p>
+                )}
+              </div>
+            )}
+
             {/* Remember + Forgot */}
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -495,13 +533,12 @@ export default function AuthPage() {
                 <span className="text-xs text-muted-foreground">Remember me</span>
               </label>
               {mode === "login" && (
-                <button
-                  type="button"
-                  onClick={() => setError("Password reset coming soon!")}
-                  className="text-xs text-primary hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer font-[inherit]"
+                <a
+                  href="mailto:support@cortexq.app?subject=Password%20Reset%20Request"
+                  className="text-xs text-primary hover:opacity-70 transition-opacity"
                 >
                   Forgot password?
-                </button>
+                </a>
               )}
             </div>
 

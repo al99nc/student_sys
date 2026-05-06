@@ -253,6 +253,24 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     if (typeof window !== "undefined" && window.innerWidth >= 1024) setSidebarOpen(true);
   }, []);
 
+  // iOS Safari: track visual viewport height so the input stays above the keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const offset = window.innerHeight - vv.height - vv.offsetTop;
+      document.documentElement.style.setProperty("--keyboard-h", `${Math.max(0, offset)}px`);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      document.documentElement.style.removeProperty("--keyboard-h");
+    };
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const target = activeId ? `/coach/${activeId}` : "/coach";
@@ -815,7 +833,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
         </div>
 
         {/* ── INPUT AREA ────────────────────────────────────────────────────── */}
-        <div className="flex-shrink-0 px-4 border-t border-border bg-background" style={{ paddingTop: 10, paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+        <div className="flex-shrink-0 px-4 border-t border-border bg-background" style={{ paddingTop: 10, paddingBottom: "max(16px, env(safe-area-inset-bottom))", marginBottom: "var(--keyboard-h, 0px)" }}>
           <div className="max-w-[700px] mx-auto">
 
             {/* Standalone practice panel */}
