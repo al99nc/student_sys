@@ -3,6 +3,8 @@ import json
 import time
 import base64
 import secrets
+import secrets as _secrets
+import string as _string
 import shutil
 import threading
 import httpx
@@ -30,6 +32,145 @@ from app.core.entitlements import (
     will_use_premium_for_mcq,
     is_premium,
 )
+
+
+def _generate_job_id() -> str:
+    """Generate an 11-character URL-safe job ID (YouTube-style)."""
+    alphabet = _string.ascii_letters + _string.digits + "-_"
+    return "".join(_secrets.choice(alphabet) for _ in range(11))
+
+
+async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost: int) -> None:
+    """
+    Runs in the background after HTTP response is sent.
+    Opens its own DB session — never reuses the request session.
+    """
+    from app.db.database import SessionLocal
+    from app.models.models import ProcessingJob, Lecture, Result, User
+    from app.services.pdf_service import extract_text_from_pdf
+    from app.services.ai_service import generate_study_content
+    from app.services.generator import generate_essay_content
+    from app.core.entitlements import refund_credits
+    from app.core.config import settings
+    import json
+    from datetime import datetime, timezone
+
+    db = SessionLocal()
+    try:
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if not job:
+            return
+
+        now = datetime.now(timezone.utc)
+        job.status = "processing"
+        job.started_at = now
+        job.progress_pct = 5
+        job.progress_label = "Reading your PDF..."
+        db.commit()
+
+        lecture = db.query(Lecture).filter(Lecture.id == job.lecture_id).first()
+        if not lecture:
+            job.status = "failed"
+            job.error_message = "Lecture not found"
+            job.completed_at = datetime.now(timezone.utc)
+            db.commit()
+            return
+
+        try:
+            text = extract_text_from_pdf(lecture.file_path)
+        except Exception as e:
+            job.status = "failed"
+            job.error_message = f"Could not read PDF: {str(e)}"
+            job.completed_at = datetime.now(timezone.utc)
+            db.commit()
+            return
+
+        job.progress_pct = 15
+        job.progress_label = "PDF read. Starting AI generation..."
+        db.commit()
+
+        context_dict = None
+        if job.custom_context:
+            try:
+                context_dict = json.loads(job.custom_context)
+            except Exception:
+                pass
+
+        is_essay_mode = job.mode in ("essay", "essay_custom")
+
+        job.progress_pct = 20
+        job.progress_label = "AI is generating your questions..."
+        db.commit()
+
+        try:
+            if is_essay_mode:
+                ai_data = await generate_essay_content(
+                    text, is_premium=use_premium, custom_context=context_dict,
+                )
+            else:
+                ai_data = await generate_study_content(
+                    text, mode=job.mode, is_premium=use_premium, custom_context=context_dict,
+                )
+        except Exception as e:
+            if spent and cost > 0:
+                user = db.query(User).filter(User.id == job.user_id).first()
+                if user:
+                    refund_credits(db, user, cost, commit=True)
+
+            err_str = str(e)
+            job.status = "failed"
+            job.error_message = err_str if len(err_str) < 300 else err_str[:300]
+            job.completed_at = datetime.now(timezone.utc)
+            job.progress_pct = 0
+            job.progress_label = "Generation failed"
+            db.commit()
+            return
+
+        job.progress_pct = 85
+        job.progress_label = "Saving your questions..."
+        db.commit()
+
+        saved_context = json.dumps(context_dict) if context_dict else None
+        existing = db.query(Result).filter(Result.lecture_id == job.lecture_id).first()
+        if existing:
+            existing.summary = ai_data.get("summary", "")
+            existing.key_concepts = json.dumps(ai_data.get("key_concepts", []))
+            if is_essay_mode:
+                existing.essays = json.dumps(ai_data.get("questions", []))
+            else:
+                existing.mcqs = json.dumps(ai_data.get("mcqs", []))
+            existing.custom_context = saved_context
+            db.commit()
+        else:
+            result = Result(
+                lecture_id=job.lecture_id,
+                summary=ai_data.get("summary", ""),
+                key_concepts=json.dumps(ai_data.get("key_concepts", [])),
+                mcqs=json.dumps(ai_data.get("mcqs", [])) if not is_essay_mode else "[]",
+                essays=json.dumps(ai_data.get("questions", [])) if is_essay_mode else None,
+                custom_context=saved_context,
+            )
+            db.add(result)
+            db.commit()
+
+        job.status = "done"
+        job.progress_pct = 100
+        job.progress_label = "Done! Redirecting you..."
+        job.completed_at = datetime.now(timezone.utc)
+        db.commit()
+
+    except Exception as e:
+        try:
+            job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+            if job and job.status not in ("done", "failed"):
+                job.status = "failed"
+                job.error_message = f"Unexpected error: {str(e)[:200]}"
+                job.completed_at = datetime.now(timezone.utc)
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -319,7 +460,7 @@ async def estimate_lecture_processing(
     )
 
 
-@router.post("/process/{lecture_id}", response_model=ProcessStatus)
+@router.post("/process/{lecture_id}")
 async def process_lecture(
     lecture_id: int,
     background_tasks: BackgroundTasks,
@@ -328,105 +469,173 @@ async def process_lecture(
     mode: str = Query("highyield", pattern="^(highyield|exam|harder|custom|essay|essay_custom)$"),
     custom_context: Optional[CustomContext] = None,
 ):
+    """
+    Creates a processing job and starts generation in the background.
+    Returns immediately with job_id. Client redirects to /upload/{job_id}.
+    """
+    from app.models.models import ProcessingJob
+    import json
+
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id
     ).first()
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
 
-    # Extract text
-    try:
-        text = extract_text_from_pdf(lecture.file_path)
-    except Exception:
-        raise HTTPException(status_code=422, detail="Could not extract text from the uploaded file")
+    # Return existing active job to prevent duplicate submissions
+    existing_active = db.query(ProcessingJob).filter(
+        ProcessingJob.user_id == current_user.id,
+        ProcessingJob.status.in_(["pending", "processing"]),
+    ).order_by(ProcessingJob.created_at.desc()).first()
 
-    # Spend credits for premium MCQ generation; insufficient balance ⇒ free model (no spend)
+    if existing_active:
+        return {
+            "job_id": existing_active.id,
+            "lecture_id": existing_active.lecture_id,
+            "status": existing_active.status,
+            "already_running": True,
+        }
+
     cost = settings.CREDIT_COST_MCQ_PROCESS
     spent = False
     use_premium = False
-    
+
     if not current_user.extra_usage_enabled:
-        # Toggle OFF: free usage with no credits spent
         use_premium = False
     elif plan_tier(current_user) in ("pro", "enterprise"):
-        # Pro/enterprise: always use premium
         use_premium = True
     elif cost > 0:
-        # Free tier with toggle ON: try to spend credits
         spent = try_spend_credits(db, current_user, cost, commit=True)
         use_premium = spent
     else:
         use_premium = is_premium(current_user)
 
-    context_dict: dict | None = None
+    try:
+        from app.services.ai_service import _estimate_processing_time
+        from app.services.pdf_service import extract_text_from_pdf
+        text_preview = extract_text_from_pdf(lecture.file_path)
+        inter = (
+            settings.PREMIUM_INTER_CHUNK_WAIT_SECONDS
+            if use_premium
+            else settings.FREE_INTER_CHUNK_WAIT_SECONDS
+        )
+        estimate = _estimate_processing_time(
+            text_preview, mode, len(settings.get_all_api_keys()), inter_chunk_wait=inter
+        )
+        estimated_seconds = estimate.get("estimated_seconds", 120)
+        total_chunks = estimate.get("chunks", 1)
+    except Exception:
+        estimated_seconds = 120
+        total_chunks = 1
+
+    context_json = None
     if custom_context is not None:
         context_dict = custom_context.model_dump()
         context_dict["field_of_study"] = " ".join(filter(None, [
             current_user.college, current_user.subject,
         ])) or "General Studies"
+        context_json = json.dumps(context_dict)
 
-    is_essay_mode = mode in ("essay", "essay_custom")
-
-    try:
-        if is_essay_mode:
-            ai_data = await generate_essay_content(
-                text, is_premium=use_premium, custom_context=context_dict,
-            )
-        else:
-            ai_data = await generate_study_content(
-                text, mode=mode, is_premium=use_premium, custom_context=context_dict,
-            )
-    except Exception as e:
-        if spent and cost > 0:
-            refund_credits(db, current_user, cost, commit=True)
-        err_str = str(e)
-        if "DAILY_LIMIT:" in err_str:
-            raise HTTPException(
-                status_code=429,
-                detail=err_str.replace("DAILY_LIMIT: ", ""),
-            )
-        raise HTTPException(status_code=503, detail=f"AI processing failed: {err_str}")
-
-    # Save or update result
-    saved_context = json.dumps(context_dict) if context_dict else None
-    existing = db.query(Result).filter(Result.lecture_id == lecture_id).first()
-    if existing:
-        existing.summary = ai_data.get("summary", "")
-        existing.key_concepts = json.dumps(ai_data.get("key_concepts", []))
-        if is_essay_mode:
-            existing.essays = json.dumps(ai_data.get("questions", []))
-        else:
-            existing.mcqs = json.dumps(ai_data.get("mcqs", []))
-        existing.custom_context = saved_context
-        db.commit()
-    else:
-        result = Result(
-            lecture_id=lecture_id,
-            summary=ai_data.get("summary", ""),
-            key_concepts=json.dumps(ai_data.get("key_concepts", [])),
-            mcqs=json.dumps(ai_data.get("mcqs", [])) if not is_essay_mode else "[]",
-            essays=json.dumps(ai_data.get("questions", [])) if is_essay_mode else None,
-            custom_context=saved_context,
-        )
-        db.add(result)
-        db.commit()
-
-    # Auto-generate flashcards in background whenever MCQs are generated
-    if not is_essay_mode:
-        from app.services.flashcard_service import generate_and_save_flashcards
-        fc_mode = mode if mode in ("highyield", "exam", "revision") else "highyield"
-        background_tasks.add_task(
-            generate_and_save_flashcards,
-            document_id=lecture_id,
-            mode=fc_mode,
-            db_session_factory=SessionLocal,
-        )
-
-    return ProcessStatus(
-        status="success",
-        message="Lecture processed successfully",
+    job_id = _generate_job_id()
+    job = ProcessingJob(
+        id=job_id,
+        user_id=current_user.id,
         lecture_id=lecture_id,
+        mode=mode,
+        status="pending",
+        progress_pct=0,
+        progress_label="Starting up...",
+        estimated_seconds_remaining=estimated_seconds,
+        total_chunks=total_chunks,
+        completed_chunks=0,
+        custom_context=context_json,
     )
+    db.add(job)
+    db.commit()
+
+    background_tasks.add_task(_run_processing_job, job_id, use_premium, spent, cost)
+
+    return {
+        "job_id": job_id,
+        "lecture_id": lecture_id,
+        "estimated_seconds": estimated_seconds,
+        "status": "pending",
+        "already_running": False,
+    }
+
+@router.get("/jobs/active/mine")
+def get_my_active_job(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Called when the user lands on /upload to check if they have a running job.
+    Returns null if none.
+    """
+    from app.models.models import ProcessingJob
+
+    job = db.query(ProcessingJob).filter(
+        ProcessingJob.user_id == current_user.id,
+        ProcessingJob.status.in_(["pending", "processing"]),
+    ).order_by(ProcessingJob.created_at.desc()).first()
+
+    if not job:
+        return {"active_job": None}
+
+    return {
+        "active_job": {
+            "job_id": job.id,
+            "lecture_id": job.lecture_id,
+            "mode": job.mode,
+            "status": job.status,
+            "progress_pct": job.progress_pct,
+            "progress_label": job.progress_label,
+        }
+    }
+
+
+@router.get("/jobs/{job_id}")
+def get_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Poll every 2s from /upload/{jobId} page."""
+    from app.models.models import ProcessingJob
+    from datetime import datetime, timezone
+
+    job = db.query(ProcessingJob).filter(
+        ProcessingJob.id == job_id,
+        ProcessingJob.user_id == current_user.id,
+    ).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    elapsed_seconds = None
+    if job.started_at:
+        elapsed_seconds = int(
+            (datetime.now(timezone.utc) - job.started_at.replace(tzinfo=timezone.utc)).total_seconds()
+        )
+
+    remaining = None
+    if job.estimated_seconds_remaining and elapsed_seconds is not None:
+        remaining = max(0, job.estimated_seconds_remaining - elapsed_seconds)
+
+    return {
+        "job_id": job.id,
+        "lecture_id": job.lecture_id,
+        "mode": job.mode,
+        "status": job.status,
+        "progress_pct": job.progress_pct,
+        "progress_label": job.progress_label,
+        "estimated_seconds_remaining": remaining,
+        "elapsed_seconds": elapsed_seconds,
+        "error_message": job.error_message if job.status == "failed" else None,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
 
 @router.get("/results/{lecture_id}", response_model=ResultOut)
 def get_results(

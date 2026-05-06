@@ -86,6 +86,7 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN monthly_credit_limit INTEGER",
         "ALTER TABLE users ADD COLUMN monthly_credits_used INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN monthly_reset_month VARCHAR(7)",
+        "CREATE TABLE IF NOT EXISTS processing_jobs (id VARCHAR(16) PRIMARY KEY, user_id VARCHAR(36), lecture_id INTEGER, mode VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'pending', progress_pct INTEGER DEFAULT 0, progress_label VARCHAR(100), estimated_seconds_remaining INTEGER, created_at DATETIME, started_at DATETIME, completed_at DATETIME, error_message TEXT, custom_context TEXT, total_chunks INTEGER, completed_chunks INTEGER DEFAULT 0)",
     ]:
         try:
             _conn.execute(text(_stmt))

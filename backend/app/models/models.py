@@ -135,3 +135,30 @@ class QuizSession(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_session"),
     )
+
+
+class ProcessingJob(Base):
+    """Background MCQ/essay generation job — one row per generation request."""
+
+    __tablename__ = "processing_jobs"
+
+    id               = Column(String(16), primary_key=True)
+    user_id          = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    lecture_id       = Column(Integer, ForeignKey("lectures.id"), nullable=False, index=True)
+    mode             = Column(String(20), nullable=False)
+    # status: pending | processing | done | failed
+    status           = Column(String(20), nullable=False, default="pending")
+
+    progress_pct     = Column(Integer, default=0)
+    progress_label   = Column(String(100), nullable=True)
+    estimated_seconds_remaining = Column(Integer, nullable=True)
+
+    created_at       = Column(DateTime, default=_utcnow, nullable=False, index=True)
+    started_at       = Column(DateTime, nullable=True)
+    completed_at     = Column(DateTime, nullable=True)
+
+    error_message    = Column(Text, nullable=True)
+    custom_context   = Column(Text, nullable=True)
+
+    total_chunks     = Column(Integer, nullable=True)
+    completed_chunks = Column(Integer, default=0)

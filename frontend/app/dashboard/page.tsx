@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getDashboard, getLectures, getMySharedSessions, getNextBestAction } from "@/lib/api";
+import { getDashboard, getLectures, getMySharedSessions, getNextBestAction, getDailyMission, DailyMission } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
 import { AppHeader } from "@/components/app-header";
 import { StepNav } from "@/components/step-nav";
@@ -24,6 +24,9 @@ import {
   Sparkles,
   ChevronRight,
   BarChart3,
+  Flame,
+  Brain,
+  Zap,
 } from "lucide-react";
 
 interface Lecture {
@@ -77,6 +80,7 @@ export default function DashboardPage() {
     reason?: string[];
   } | null>(null);
   const [userName, setUserName] = useState("Student");
+  const [dailyMission, setDailyMission] = useState<DailyMission | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -108,6 +112,10 @@ export default function DashboardPage() {
       .then((res) => setNextAction(res.data))
       .catch(() => {})
       .finally(() => setLoadingNextAction(false));
+
+    getDailyMission()
+      .then((res) => setDailyMission(res.data))
+      .catch(() => {});
   };
 
   return (
@@ -164,6 +172,62 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Daily Mission */}
+            <Card className={dailyMission?.completed ? "border-emerald-500/40" : ""}>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-bold text-foreground">Daily Mission</p>
+                  </div>
+                  {dailyMission && (
+                    <div className="flex items-center gap-1.5">
+                      <Flame className="h-3.5 w-3.5 text-orange-500" />
+                      <span className="text-sm font-bold text-foreground">{dailyMission.streak_days}d</span>
+                    </div>
+                  )}
+                </div>
+
+                {!dailyMission ? (
+                  <div className="animate-pulse space-y-2">
+                    <div className="h-2 bg-muted rounded w-3/4" />
+                    <div className="h-2 bg-muted rounded w-1/2" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-end justify-between mb-2">
+                      <span className="text-3xl font-bold text-foreground">{dailyMission.answered_today}</span>
+                      <span className="text-sm text-muted-foreground mb-1">/ {dailyMission.goal} questions</span>
+                    </div>
+                    <Progress
+                      value={Math.min(100, (dailyMission.answered_today / dailyMission.goal) * 100)}
+                      className={`h-2 mb-3 ${dailyMission.completed ? "[&>div]:bg-emerald-500" : ""}`}
+                    />
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>
+                        {dailyMission.completed
+                          ? "Mission complete!"
+                          : `${dailyMission.goal - dailyMission.answered_today} left`}
+                      </span>
+                      {dailyMission.answered_today > 0 && (
+                        <span className={dailyMission.accuracy_today >= 70 ? "text-emerald-500" : "text-orange-500"}>
+                          {dailyMission.accuracy_today}% accuracy
+                        </span>
+                      )}
+                    </div>
+                    {dailyMission.fsrs_due_count > 0 && (
+                      <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
+                        <Brain className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                        <p className="text-xs text-foreground">
+                          <span className="font-bold text-primary">{dailyMission.fsrs_due_count}</span> questions due for spaced review
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
               </CardContent>
             </Card>
 

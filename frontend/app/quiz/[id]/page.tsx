@@ -26,6 +26,7 @@ interface QuizMCQ {
   answer: string;
   explanation?: string;
   topic?: string;
+  distractors?: Record<string, string>;
 }
 
 export default function QuizPage() {
@@ -66,6 +67,7 @@ export default function QuizPage() {
             answer: q.answer,
             explanation: q.explanation,
             topic: q.topic ?? freshTopic,
+            distractors: q.distractors,
           }));
           setQuestions(qs);
         })
@@ -81,7 +83,14 @@ export default function QuizPage() {
     } else {
       getResults(lectureId)
         .then((res) => {
-          const all: QuizMCQ[] = res.data.mcqs || [];
+          const all: QuizMCQ[] = (res.data.mcqs || []).map((q: QuizMCQ & { distractors?: Record<string, string> }) => ({
+            question: q.question,
+            options: q.options,
+            answer: q.answer,
+            explanation: q.explanation,
+            topic: q.topic,
+            distractors: q.distractors,
+          }));
           setQuestions(questionLimit ? all.slice(0, questionLimit) : all);
         })
         .catch(() => router.push(`/results/${lectureId}`))
@@ -343,6 +352,39 @@ export default function QuizPage() {
           >
             <span className="font-semibold">Answer {q.answer}:</span>{" "}
             {q.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}
+          </div>
+        )}
+
+        {/* Wrong Answer Autopsy — shown only when the student answered incorrectly */}
+        {revealed && selectedLetter && selectedLetter !== q.answer && q.distractors && (
+          <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-destructive/15">
+              <p className="text-xs font-bold text-destructive uppercase tracking-wider">
+                Why you were wrong
+              </p>
+            </div>
+            <div className="p-4 space-y-3">
+              {/* Primary: explain the student's specific wrong choice */}
+              {q.distractors[selectedLetter] && (
+                <div className="flex gap-3">
+                  <span className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold bg-destructive text-white flex-shrink-0">
+                    {selectedLetter}
+                  </span>
+                  <p className="text-sm text-foreground leading-snug">{q.distractors[selectedLetter]}</p>
+                </div>
+              )}
+              {/* Secondary: show other wrong options collapsed */}
+              {Object.entries(q.distractors)
+                .filter(([letter]) => letter !== selectedLetter && letter !== q.answer)
+                .map(([letter, reason]) => (
+                  <div key={letter} className="flex gap-3 opacity-70">
+                    <span className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold bg-muted text-muted-foreground flex-shrink-0">
+                      {letter}
+                    </span>
+                    <p className="text-xs text-muted-foreground leading-snug">{reason}</p>
+                  </div>
+                ))}
+            </div>
           </div>
         )}
       </main>

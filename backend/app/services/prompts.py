@@ -70,7 +70,13 @@ HIGHYIELD_SYSTEM_PROMPT = (
     "=== OUTPUT FORMAT ===\n"
     "Return ONLY valid JSON — no markdown, no code fences, no text outside the object:\n"
     "  summary: 3-5 sentences | key_concepts: 8-12 phrases\n"
-    "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation}]\n\n"
+    "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
+    "          distractors:{letter:\"1-sentence why this wrong option is wrong\" for each wrong option only}}]\n\n"
+
+    "=== DISTRACTOR AUTOPSY ===\n"
+    "For every MCQ, include a 'distractors' object. Keys = every wrong option letter (NOT the correct answer).\n"
+    "Value = exactly 1 sentence: WHY that option is wrong, or what misconception it exploits.\n"
+    "Example (answer=C): {\"A\":\"Wrong because...\",\"B\":\"Incorrect — confuses with...\",\"D\":\"This applies to X, not Y.\"}\n\n"
 
     "=== INTERNAL VERIFICATION (do not output) ===\n"
     "1. All objectives distinct — no naming/trivia questions.\n"
@@ -84,6 +90,7 @@ HIGHYIELD_SYSTEM_PROMPT = (
     "9. A/B/C/D each between 15%-35% of total. Fix distribution before output.\n"
     "10. Type 1 ≤ 35% of total. Convert excess recall to vignettes.\n"
     "11. Zero historical trivia / naming / bullet-point conversion questions.\n"
+    "12. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
     "Regenerate any failing question before output."
 )
 
@@ -128,8 +135,11 @@ DIFFICULTY: 30% recall, 50% application, 20% analysis. If Type 1 > 35%, convert 
 6. IDA marrow correct. 7. ACD serum iron correct. 8. Consistent explanations.
 9. A/B/C/D each 15-35%. Fix before submitting.
 
+AUTOPSY RULE: Every MCQ must include "distractors": an object where each key is a wrong option letter
+and value is 1 sentence explaining WHY it is wrong. Omit the correct answer from distractors.
+
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation"}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -193,6 +203,10 @@ EXAM_SYSTEM_PROMPT = (
     "Sentence 2: WHY top wrong answer is wrong — by content, never by letter.\n"
     "Never generic. Never self-contradicting.\n\n"
 
+    "=== DISTRACTOR AUTOPSY ===\n"
+    "Every MCQ must include 'distractors': keys = wrong option letters, values = 1 sentence why wrong.\n"
+    "Example (answer=B): {\"A\":\"Wrong because...\",\"C\":\"Incorrect — this is true for X not Y.\",\"D\":\"Applies to Z context only.\"}\n\n"
+
     "OUTPUT: Return ONLY valid JSON. No markdown. No trailing commas. No text outside the object."
 )
 
@@ -234,8 +248,11 @@ VERIFY BEFORE SUBMITTING:
 5. No factual errors. No self-contradicting explanations.
 6. A/B/C/D roughly evenly distributed.
 
+AUTOPSY RULE: Every MCQ must include "distractors": object with wrong option letters as keys,
+1-sentence "why wrong" as values. Do NOT include the correct answer letter.
+
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation"}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -270,7 +287,11 @@ REVISION_SYSTEM_PROMPT = (
     "=== OUTPUT FORMAT ===\n"
     "Return ONLY valid JSON:\n"
     "  summary: 2-3 sentences | key_concepts: 8-12 phrases\n"
-    "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation}]\n\n"
+    "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
+    "          distractors:{letter:\"why wrong\" for each wrong option}}]\n\n"
+
+    "=== DISTRACTOR AUTOPSY ===\n"
+    "Every MCQ must include 'distractors': keys = wrong option letters only, values = 1 sentence why wrong.\n\n"
 
     "=== VERIFICATION ===\n"
     "1. Every option has A./B./C./D. prefix.\n"
@@ -278,6 +299,7 @@ REVISION_SYSTEM_PROMPT = (
     "3. No forbidden phrases.\n"
     "4. Each concept tested once.\n"
     "5. A/B/C/D answers roughly evenly distributed.\n"
+    "6. Every MCQ has distractors for all wrong options.\n"
     "Regenerate any failing question before output."
 )
 
@@ -303,8 +325,10 @@ VERIFY BEFORE OUTPUT:
 3. No duplicates.
 4. A/B/C/D roughly evenly distributed.
 
+AUTOPSY: Every MCQ needs "distractors":{wrong_letter:"why wrong"} — keys are wrong option letters only.
+
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — brief reason"}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — brief reason","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -351,8 +375,13 @@ HARDER_SYSTEM_PROMPT = (
     "  ✗ ACD = normal/elevated serum iron (wrong — LOW iron + HIGH ferritin)\n"
     "  ✗ Sickle cell = microcytic (wrong — normocytic)\n\n"
 
+    "=== DISTRACTOR AUTOPSY ===\n"
+    "Every MCQ: include 'distractors' object. Keys = wrong option letters only. "
+    "Value = 1 sentence: why that option is wrong or what trap it exploits.\n\n"
+
     "OUTPUT: Return ONLY valid JSON. No markdown. "
-    "mcqs: [{topic, question, options:[A./B./C./D. prefixed], answer, explanation}]. "
+    "mcqs: [{topic, question, options:[A./B./C./D. prefixed], answer, explanation, "
+    "distractors:{wrong_letter:\"why wrong\",...}}]. "
     "Explanation: letter + dash, why correct, why top wrong answer is wrong."
 )
 
@@ -381,8 +410,10 @@ FACTUAL BANS:
 VERIFY: FALSE EXCEPT ~50% (rewrite if zero). Each: 1 true, 3 false. Vignettes: exact labs + steps.
 A/B/C/D evenly distributed (15-35% each). Zero forbidden phrases.
 
+AUTOPSY: Every MCQ must have "distractors":{wrong_letter:"1 sentence why wrong"} — all 3 wrong options.
+
 Return ONLY this JSON (mcqs FIRST):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation"}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -632,7 +663,12 @@ def build_contextual_prompt(
         "=== OUTPUT FORMAT ===\n"
         "Return ONLY valid JSON — no markdown, no code fences, no text outside the object:\n"
         "  summary: 3-5 sentences | key_concepts: 8-12 phrases\n"
-        "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation}]\n\n"
+        "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
+        "          distractors:{letter:\"1-sentence why wrong\" for each wrong option only}}]\n\n"
+
+        "=== DISTRACTOR AUTOPSY ===\n"
+        "Every MCQ must include 'distractors': keys = wrong option letters, values = 1 sentence why that option is wrong.\n"
+        "Do NOT include the correct answer letter in distractors.\n\n"
 
         "=== INTERNAL VERIFICATION (do not output) ===\n"
         f"0. COUNT mcqs array. Must equal exactly {mcq_count}. Delete excess. Stop if short and pad only with high-quality questions.\n"
@@ -646,6 +682,7 @@ def build_contextual_prompt(
         f"8. Difficulty matches {diff_label}: verify distribution is {diff_dist}\n"
         "9. Distractors are plausible and field-appropriate — not random.\n"
         f"10. No single topic has more than 2 questions. If any does, delete the excess.\n"
+        "11. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
         "Regenerate any failing question before output."
     )
 
@@ -702,8 +739,11 @@ Topics with more content do NOT get more questions — they get HARDER questions
 4. A/B/C/D each 15-35% of answers.
 5. Difficulty matches {diff_label}: distribution is {diff_dist}
 
+AUTOPSY RULE: Every MCQ must include "distractors": keys = wrong option letters only,
+values = 1 sentence why that option is wrong. Do NOT include the correct answer letter.
+
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation"}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {{text}}"""

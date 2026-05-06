@@ -450,6 +450,7 @@ def submit_answer(
 @router.post("/sessions/{session_id}/complete", response_model=CompleteSessionResponse)
 def complete_session(
     session_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -537,6 +538,10 @@ def complete_session(
     ).update({"is_current": False})
 
     db.commit()
+
+    # Fire LearningPattern computation in background — never blocks the response
+    from app.db.database import SessionLocal as _SessionLocal
+    background_tasks.add_task(_compute_learning_pattern_bg, current_user.id, _SessionLocal)
 
     accuracy = correct / total if total > 0 else 0.0
 
@@ -2785,3 +2790,244 @@ Rules:
             "behavioral_warning": None,
             "strongest_topic": None,
         }
+
+
+# ─────────────────────────────────────────────────────────────────
+# LEARNING PATTERN COMPUTATION  (Forgetting Clock)
+# ─────────────────────────────────────────────────────────────────
+
+def _compute_learning_pattern(student_id: str, db: Session) -> None:
+    """Compute and upsert one LearningPattern row for this student."""
+    from collections import Counter
+    now = datetime.now(timezone.utc)
+    cutoff_28d = now - timedelta(days=28)
+
+    recent_sessions = db.query(PerformanceSession).filter(
+        PerformanceSession.student_id == student_id,
+        PerformanceSession.started_at >= cutoff_28d,
+        PerformanceSession.completed_at.isnot(None),
+    ).all()
+
+    avg_sessions_per_week = len(recent_sessions) / 4.0
+
+    durations = [s.duration_seconds for s in recent_sessions if s.duration_seconds]
+    preferred_length = (sum(durations) / len(durations) / 60.0) if durations else None
+
+    hours = [s.started_at.hour for s in recent_sessions if s.started_at]
+    preferred_hour = Counter(hours).most_common(1)[0][0] if hours else None
+
+    distinct_days = len({s.started_at.date() for s in recent_sessions if s.started_at})
+    consistency_score = min(1.0, distinct_days / 28.0)
+
+    recent_attempts = db.query(QuestionAttempt).filter(
+        QuestionAttempt.student_id == student_id,
+        QuestionAttempt.created_at >= cutoff_28d,
+        QuestionAttempt.calibration_gap.isnot(None),
+    ).all()
+
+    total_calibrated = len(recent_attempts)
+    overconfidence_rate = (
+        sum(1 for a in recent_attempts if (a.calibration_gap or 0) <= -1) / total_calibrated
+        if total_calibrated else None
+    )
+    underconfidence_rate = (
+        sum(1 for a in recent_attempts if (a.calibration_gap or 0) >= 1) / total_calibrated
+        if total_calibrated else None
+    )
+
+    def _tod_acc(hour_range):
+        subset = [a for a in recent_attempts if a.time_of_day is not None and a.time_of_day in hour_range]
+        return (sum(1 for a in subset if a.is_correct) / len(subset)) if subset else None
+
+    morning_acc   = _tod_acc(range(6, 12))
+    afternoon_acc = _tod_acc(range(12, 18))
+    evening_acc   = _tod_acc(range(18, 24))
+
+    changed = [a for a in recent_attempts if a.answer_changed]
+    answer_change_acc = (
+        sum(1 for a in changed if a.is_correct) / len(changed) if changed else None
+    )
+
+    last_5 = sorted(recent_sessions, key=lambda s: s.completed_at or now)[-5:]
+    if last_5:
+        scores = [s.readiness_score or 0.0 for s in last_5]
+        avg_score = sum(scores) / len(scores)
+        proj_7d  = min(100.0, avg_score * 1.05)
+        proj_14d = min(100.0, avg_score * 1.10)
+        proj_30d = min(100.0, avg_score * 1.20)
+    else:
+        proj_7d = proj_14d = proj_30d = None
+
+    flags = []
+    if overconfidence_rate and overconfidence_rate > 0.3:
+        flags.append("overconfident")
+    if consistency_score < 0.2:
+        flags.append("inconsistent_study")
+    if preferred_length and preferred_length < 5:
+        flags.append("very_short_sessions")
+
+    existing = db.query(LearningPattern).filter(
+        LearningPattern.student_id == student_id
+    ).first()
+
+    if existing:
+        existing.computed_at                      = now
+        existing.avg_sessions_per_week            = avg_sessions_per_week
+        existing.preferred_session_length_minutes = preferred_length
+        existing.preferred_time_of_day            = preferred_hour
+        existing.consistency_score                = consistency_score
+        existing.overconfidence_rate              = overconfidence_rate
+        existing.underconfidence_rate             = underconfidence_rate
+        existing.answer_change_accuracy           = answer_change_acc
+        existing.morning_accuracy                 = morning_acc
+        existing.afternoon_accuracy               = afternoon_acc
+        existing.evening_accuracy                 = evening_acc
+        existing.projected_readiness_7d           = proj_7d
+        existing.projected_readiness_14d          = proj_14d
+        existing.projected_readiness_30d          = proj_30d
+        existing.behavioral_flags                 = ",".join(flags) if flags else None
+    else:
+        db.add(LearningPattern(
+            id=str(uuid4()),
+            student_id=student_id,
+            computed_at=now,
+            avg_sessions_per_week=avg_sessions_per_week,
+            preferred_session_length_minutes=preferred_length,
+            preferred_time_of_day=preferred_hour,
+            consistency_score=consistency_score,
+            overconfidence_rate=overconfidence_rate,
+            underconfidence_rate=underconfidence_rate,
+            answer_change_accuracy=answer_change_acc,
+            morning_accuracy=morning_acc,
+            afternoon_accuracy=afternoon_acc,
+            evening_accuracy=evening_acc,
+            projected_readiness_7d=proj_7d,
+            projected_readiness_14d=proj_14d,
+            projected_readiness_30d=proj_30d,
+            behavioral_flags=",".join(flags) if flags else None,
+        ))
+
+
+def _compute_learning_pattern_bg(student_id: str, db_session_factory) -> None:
+    """Background-task wrapper: opens its own DB session."""
+    db = db_session_factory()
+    try:
+        _compute_learning_pattern(student_id, db)
+        db.commit()
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "LearningPattern computation failed for student %s", student_id
+        )
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────────────────────────
+# DAILY MISSION  (streak + today's progress)
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/students/me/daily-mission")
+def get_daily_mission(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns today's answered count, streak, goal, and FSRS due count."""
+    now = datetime.now(timezone.utc)
+    today = now.date()
+
+    answered_today = db.query(QuestionAttempt).filter(
+        QuestionAttempt.student_id == current_user.id,
+        func.date(QuestionAttempt.created_at) == today,
+    ).count()
+
+    correct_today = db.query(QuestionAttempt).filter(
+        QuestionAttempt.student_id == current_user.id,
+        func.date(QuestionAttempt.created_at) == today,
+        QuestionAttempt.is_correct == True,
+    ).count()
+
+    fsrs_due = db.query(FsrsCard).filter(
+        FsrsCard.student_id == current_user.id,
+        FsrsCard.due_date <= now,
+    ).count()
+
+    # Goal: base 20, plus overdue FSRS cards (capped at 40 total)
+    goal = min(40, 20 + fsrs_due) if fsrs_due > 0 else 20
+
+    # Streak: consecutive calendar days with activity (session or attempt)
+    streak = 0
+    check = today
+    while streak <= 365:
+        has_activity = (
+            db.query(QuestionAttempt.id).filter(
+                QuestionAttempt.student_id == current_user.id,
+                func.date(QuestionAttempt.created_at) == check,
+            ).first()
+        )
+        if has_activity:
+            streak += 1
+            check = check - timedelta(days=1)
+        else:
+            break
+
+    return {
+        "goal": goal,
+        "answered_today": answered_today,
+        "correct_today": correct_today,
+        "accuracy_today": round(correct_today / answered_today * 100) if answered_today > 0 else 0,
+        "streak_days": streak,
+        "completed": answered_today >= goal,
+        "fsrs_due_count": fsrs_due,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# KNOWLEDGE X-RAY  (pre-assessment: 1 question per topic)
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/xray/{document_id}")
+def get_xray_questions(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Pick one diagnostic MCQ per topic (up to 10 topics) so the student
+    can discover what they know before studying the full lecture.
+    """
+    all_questions = db.query(McqQuestion).filter(
+        McqQuestion.document_id == document_id,
+    ).all()
+
+    if not all_questions:
+        raise HTTPException(status_code=404, detail="No questions found for this document. Process the lecture first.")
+
+    topic_map: dict[str, list] = {}
+    for q in all_questions:
+        topic_map.setdefault(q.topic, []).append(q)
+
+    selected = [random.choice(qs) for qs in list(topic_map.values())[:10]]
+    random.shuffle(selected)
+
+    def _fmt(q: McqQuestion) -> dict:
+        raw_opts = [q.option_a, q.option_b, q.option_c, q.option_d]
+        prefixed = []
+        for i, opt in enumerate(raw_opts):
+            letter = chr(65 + i)
+            prefixed.append(opt if (opt or "").startswith(f"{letter}.") else f"{letter}. {opt or ''}")
+        return {
+            "id": q.id,
+            "topic": q.topic,
+            "question": q.question_text,
+            "options": prefixed,
+            "answer": q.correct_answer,
+            "explanation": q.explanation,
+        }
+
+    return {
+        "document_id": document_id,
+        "questions": [_fmt(q) for q in selected],
+        "topic_count": len(topic_map),
+        "total_questions_in_lecture": len(all_questions),
+    }

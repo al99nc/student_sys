@@ -832,6 +832,19 @@ export default function ResultsPage() {
                 </div>
               </div>
             )}
+
+            {/* Knowledge X-Ray entry point */}
+            <Link
+              href={`/xray/${lectureId}`}
+              className="flex items-center gap-3 px-3.5 py-3 rounded-xl border border-sky-500/25 bg-sky-500/5 hover:bg-sky-500/10 transition-colors"
+            >
+              <Brain className="w-4 h-4 text-sky-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-sky-300">Knowledge X-Ray</p>
+                <p className="text-[11px] text-muted-foreground">Find out what you know before studying</p>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
+            </Link>
           </div>
         )}
 
@@ -1166,6 +1179,11 @@ export default function ResultsPage() {
           <Button asChild variant="secondary" size="sm" className="gap-1.5 text-violet-300 bg-violet-600/10 border-violet-600/25 hover:bg-violet-600/15">
             <Link href={`/quiz/${lectureId}`}>
               <Zap className="w-3.5 h-3.5" />Quiz
+            </Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm" className="gap-1.5 text-sky-300 bg-sky-600/10 border-sky-600/25 hover:bg-sky-600/15">
+            <Link href={`/xray/${lectureId}`}>
+              <Brain className="w-3.5 h-3.5" />X-Ray
             </Link>
           </Button>
           <Button

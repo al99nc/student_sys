@@ -376,6 +376,7 @@ export interface FreshMCQ {
   answer: string;      // "A" | "B" | "C" | "D"
   explanation?: string;
   topic?: string;
+  distractors?: Record<string, string>; // wrong letter → why it's wrong
 }
 
 export const coachGeneratePractice = (topic: string, count: number) =>
@@ -485,6 +486,38 @@ export const recordQuizResult = (documentId: number, correct: number, total: num
     mode: "quiz_mode",
     started_from: startedFrom,
   });
+
+export interface DailyMission {
+  goal: number;
+  answered_today: number;
+  correct_today: number;
+  accuracy_today: number;
+  streak_days: number;
+  completed: boolean;
+  fsrs_due_count: number;
+}
+
+export const getDailyMission = () =>
+  api.get<DailyMission>("/api/v1/performance/students/me/daily-mission");
+
+export interface XrayQuestion {
+  id: string;
+  topic: string;
+  question: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+}
+
+export interface XrayResult {
+  document_id: number;
+  questions: XrayQuestion[];
+  topic_count: number;
+  total_questions_in_lecture: number;
+}
+
+export const getXrayQuestions = (documentId: number) =>
+  api.get<XrayResult>(`/api/v1/performance/xray/${documentId}`);
 
 // ── Essay Q types ─────────────────────────────────────────────────────────────
 

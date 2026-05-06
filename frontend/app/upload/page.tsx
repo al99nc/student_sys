@@ -6,7 +6,6 @@ import {
   uploadText,
   extractImageText,
   processLecture,
-  estimateProcessing,
   getEntitlements,
   Difficulty,
   CustomContext,
@@ -302,16 +301,10 @@ function UploadContent() {
   const [fileValidation, setFileValidation] = useState<ValidationResult | null>(null);
   const [dragging, setDragging]         = useState(false);
   const [uploading, setUploading]       = useState(false);
-  const [processing, setProcessing]     = useState(false);
   const [error, setError]               = useState("");
   const [step, setStep]                 = useState<"upload" | "process" | "done">("upload");
   const [tab, setTab]                   = useState<Tab>("study");
   const [mode, setMode]                 = useState<Mode>("highyield");
-  const [timeEstimate, setTimeEstimate] = useState<{
-    estimated_range: string; chunks: number; keys?: number; estimated_seconds?: number;
-  } | null>(null);
-  const [elapsed, setElapsed]           = useState(0);
-  const elapsedRef                      = useRef<ReturnType<typeof setInterval> | null>(null);
   const [tgFileLoading, setTgFileLoading] = useState(false);
   const [tgFileReady, setTgFileReady]   = useState(false);
 
@@ -344,9 +337,31 @@ function UploadContent() {
 
   useEffect(() => {
     if (!isInTelegram || !mainButton) return;
-    if (uploading || processing) mainButton.setText("Processing...").showProgress(true).disable();
+    if (uploading) mainButton.setText("Processing...").showProgress(true).disable();
     else if (step === "done") mainButton.hideProgress().setText("Done!").disable();
-  }, [isInTelegram, mainButton, uploading, processing, step]);
+  }, [isInTelegram, mainButton, uploading, step]);
+
+  // ── Active job check — redirect if a generation is already running ────────
+  useEffect(() => {
+    const checkActiveJob = async () => {
+      const { getToken } = await import("@/lib/auth");
+      const token = getToken();
+      if (!token) return;
+      try {
+        const res = await fetch("/api/jobs/active/mine", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.active_job) {
+          router.push(`/upload/${data.active_job.job_id}`);
+        }
+      } catch {
+        // silently ignore — never block the upload page
+      }
+    };
+    checkActiveJob();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auth + shared files ───────────────────────────────────────────────────
   useEffect(() => {
@@ -432,27 +447,19 @@ function UploadContent() {
 
   // ── Processing pipeline ───────────────────────────────────────────────────
   const handleProcess = async (id: number) => {
-    setStep("process");
-    setProcessing(true);
-    setElapsed(0);
+    setUploading(true);
     setError("");
     try {
-      const est = await estimateProcessing(id, mode as Difficulty);
-      setTimeEstimate(est.data);
-    } catch { /* non-fatal */ }
-    elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
-    try {
-      await processLecture(id, essayMode ? "essay" : mode as Difficulty, customContext ?? undefined);
-      setStep("done");
-      setTimeout(() => router.push(essayMode ? `/essay-quiz/${id}` : `/results/${id}`), 1500);
+      const res = await processLecture(id, essayMode ? "essay" : mode as Difficulty, customContext ?? undefined);
+      const jobId = res.data.job_id;
+      router.push(`/upload/${jobId}`);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
       const d = axiosErr.response?.data?.detail;
-      setError(typeof d === "string" ? d : (d && typeof d === "object" && "message" in d ? `${(d as {message: string}).message} ${(d as {hint?: string}).hint ?? ""}`.trim() : "Processing failed"));
+      setError(typeof d === "string" ? d : (d && typeof d === "object" && "message" in d ? `${(d as {message: string}).message} ${(d as {hint?: string}).hint ?? ""}`.trim() : "Processing failed. Please try again."));
       setStep("upload");
     } finally {
-      setProcessing(false);
-      if (elapsedRef.current) clearInterval(elapsedRef.current);
+      setUploading(false);
     }
   };
 
@@ -600,60 +607,17 @@ function UploadContent() {
     );
   };
 
-  // ── Processing / Done screens ──────────────────────────────────────────────
-  if (step === "process" || step === "done") {
+  // ── Done screen (legacy — normally the job page handles this) ────────────
+  if (step === "done") {
     return (
       <div className="min-h-screen flex items-center justify-center relative bg-background">
         <div className="grain-overlay" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
         <Card className="relative z-10 glass-panel border-border/50 max-w-md mx-4 w-full">
           <CardContent className="p-6 sm:p-12 text-center">
-            {step === "process" ? (
-              <>
-                <div className="w-20 h-20 rounded-2xl synapse-gradient flex items-center justify-center mx-auto mb-6 shadow-lg shadow-primary/30">
-                  <Loader2 className="w-10 h-10 text-white animate-spin" />
-                </div>
-                <h2 className="text-2xl font-bold text-foreground mb-2">Processing your content…</h2>
-                <p className="text-muted-foreground mb-6">
-                  {essayMode
-                    ? <>AI is generating <span className="text-cyan-400 font-bold">Essay Questions</span> with ideal answers</>
-                    : <>AI is generating MCQs in <span className="text-cyan-400 font-bold">{modeLabel}</span></>
-                  }
-                </p>
-                {timeEstimate && (
-                  <div className="mb-4 px-5 py-3 rounded-xl bg-muted text-left space-y-1">
-                    <p className="text-sm text-cyan-400 font-medium">
-                      Estimated: <span className="font-bold text-foreground">{timeEstimate.estimated_range}</span>
-                    </p>
-                    {timeEstimate.chunks > 1 && (
-                      <p className="text-xs text-muted-foreground">
-                        {timeEstimate.chunks} chunk{timeEstimate.chunks > 1 ? "s" : ""}
-                        {(timeEstimate.keys ?? 1) > 1 && ` · ${timeEstimate.keys} keys in parallel`}
-                      </p>
-                    )}
-                    {timeEstimate.estimated_seconds && elapsed < timeEstimate.estimated_seconds && (
-                      <p className="text-xs text-muted-foreground">
-                        ~{Math.max(0, timeEstimate.estimated_seconds - elapsed)}s remaining
-                      </p>
-                    )}
-                  </div>
-                )}
-                <Progress
-                  value={timeEstimate?.estimated_seconds
-                    ? Math.min(95, (elapsed / timeEstimate.estimated_seconds) * 100)
-                    : 50}
-                  className="h-2 mb-3"
-                />
-                <p className="text-xs text-muted-foreground">{elapsed}s elapsed</p>
-              </>
-            ) : (
-              <>
-                <div className="w-20 h-20 rounded-2xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-6">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-                </div>
-                <h2 className="text-2xl font-bold text-foreground">Done! Redirecting…</h2>
-              </>
-            )}
+            <div className="w-20 h-20 rounded-2xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-6">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-foreground">Done! Redirecting…</h2>
           </CardContent>
         </Card>
       </div>
