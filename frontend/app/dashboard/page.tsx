@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getDashboard, getLectures, getMySharedSessions, getNextBestAction, getDailyMission, DailyMission } from "@/lib/api";
 import { isAuthenticated, logout } from "@/lib/auth";
+import { prefetch } from "@/lib/prefetch-cache";
 import { AppHeader } from "@/components/app-header";
 import { StepNav } from "@/components/step-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +21,6 @@ import {
   FileText,
   CheckCircle2,
   Clock,
-  ExternalLink,
   Sparkles,
   ChevronRight,
   BarChart3,
@@ -91,30 +91,31 @@ export default function DashboardPage() {
   }, [router]);
 
   const fetchData = () => {
-    getDashboard()
+    (prefetch.dashboard ?? getDashboard())
       .then((res) => {
+        if (!res) return;
         if (res.data.user.name) setUserName(res.data.user.name);
         setStats(res.data.lecture_stats);
       })
       .catch(() => setError("Failed to load dashboard data"))
       .finally(() => setLoadingDash(false));
 
-    getLectures()
-      .then((res) => setLectures(res.data))
+    (prefetch.lectures ?? getLectures())
+      .then((res) => { if (res) setLectures(res.data); })
       .catch(() => setError("Failed to load lectures"))
       .finally(() => setLoadingLectures(false));
 
-    getMySharedSessions()
-      .then((res) => setSharedSessions(res.data))
+    (prefetch.sharedSessions ?? getMySharedSessions())
+      .then((res) => { if (res) setSharedSessions(res.data); })
       .catch(() => {});
 
-    getNextBestAction()
-      .then((res) => setNextAction(res.data))
+    (prefetch.nextAction ?? getNextBestAction())
+      .then((res) => { if (res) setNextAction(res.data); })
       .catch(() => {})
       .finally(() => setLoadingNextAction(false));
 
-    getDailyMission()
-      .then((res) => setDailyMission(res.data))
+    (prefetch.dailyMission ?? getDailyMission())
+      .then((res) => { if (res) setDailyMission(res.data); })
       .catch(() => {});
   };
 
@@ -231,28 +232,53 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Coach Card */}
+          </div>
+
+          {/* Right column */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* Merged Coach / Hero Card */}
             <Card>
               <CardContent className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-                    <Bot className="w-[18px] h-[18px] text-primary-foreground" />
+                {/* Header row */}
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div className="flex-1">
+                    <Badge variant="outline" className="mb-3 text-xs font-medium">
+                      AI Study Advisor
+                    </Badge>
+                    <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-1">
+                      What do you want to work on?
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                      Ask the coach anything — study plans, weak points, practice sessions, or just motivation.
+                    </p>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold text-foreground">AI Coach</p>
-                    <p className="text-xs text-muted-foreground">Powered by Gemini</p>
+                  {/* Readiness score badge */}
+                  <div className="hidden sm:flex flex-col items-center gap-1 flex-shrink-0">
+                    <div className="relative w-20 h-20">
+                      <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 80 80">
+                        <circle cx="40" cy="40" r="32" fill="none" stroke="hsl(var(--border))" strokeWidth="6" />
+                        <circle
+                          cx="40" cy="40" r="32" fill="none"
+                          stroke="hsl(var(--primary))" strokeWidth="6"
+                          strokeDasharray={`${2 * Math.PI * 32}`}
+                          strokeDashoffset={`${2 * Math.PI * 32 * (1 - (nextAction?.predicted_readiness_24h ?? 0) / 100)}`}
+                          strokeLinecap="round"
+                          className="transition-all duration-700"
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-sm font-bold text-foreground">
+                          {nextAction?.predicted_readiness_24h != null ? `${nextAction.predicted_readiness_24h}%` : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">Readiness</span>
                   </div>
-                  <Button size="sm" variant="outline" asChild className="ml-auto">
-                    <Link href="/coach" prefetch={false}>
-                      <ExternalLink className="w-3 h-3 mr-1.5" />
-                      Open
-                    </Link>
-                  </Button>
                 </div>
 
-                {/* Next action */}
-                <div className={`rounded-xl bg-primary/5 border border-primary/20 p-4 mb-4 transition-opacity ${loadingNextAction ? "animate-pulse opacity-60" : ""}`}>
-                  <p className="text-xs font-medium text-primary mb-1">
+                {/* Next action box */}
+                <div className={`rounded-xl bg-primary/5 border border-primary/20 p-4 mb-5 transition-opacity ${loadingNextAction ? "animate-pulse opacity-60" : ""}`}>
+                  <p className="text-xs font-medium text-primary mb-1 capitalize">
                     {nextAction?.action_type?.replace(/_/g, " ") || "Exploration Mode"}
                   </p>
                   <p className="text-sm font-medium text-foreground">
@@ -267,95 +293,50 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {/* Readiness */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
+                {/* Readiness bar (mobile only) */}
+                <div className="sm:hidden mb-5">
+                  <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs text-muted-foreground">Readiness Score</span>
-                    <span className="text-sm font-bold text-foreground">
+                    <span className="text-xs font-bold text-foreground">
                       {nextAction?.predicted_readiness_24h != null ? `${nextAction.predicted_readiness_24h}%` : "—%"}
                     </span>
                   </div>
                   <Progress value={nextAction?.predicted_readiness_24h ?? 0} className="h-2" />
                 </div>
 
-                {/* Quick chips — prefetch=false: these link to coach with query params,
-                    prefetching them would fire 3 redundant RSC requests */}
-                <div className="flex flex-wrap gap-2">
+                {/* Suggestion chips — prefetch=false: these link to coach with query params,
+                    prefetching them would fire redundant RSC requests */}
+                <div className="flex flex-wrap gap-2 mb-5">
                   {[
-                    { label: "Plan session", q: "Plan my next study session based on my weak points" },
-                    { label: "Weak points", q: "Explain my weakest topics and how to fix them" },
-                    { label: "What's next?", q: "What should I study next?" },
-                  ].map(({ label, q }) => (
+                    { label: "Plan my study session", icon: "calendar_today" },
+                    { label: "What are my weak points?", icon: "radio_button_checked" },
+                    { label: "Quiz me on my worst topic", icon: "quiz" },
+                    { label: "Review a topic", icon: "menu_book" },
+                    { label: "Motivate me", icon: "bolt" },
+                  ].map(({ label, icon }) => (
                     <Link
                       key={label}
-                      href={`/coach?q=${encodeURIComponent(q)}`}
+                      href={`/coach?q=${encodeURIComponent(label)}`}
                       prefetch={false}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-muted/50 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
                     >
-                      <ArrowRight className="w-3 h-3" />
+                      <span className="material-symbols-outlined text-[13px]">{icon}</span>
                       {label}
                     </Link>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          </div>
 
-          {/* Right column */}
-          <div className="lg:col-span-8 space-y-6">
-            {/* Hero / Sage suggestion chips */}
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <Badge variant="outline" className="mb-3 text-xs font-medium">
-                      AI Study Advisor
-                    </Badge>
-                    <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-2">
-                      What do you want to work on?
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-5">
-                      Ask the coach anything — study plans, weak points, practice sessions, or just motivation.
-                    </p>
-                    <div className="flex flex-wrap gap-2 mb-5">
-                      {[
-                        { label: "Plan my study session", icon: "calendar_today" },
-                        { label: "What are my weak points?", icon: "radio_button_checked" },
-                        { label: "Quiz me on my worst topic", icon: "quiz" },
-                        { label: "Motivate me", icon: "bolt" },
-                      ].map(({ label, icon }) => (
-                        <Link
-                          key={label}
-                          href={`/coach?q=${encodeURIComponent(label)}`}
-                          prefetch={false}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-muted/50 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
-                        >
-                          <span className="material-symbols-outlined text-[13px]">{icon}</span>
-                          {label}
-                        </Link>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Button asChild>
-                        <Link href="/coach" prefetch={false}>
-                          <Bot className="w-4 h-4 mr-2" />
-                          Open Coach
-                        </Link>
-                      </Button>
-                      <Button variant="outline" asChild>
-                        <Link href="/upload" prefetch={false}>+ Upload Lecture</Link>
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="relative hidden sm:flex flex-shrink-0 w-32 h-32 items-center justify-center">
-                    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200">
-                      <circle cx="100" cy="100" r="90" fill="none" stroke="hsl(var(--border))" strokeWidth="1" />
-                      <circle cx="100" cy="100" r="66" fill="none" stroke="hsl(var(--border))" strokeWidth="1" strokeDasharray="4 4" />
-                    </svg>
-                    <div className="relative z-10 w-14 h-14 rounded-full bg-primary flex items-center justify-center">
-                      <Sparkles className="w-6 h-6 text-primary-foreground" />
-                    </div>
-                  </div>
+                {/* CTAs */}
+                <div className="flex items-center gap-3">
+                  <Button asChild>
+                    <Link href="/coach" prefetch={false}>
+                      <Bot className="w-4 h-4 mr-2" />
+                      Open Coach
+                    </Link>
+                  </Button>
+                  <Button variant="outline" asChild>
+                    <Link href="/upload" prefetch={false}>+ Upload Lecture</Link>
+                  </Button>
                 </div>
               </CardContent>
             </Card>

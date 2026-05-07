@@ -53,7 +53,7 @@ export default function FlashcardsPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
-      <AppHeader />
+      <AppHeader activePage="Flashcards" />
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
 

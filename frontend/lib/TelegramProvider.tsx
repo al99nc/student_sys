@@ -236,12 +236,16 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     setWebApp(tg);
 
     // Auto-authenticate: exchange Telegram identity for a cortexQ JWT,
-    // then navigate to dashboard if user is on the landing or auth page.
+    // then navigate to the welcome animation if user is on the landing or auth page.
     loginWithTelegram(tg.initData)
       .then(() => {
         const path = window.location.pathname;
         if (path === "/" || path === "/auth") {
-          window.location.href = "/dashboard";
+          const firstName = tg.initDataUnsafe?.user?.first_name;
+          const dest = firstName
+            ? `/welcome?from=telegram&name=${encodeURIComponent(firstName)}`
+            : "/welcome?from=telegram";
+          window.location.href = dest;
         }
       })
       .catch((err) =>

@@ -174,7 +174,7 @@ export default function LecturesPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-3 gap-3">
               <div className="rounded-3xl border border-border/60 bg-slate-950/5 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">Answered</p>
                 <p className="mt-3 text-3xl font-bold text-foreground">{totalMCQs}</p>
@@ -198,7 +198,7 @@ export default function LecturesPage() {
           <div className="mb-8">
             <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground mb-1">Your uploads</p>
             <h2 className="text-2xl font-semibold text-foreground mb-4">Continue studying</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className={`grid gap-3 ${allUploads.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
               {allUploads.map((upload) => {
                 const isReady = upload.is_processed;
                 const href = isReady ? `/results/${upload.id}` : `/upload`;
@@ -232,7 +232,7 @@ export default function LecturesPage() {
           </div>
         )}
 
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-6">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground">Study overview</p>
             <h2 className="text-2xl font-semibold text-foreground">Discover your lectures</h2>
@@ -248,7 +248,7 @@ export default function LecturesPage() {
         </div>
 
         <div className="mb-5 md:mb-6">
-          <div className="relative max-w-2xl">
+          <div className="relative">
             <Search className="absolute left-3.5 top-3 w-4 h-4 text-muted-foreground" />
             <input
               type="text"

@@ -105,7 +105,8 @@ export default function AuthPage() {
         const res = await login(email, password);
         saveToken(res.data.access_token);
         persistRememberMe();
-        router.push(new URLSearchParams(window.location.search).get("redirect") || "/dashboard");
+        const redirectTo = new URLSearchParams(window.location.search).get("redirect");
+        router.push(redirectTo || "/welcome");
       }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
@@ -137,7 +138,7 @@ export default function AuthPage() {
       try { await saveOnboarding(userName.trim(), university.trim(), college, yearOfStudy); } catch {}
       finally { setLoading(false); }
       localStorage.setItem("cortexq_profile", JSON.stringify({ name: userName, university, college, yearOfStudy }));
-      router.push("/dashboard");
+      router.push(`/welcome?name=${encodeURIComponent(userName.trim())}`);
     }
   };
 

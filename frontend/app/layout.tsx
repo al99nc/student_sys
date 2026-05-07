@@ -37,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`dark ${plusJakarta.variable}`}>
+    <html lang="en" className={`dark ${plusJakarta.variable}`} suppressHydrationWarning>
 
       <body className="font-sans antialiased bg-background min-h-screen">
         <MaterialSymbolsFont />
