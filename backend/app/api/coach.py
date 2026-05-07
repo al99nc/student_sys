@@ -1,5 +1,5 @@
-"""
-CortexQ Coach — full conversation management API.
+﻿"""
+themcq Coach — full conversation management API.
 
 Endpoints:
   GET    /api/v1/coach/conversations            list all conversations
@@ -989,7 +989,7 @@ async def _call_ai_vision(
         for m in significant_memories
     ) if significant_memories else "  • Nothing saved yet"
 
-    system_prompt = f"""You are CortexQ — an adaptive AI companion with three dynamic roles: Friend, Teacher, and Coach.
+    system_prompt = f"""You are themcq — an adaptive AI companion with three dynamic roles: Friend, Teacher, and Coach.
 The student has shared an image. Analyze what it actually shows and respond naturally in the right role.
 You are ONE consistent personality — never feel like switching systems.
 

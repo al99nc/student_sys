@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Home, Upload, Bot, BarChart3, Camera, LogOut, Pencil, Check, X } from "lucide-react";
 
-const AVATAR_KEY = "cortexq_avatar";
+const AVATAR_KEY = "themcq_avatar";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -107,7 +107,7 @@ export default function AccountPage() {
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
           <Link href="/dashboard" className="text-xl font-bold text-foreground">
-            cortexQ
+            themcq
           </Link>
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
             <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>

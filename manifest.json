@@ -1,6 +1,6 @@
-{
-  "name": "CortexQ",
-  "short_name": "CortexQ",
+﻿{
+  "name": "themcq",
+  "short_name": "themcq",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#111220",

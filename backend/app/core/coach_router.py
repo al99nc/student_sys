@@ -1,5 +1,5 @@
-"""
-Keyword-based intent classifier for CortexQ Coach.
+﻿"""
+Keyword-based intent classifier for themcq Coach.
 
 Classifies incoming messages into intents before hitting the LLM so we can:
   - Return canned responses for off_topic  (no LLM cost / latency)

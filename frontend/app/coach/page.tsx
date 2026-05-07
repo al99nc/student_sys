@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useRef, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -89,7 +89,7 @@ interface PracticeModalData {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const PRACTICE_KEY = "cortexq_practice_map";
+const PRACTICE_KEY = "themcq_practice_map";
 
 function loadPracticeMap(): PracticeMap {
   if (typeof window === "undefined") return {};
@@ -625,7 +625,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
               <div className="w-8 h-8 rounded-[10px] bg-foreground flex items-center justify-center flex-shrink-0">
                 <span className="text-background font-black text-[11px]">cQ</span>
               </div>
-              <span className="text-foreground font-bold text-sm">cortexQ</span>
+              <span className="text-foreground font-bold text-sm">themcq</span>
             </Link>
             {isMobile && (
               <button onClick={() => setSidebarOpen(false)} className="w-9 h-9 rounded-lg flex items-center justify-center bg-muted/50 text-muted-foreground hover:text-foreground transition-colors">
@@ -769,7 +769,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
               <Bot className="w-4 h-4 text-foreground/70" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-bold text-foreground truncate leading-tight">{activeId ? convTitle : "cortexQ Coach"}</p>
+              <p className="text-sm font-bold text-foreground truncate leading-tight">{activeId ? convTitle : "themcq Coach"}</p>
               <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/40 leading-tight">AI Study Advisor</p>
             </div>
           </div>
@@ -971,7 +971,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
             </div>
 
             <p className="text-[10px] text-muted-foreground/20 text-center mt-2">
-              CortexQ Coach uses your real performance data — responses are specific to you.
+              themcq Coach uses your real performance data — responses are specific to you.
             </p>
           </div>
         </div>

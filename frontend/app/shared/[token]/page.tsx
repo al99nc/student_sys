@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSharedResult, pingSharedSession, getQuizSession, saveQuizSession, retakeQuizSession } from "@/lib/api";
@@ -76,10 +76,10 @@ export default function SharedPage() {
     setIsLoggedIn(loggedIn);
 
     // Retrieve or generate a session ID for this browser tab
-    let sid = sessionStorage.getItem(`cortexq_sid_${token}`);
+    let sid = sessionStorage.getItem(`themcq_sid_${token}`);
     if (!sid) {
       sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      sessionStorage.setItem(`cortexq_sid_${token}`, sid);
+      sessionStorage.setItem(`themcq_sid_${token}`, sid);
     }
     sessionIdRef.current = sid;
 
@@ -120,7 +120,7 @@ export default function SharedPage() {
     const ping = () => {
       pingSharedSession(token, sessionIdRef.current).then(res => {
         sessionIdRef.current = res.data.session_id;
-        sessionStorage.setItem(`cortexq_sid_${token}`, res.data.session_id);
+        sessionStorage.setItem(`themcq_sid_${token}`, res.data.session_id);
       }).catch(() => {});
     };
 
@@ -191,7 +191,7 @@ export default function SharedPage() {
     setConfirmRetake(false);
     // Feature 6: gate second retake for guests
     if (!isLoggedIn) {
-      const key = `cortexq_guest_shared_retakes_${token}`;
+      const key = `themcq_guest_shared_retakes_${token}`;
       const count = parseInt(localStorage.getItem(key) || "0");
       if (count >= 1) {
         setGuestRetakeBlocked(true);
@@ -230,7 +230,7 @@ export default function SharedPage() {
           <h2 className="text-2xl font-bold text-white mb-2">Link Not Found</h2>
           <p className="text-on-surface-variant mb-8">This share link is invalid or has been removed.</p>
           <Link href="/" className="synapse-gradient text-white font-bold px-8 py-3 rounded-xl inline-block hover:-translate-y-1 transition-transform">
-            Go to cortexQ
+            Go to themcq
           </Link>
         </div>
       </div>
@@ -335,7 +335,7 @@ export default function SharedPage() {
       <header className="fixed top-0 w-full flex justify-between items-center px-5 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
         <div className="flex items-center gap-3">
           <Link href={isLoggedIn ? "/dashboard" : "/"} className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent hover:opacity-80 transition-opacity">
-            cortexQ
+            themcq
           </Link>
           <span className="hidden md:inline px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant bg-surface-container-high border border-outline-variant/20 rounded">Shared</span>
         </div>
@@ -359,7 +359,7 @@ export default function SharedPage() {
               </button>
               <div className="absolute top-full right-0 mt-2 w-64 glass-panel rounded-xl p-4 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 border border-outline-variant/20 shadow-xl">
                 <p className="font-bold text-white text-sm mb-1">Your answers are not saved</p>
-                <p className="text-on-surface-variant text-xs mb-3 leading-relaxed">Create a free cortexQ account to auto-save answers, track retakes, and generate MCQs from your own PDFs.</p>
+                <p className="text-on-surface-variant text-xs mb-3 leading-relaxed">Create a free themcq account to auto-save answers, track retakes, and generate MCQs from your own PDFs.</p>
                 <Link href="/" className="block text-center synapse-gradient text-white font-bold py-2 rounded-lg text-xs hover:-translate-y-0.5 transition-transform">
                   Create Free Account
                 </Link>
@@ -406,7 +406,7 @@ export default function SharedPage() {
             )}
             {!isLoggedIn && (
               <Link href="/" className="text-sm font-bold px-3 py-1.5 rounded-lg synapse-gradient text-white hover:-translate-y-0.5 transition-transform">
-                Try cortexQ
+                Try themcq
               </Link>
             )}
           </div>
@@ -649,7 +649,7 @@ export default function SharedPage() {
       {!isLoggedIn && (
         <div className="hidden md:flex fixed bottom-0 w-full z-40 justify-center py-3 bg-slate-950/60 backdrop-blur-md border-t border-white/5">
           <Link href="/" className="flex items-center gap-2 text-xs text-on-surface-variant hover:text-white transition-colors">
-            <span className="font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">cortexQ</span>
+            <span className="font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">themcq</span>
             <span>— Upload your own lecture and generate MCQs instantly</span>
             <span className="material-symbols-outlined text-sm">arrow_forward</span>
           </Link>

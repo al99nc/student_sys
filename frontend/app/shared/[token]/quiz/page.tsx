@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -116,7 +116,7 @@ export default function SharedQuizPage() {
 
   const handleRetake = () => {
     if (!isLoggedIn) {
-      const key = `cortexq_guest_retakes_${token}`;
+      const key = `themcq_guest_retakes_${token}`;
       const count = parseInt(localStorage.getItem(key) || "0");
       if (count >= 1) {
         setGuestRetakeBlocked(true);
@@ -208,7 +208,7 @@ export default function SharedQuizPage() {
                 Generate MCQs from any PDF in 30 seconds. Free forever.
               </p>
               <Button asChild className="w-full synapse-gradient text-white rounded-xl text-sm">
-                <Link href="/">Try cortexQ free</Link>
+                <Link href="/">Try themcq free</Link>
               </Button>
             </CardContent>
           </Card>

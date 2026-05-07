@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 import random
 import re
@@ -935,7 +935,7 @@ def _build_next_best_action(student_id: int, db: Session) -> dict:
         "reason": reason,
         "confidence_gap_alert": confidence_gap_alert,
         "short_message": (
-            f"CortexQ: Focus on {topic if topic else 'a focused topic'}. "
+            f"themcq: Focus on {topic if topic else 'a focused topic'}. "
             "Clear the key gap, then we re-evaluate."
         ),
         "predicted_readiness_24h": _estimate_readiness_24h(student_id, db),
@@ -1526,7 +1526,7 @@ async def _call_ai_for_insight(context: dict) -> dict:
         and t["last_attempted_days_ago"] > t["decay_rate_days"]
     ]
 
-    system_prompt = f"""You are CortexQ — an adaptive AI learning coach for medical students.
+    system_prompt = f"""You are themcq — an adaptive AI learning coach for medical students.
 You receive complete performance data for one student and return a structured insight report.
 
 Be precise, specific, and direct. Use actual topic names. Never give generic study advice.
@@ -1826,7 +1826,7 @@ Feel natural — not like a filtered system.
     else:
         field_block = ""
 
-    system_prompt = f"""You are CortexQ — an adaptive AI companion with three dynamic roles: Friend, Teacher, and Coach.
+    system_prompt = f"""You are themcq — an adaptive AI companion with three dynamic roles: Friend, Teacher, and Coach.
 {field_block}
 
 Your goal is NOT to dump information. Your goal is to guide, support, and adapt to the student like a real human companion.
@@ -2189,7 +2189,7 @@ def _chat_fallback(
 
 async def _run_analyzer(context: dict) -> dict:
     """
-    Stage 1 — CortexQ Analyzer.
+    Stage 1 — themcq Analyzer.
     Cold, precise logic. Reads student profile, applies priority rules,
     returns a structured decision object. No human tone. No explanations.
     Uses ANALYZER_MODEL at temperature=0.1.
@@ -2203,7 +2203,7 @@ async def _run_analyzer(context: dict) -> dict:
     dangerous = [t for t in weak_topics if t.get("dangerous_misconception")]
     early_data = [t for t in weak_topics if t.get("total_attempts", 0) < 3]
 
-    system_prompt = """You are CortexQ Analyzer — a precision learning intelligence engine.
+    system_prompt = """You are themcq Analyzer — a precision learning intelligence engine.
 
 Your job is to analyze a student's performance data and produce a structured decision object.
 
@@ -2292,14 +2292,14 @@ Recent sessions: {len(recent)} sessions on record"""
 
 async def _run_humanizer(decision: dict, context: dict) -> dict:
     """
-    Stage 2 — CortexQ Humanizer.
+    Stage 2 — themcq Humanizer.
     Takes the Analyzer's structured decision and converts it into a natural,
     conversational coaching message. 1-2 sentences. Action-first. Never robotic.
     Uses HUMANIZER_MODEL at temperature=0.7.
     """
     overconf = context.get("calibration", {}).get("overconfidence_rate")
 
-    system_prompt = """You are CortexQ Coach — a sharp, human-like medical study coach.
+    system_prompt = """You are themcq Coach — a sharp, human-like medical study coach.
 
 Your job is to convert a structured AI decision into a natural, conversational coaching message.
 

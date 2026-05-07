@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+﻿@import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
@@ -136,7 +136,7 @@
   }
 }
 
-/* ── CortexQ custom utilities ── */
+/* ── themcq custom utilities ── */
 .synapse-gradient {
   background: oklch(0.22 0 0);
 }

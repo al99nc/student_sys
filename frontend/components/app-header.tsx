@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getMe } from "@/lib/api";
@@ -40,7 +40,7 @@ export function AppHeader({ activePage }: { activePage: string }) {
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
           <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
-            cortexQ
+            themcq
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">

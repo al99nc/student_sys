@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -396,7 +396,7 @@ export default function DashboardPage() {
                     <BookOpen className="h-10 w-10 text-muted-foreground mb-4" />
                     <p className="font-semibold text-foreground mb-2">No lectures yet</p>
                     <p className="text-sm text-muted-foreground mb-5">
-                      Upload your first PDF and CortexQ will generate questions within seconds.
+                      Upload your first PDF and themcq will generate questions within seconds.
                     </p>
                     <Button variant="outline" asChild>
                       <Link href="/upload" prefetch={false}>+ Upload New Lecture</Link>

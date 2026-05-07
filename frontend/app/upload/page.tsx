@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -101,7 +101,7 @@ function TelegramAnnouncement() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!localStorage.getItem("cortexq_upload_tip_v1")) setVisible(true);
+    if (!localStorage.getItem("themcq_upload_tip_v1")) setVisible(true);
   }, []);
 
   useEffect(() => {
@@ -114,7 +114,7 @@ function TelegramAnnouncement() {
   }, [visible, done]);
 
   const dismiss = () => {
-    localStorage.setItem("cortexq_upload_tip_v1", "1");
+    localStorage.setItem("themcq_upload_tip_v1", "1");
     setVisible(false);
   };
 
@@ -167,7 +167,7 @@ function TelegramAnnouncement() {
 
           <div className="flex flex-col sm:flex-row gap-3">
             <a
-              href="https://t.me/cortexQ_bot"
+              href="https://t.me/themcq_bot"
               target="_blank"
               rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-foreground text-background text-sm font-bold hover:opacity-90 transition-opacity"
@@ -204,7 +204,7 @@ function TelegramInAppAnnouncement({ onDismiss }: { onDismiss: () => void }) {
     return () => clearInterval(t);
   }, [done]);
 
-  const save = () => localStorage.setItem("cortexq_tg_upload_tip_v1", "1");
+  const save = () => localStorage.setItem("themcq_tg_upload_tip_v1", "1");
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-background/85 backdrop-blur-sm">
@@ -281,7 +281,7 @@ function UploadContent() {
   const { isInTelegram, mainButton } = useTelegram();
   const [showTgAnnouncement, setShowTgAnnouncement] = useState(false);
   useEffect(() => {
-    if (isInTelegram && !localStorage.getItem("cortexq_tg_upload_tip_v1")) {
+    if (isInTelegram && !localStorage.getItem("themcq_tg_upload_tip_v1")) {
       setShowTgAnnouncement(true);
     }
   }, [isInTelegram]);
@@ -644,7 +644,7 @@ function UploadContent() {
             </p>
             <div className="flex justify-center pt-1">
               <a
-                href="https://t.me/cortexQ_bot"
+                href="https://t.me/themcq_bot"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-[#229ED9]/15 border border-[#229ED9]/35 text-[#229ED9] font-semibold text-sm hover:bg-[#229ED9]/25 hover:border-[#229ED9]/60 transition-all duration-200"

@@ -1,4 +1,4 @@
-# StudyAI - Student Study Assistant
+﻿# themcq - Student Study Assistant
 
 Upload lecture PDFs and get AI-generated MCQs, summaries, and key concepts.
 

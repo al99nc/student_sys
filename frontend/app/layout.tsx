@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from 'next'
+﻿import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
 import Script from 'next/script'
@@ -15,7 +15,7 @@ const plusJakarta = localFont({
 })
 
 export const metadata: Metadata = {
-  title: 'cortexQ - Learn Smarter',
+  title: 'themcq - Learn Smarter',
   description: 'Upload lectures and get AI-generated MCQs, summaries, and key concepts. Turn your study materials into mastery.',
   icons: {
     icon: '/favicon.ico',

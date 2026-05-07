@@ -1,8 +1,8 @@
-"""
-CortexQ Group Joiner
+﻿"""
+themcq Group Joiner
 --------------------
 Userbot helper: joins a Telegram group/channel via invite link,
-promotes the CortexQ bot to admin, then leaves.
+promotes the themcq bot to admin, then leaves.
 
 First run will ask for your phone number + OTP — after that a
 session file (owner.session) is saved and reused automatically.
@@ -37,7 +37,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 API_ID       = int(os.environ["TELEGRAM_API_ID"])
 API_HASH     = os.environ["TELEGRAM_API_HASH"]
-BOT_USERNAME = os.environ.get("BOT_USERNAME", "")   # e.g. "cortexq_bot" (no @)
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "")   # e.g. "themcq_bot" (no @)
 PHONE        = os.environ.get("TELEGRAM_PHONE", "")  # e.g. "+1234567890"
 
 SESSION_FILE = os.path.join(os.path.dirname(__file__), "sessions", "owner")
@@ -104,7 +104,7 @@ async def join_and_add_bot(link: str) -> str:
                     add_admins=False,
                     ban_users=False,
                 )
-                await client(EditAdminRequest(chat, bot_entity, admin_rights, rank="CortexQ"))
+                await client(EditAdminRequest(chat, bot_entity, admin_rights, rank="themcq"))
             elif isinstance(chat, Chat):
                 # Basic group — use messages.EditChatAdminRequest (simple is_admin flag)
                 await client(EditChatAdminRequest(chat.id, bot_entity, is_admin=True))

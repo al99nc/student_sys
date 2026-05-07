@@ -1,4 +1,4 @@
-import Link from "next/link"
+﻿import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { ArrowRight, Sparkles } from "lucide-react"
@@ -21,7 +21,7 @@ export function CTA() {
             </h2>
             
             <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-              Join thousands of students already using cortexQ to ace their exams. 
+              Join thousands of students already using themcq to ace their exams. 
               Start for free, no credit card required.
             </p>
             

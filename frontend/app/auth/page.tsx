@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { signup, login, saveOnboarding } from "@/lib/api";
@@ -137,7 +137,7 @@ export default function AuthPage() {
       setLoading(true);
       try { await saveOnboarding(userName.trim(), university.trim(), college, yearOfStudy); } catch {}
       finally { setLoading(false); }
-      localStorage.setItem("cortexq_profile", JSON.stringify({ name: userName, university, college, yearOfStudy }));
+      localStorage.setItem("themcq_profile", JSON.stringify({ name: userName, university, college, yearOfStudy }));
       router.push(`/welcome?name=${encodeURIComponent(userName.trim())}`);
     }
   };
@@ -217,7 +217,7 @@ export default function AuthPage() {
                 </div>
                 <h1 className="text-2xl font-black tracking-tight mb-2.5">Nice to meet you!</h1>
                 <p className="text-sm text-muted-foreground leading-relaxed mx-auto max-w-xs mb-7">
-                  cortexQ turns your lecture PDFs into smart MCQ quizzes — study smarter, retain more, enjoy exam prep.
+                  themcq turns your lecture PDFs into smart MCQ quizzes — study smarter, retain more, enjoy exam prep.
                 </p>
                 <div className="grid grid-cols-3 gap-2 mb-7">
                   {[
@@ -535,7 +535,7 @@ export default function AuthPage() {
               </label>
               {mode === "login" && (
                 <a
-                  href="mailto:support@cortexq.app?subject=Password%20Reset%20Request"
+                  href="mailto:support@themcq.app?subject=Password%20Reset%20Request"
                   className="text-xs text-primary hover:opacity-70 transition-opacity"
                 >
                   Forgot password?

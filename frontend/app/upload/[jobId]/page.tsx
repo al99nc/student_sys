@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { getToken } from "@/lib/auth";
@@ -101,7 +101,7 @@ export default function JobWaitingRoom() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       {/* Header */}
       <header className="px-6 py-4 flex items-center gap-3">
-        <span className="text-lg font-extrabold tracking-tight text-foreground">CortexQ</span>
+        <span className="text-lg font-extrabold tracking-tight text-foreground">themcq</span>
       </header>
 
       {/* Main */}

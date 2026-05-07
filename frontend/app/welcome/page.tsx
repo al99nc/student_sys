@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
@@ -26,7 +26,7 @@ function WelcomeInner() {
       setUserName(nameParam);
     } else {
       try {
-        const profile = JSON.parse(localStorage.getItem("cortexq_profile") || "{}");
+        const profile = JSON.parse(localStorage.getItem("themcq_profile") || "{}");
         if (profile.name) setUserName(profile.name);
       } catch {}
     }

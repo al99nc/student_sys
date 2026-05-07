@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,7 @@ export function Header() {
               <Sparkles className="h-4 w-4 text-primary-foreground" />
             </div>
             <span className="text-xl font-semibold tracking-tight text-foreground">
-              cortexQ
+              themcq
             </span>
           </Link>
 

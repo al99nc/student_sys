@@ -1,4 +1,4 @@
-import Link from "next/link"
+﻿import Link from "next/link"
 import { Sparkles } from "lucide-react"
 
 const footerLinks = [
@@ -20,7 +20,7 @@ export function Footer() {
               <Sparkles className="h-4 w-4 text-primary-foreground" />
             </div>
             <span className="text-xl font-semibold tracking-tight text-foreground">
-              cortexQ
+              themcq
             </span>
           </Link>
 
@@ -46,7 +46,7 @@ export function Footer() {
 
           {/* Copyright */}
           <p className="text-xs text-muted-foreground">
-            &copy; {new Date().getFullYear()} cortexQ. All rights reserved.
+            &copy; {new Date().getFullYear()} themcq. All rights reserved.
           </p>
         </div>
       </div>

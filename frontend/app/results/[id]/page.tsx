@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -965,7 +965,7 @@ export default function ResultsPage() {
             <div className="w-8 h-8 rounded-[10px] bg-violet-600 flex items-center justify-center text-[11px] font-black text-white flex-shrink-0">
               cQ
             </div>
-            {!isMobile && <span className="text-foreground font-bold text-sm">CortexQ</span>}
+            {!isMobile && <span className="text-foreground font-bold text-sm">themcq</span>}
           </Link>
 
           <div className="flex items-center gap-2.5">

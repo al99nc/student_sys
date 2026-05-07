@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState } from "react";
 import { api, getAdminStats, adminSetCredits, AdminStats } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -184,7 +184,7 @@ export default function AdminPage() {
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" />
             <span className="text-lg font-bold">Admin</span>
-            <Badge variant="secondary" className="text-xs">cortexQ</Badge>
+            <Badge variant="secondary" className="text-xs">themcq</Badge>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={refreshStats}>

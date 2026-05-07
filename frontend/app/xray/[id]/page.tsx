@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -90,7 +90,7 @@ export default function XrayPage() {
       <div className="min-h-screen bg-background text-foreground">
         <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
           <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-            <Link href="/dashboard" className="text-xl font-bold text-foreground">cortexQ</Link>
+            <Link href="/dashboard" className="text-xl font-bold text-foreground">themcq</Link>
             <Link href={`/results/${lectureId}`} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" /> Back
             </Link>
@@ -103,7 +103,7 @@ export default function XrayPage() {
           <Badge variant="outline" className="mb-4 text-xs tracking-wider uppercase">Knowledge X-Ray</Badge>
           <h1 className="text-3xl font-bold text-foreground mb-3">What do you already know?</h1>
           <p className="text-muted-foreground mb-8 leading-relaxed">
-            {questions.length} quick questions — one per topic. CortexQ will map exactly
+            {questions.length} quick questions — one per topic. themcq will map exactly
             what you know and what you don&apos;t before you spend a single minute studying.
           </p>
           <div className="flex gap-3 justify-center flex-wrap text-sm text-muted-foreground mb-8">
@@ -157,7 +157,7 @@ export default function XrayPage() {
       <div className="min-h-screen bg-background text-foreground pb-24">
         <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
           <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-            <Link href="/dashboard" className="text-xl font-bold text-foreground">cortexQ</Link>
+            <Link href="/dashboard" className="text-xl font-bold text-foreground">themcq</Link>
             <Link href={`/results/${lectureId}`} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" /> Back to Results
             </Link>
@@ -267,7 +267,7 @@ export default function XrayPage() {
     <div className="min-h-screen bg-background text-foreground pb-32">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" className="text-xl font-bold text-foreground">cortexQ</Link>
+          <Link href="/dashboard" className="text-xl font-bold text-foreground">themcq</Link>
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground tabular-nums">{currentQ + 1} / {questions.length}</span>
             <Link href={`/results/${lectureId}`} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">

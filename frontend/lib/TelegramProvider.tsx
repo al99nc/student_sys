@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { createContext, useEffect, useRef, useState, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 
@@ -235,7 +235,7 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
     setWebApp(tg);
 
-    // Auto-authenticate: exchange Telegram identity for a cortexQ JWT,
+    // Auto-authenticate: exchange Telegram identity for a themcq JWT,
     // then navigate to the welcome animation if user is on the landing or auth page.
     loginWithTelegram(tg.initData)
       .then(() => {

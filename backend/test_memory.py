@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-test_memory.py — Memory behavior test suite for CortexQ AI Coach.
+test_memory.py — Memory behavior test suite for themcq AI Coach.
 
 Tests:
   T1  Basic save        "My name is Ali"            → save_memory, type=identity, importance ≥ 0.85
@@ -24,7 +24,7 @@ import requests
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 DEFAULT_BASE  = "http://localhost:8000"
-TEST_EMAIL    = "memtest@cortexq.local"
+TEST_EMAIL    = "memtest@themcq.local"
 TEST_PASSWORD = "memtest_pass_1337"
 
 # ── ANSI colours ───────────────────────────────────────────────────────────────
@@ -244,7 +244,7 @@ class MemoryTester:
     # ── Main run ──────────────────────────────────────────────────────────────
 
     def run(self) -> bool:
-        print(f"\n{BOLD}{CYAN}CortexQ Memory Test Suite{RESET}")
+        print(f"\n{BOLD}{CYAN}themcq Memory Test Suite{RESET}")
         print(f"Target : {self.base}")
         print(f"Debug  : {'on' if self.debug else 'off'}\n")
 
@@ -270,7 +270,7 @@ class MemoryTester:
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CortexQ Memory Test Suite")
+    parser = argparse.ArgumentParser(description="themcq Memory Test Suite")
     parser.add_argument("--base",  default=DEFAULT_BASE, help="API base URL (default: %(default)s)")
     parser.add_argument("--debug", action="store_true",  help="Show AI reasoning and memory decisions inline")
     args = parser.parse_args()

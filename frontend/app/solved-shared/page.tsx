@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMySharedSessions } from "@/lib/api";
@@ -36,7 +36,7 @@ export default function SolvedSharedPage() {
       {/* Top Nav */}
       <header className="fixed top-0 w-full flex justify-between items-center px-6 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)] border-b border-white/5">
         <div className="flex items-center gap-8">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent tracking-tight">cortexQ</h1>
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent tracking-tight">themcq</h1>
           <nav className="hidden md:flex gap-6 items-center">
             <Link href="/dashboard" className="text-slate-400 hover:text-white transition-colors text-sm font-medium">Dashboard</Link>
             <a className="text-[#00D2FD] font-bold text-sm">Solved Shared</a>

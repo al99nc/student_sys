@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -248,7 +248,7 @@ function BillingContent() {
           <Link href="/dashboard" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </Link>
-          <span className="text-xl font-bold text-foreground">cortexQ</span>
+          <span className="text-xl font-bold text-foreground">themcq</span>
           <span className="text-sm text-muted-foreground">· Credits &amp; Usage</span>
         </div>
         <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Credits & Usage" }]} />

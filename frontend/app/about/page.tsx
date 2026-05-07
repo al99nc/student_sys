@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 
@@ -14,7 +14,7 @@ export default function AboutPage() {
         setLoading(false)
       })
       .catch(() => {
-        setContent('About cortexQ is an AI-powered learning platform designed to help students master complex topics through adaptive practice and personalized insights.')
+        setContent('About themcq is an AI-powered learning platform designed to help students master complex topics through adaptive practice and personalized insights.')
         setLoading(false)
       })
   }, [])
@@ -32,7 +32,7 @@ export default function AboutPage() {
       <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
         <div className="prose prose-invert max-w-none">
           <h1 className="text-4xl font-bold tracking-tight text-foreground">
-            About cortexQ
+            About themcq
           </h1>
           <div className="mt-8 text-muted-foreground">
             <div dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br/>') }} />

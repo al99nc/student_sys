@@ -1,7 +1,7 @@
-"""
-CortexQ Telegram Bot
+﻿"""
+themcq Telegram Bot
 --------------------
-/start       → opens the CortexQ Mini App
+/start       → opens the themcq Mini App
 PDF forward  → bot uploads the PDF to the backend, then sends a button
                that opens the Mini App with the file pre-loaded.
 t.me link    → (owner only) joins the group, adds bot as admin, leaves.
@@ -36,9 +36,9 @@ from joiner import join_and_add_bot
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 BOT_TOKEN    = os.environ["BOT_TOKEN"]
-MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://cortexq.net/upload")
-BACKEND_URL  = os.environ.get("BACKEND_URL",  "https://cortexq.net/api").rstrip("/")
-BOT_SECRET   = os.environ.get("BOT_SECRET",   "cortexq-bot-secret-2026")
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://themcq.net/upload")
+BACKEND_URL  = os.environ.get("BACKEND_URL",  "https://themcq.net/api").rstrip("/")
+BOT_SECRET   = os.environ.get("BOT_SECRET",   "themcq-bot-secret-2026")
 OWNER_ID     = int(os.environ.get("OWNER_ID", "0"))  # your Telegram numeric user ID
 
 _TG_LINK_RE = re.compile(r"https?://t\.me/\S+")
@@ -57,11 +57,11 @@ def _open_app_button(label: str, url: str) -> InlineKeyboardMarkup:
 @dp.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
-        "👋 Welcome to *CortexQ*!\n\n"
+        "👋 Welcome to *themcq*!\n\n"
         "Upload a PDF lecture and I'll generate MCQs for your exam revision.\n\n"
         "Tap the button below to open the app:",
         parse_mode="Markdown",
-        reply_markup=_open_app_button("📚 Open CortexQ", MINI_APP_URL),
+        reply_markup=_open_app_button("📚 Open themcq", MINI_APP_URL),
     )
 
 
@@ -116,13 +116,13 @@ async def handle_document(message: Message) -> None:
 
     if temp_token:
         deep_link = f"{MINI_APP_URL}?tg_file={temp_token}"
-        caption   = f"📄 *{doc.file_name}*\n\nYour PDF is ready — tap to open CortexQ and generate MCQs:"
+        caption   = f"📄 *{doc.file_name}*\n\nYour PDF is ready — tap to open themcq and generate MCQs:"
         btn_label = "⚡ Generate MCQs"
     else:
         # Fallback: open app without pre-loading the file
         deep_link = MINI_APP_URL
-        caption   = f"📄 *{doc.file_name}*\n\nOpen CortexQ and upload this PDF to generate MCQs:"
-        btn_label = "⚡ Open CortexQ"
+        caption   = f"📄 *{doc.file_name}*\n\nOpen themcq and upload this PDF to generate MCQs:"
+        btn_label = "⚡ Open themcq"
 
     await message.reply(
         caption,

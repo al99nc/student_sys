@@ -1,8 +1,8 @@
-# Lecturer MCQ Library Implementation Complete ✓
+﻿# Lecturer MCQ Library Implementation Complete ✓
 
 ## Summary
 
-I've successfully created a comprehensive **Lecturer MCQ Library** feature for your cortexQ application. This includes a full page to view, organize, and interact with MCQs, with the ability to chat with the AI coach for any question.
+I've successfully created a comprehensive **Lecturer MCQ Library** feature for your themcq application. This includes a full page to view, organize, and interact with MCQs, with the ability to chat with the AI coach for any question.
 
 ---
 

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -226,7 +226,7 @@ export default function EssayQuizPage() {
             <Link href="/lectures" prefetch={false} className="text-muted-foreground hover:text-foreground transition-colors">
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            <span className="text-xl font-bold text-foreground">cortexQ</span>
+            <span className="text-xl font-bold text-foreground">themcq</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Brain className="w-4 h-4 text-violet-400" />
