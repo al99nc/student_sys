@@ -165,6 +165,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const quizPct   = searchParams.get("quiz_pct");
   const quizTopic = searchParams.get("quiz_topic");
   const autoQ     = searchParams.get("q");
+  const seedMsg   = searchParams.get("seed");
 
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -347,6 +348,8 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
             const pct = quizPct ?? Math.round((parseInt(quizScore) / parseInt(quizTotal)) * 100);
             const topicPart = quizTopic ? ` on ${quizTopic}` : "";
             setPendingAutoMsg(`I just finished the practice quiz${topicPart} and scored ${quizScore}/${quizTotal} (${pct}%). How did I do and what should I focus on next?`);
+          } else if (seedMsg) {
+            setPendingAutoMsg(seedMsg);
           }
         } else if (autoQ) {
           setPendingAutoMsg(autoQ);
@@ -360,7 +363,7 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct, autoQ]);
+  }, [router, returnConvId, loadConversation, quizScore, quizTotal, quizPct, autoQ, seedMsg]);
 
   useEffect(() => {
     if (!pendingAutoMsg || !activeId || sending) return;

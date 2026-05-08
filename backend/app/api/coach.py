@@ -1136,3 +1136,165 @@ RESPONSE SCHEMA:
             analyzer_decision=fallback_decision,
             premium=premium,
         )
+
+
+# ── Companion widget endpoint ─────────────────────────────────────────────────
+
+_HOW_TO_USE_CACHE: str | None = None
+
+
+def _load_how_to_use() -> str:
+    global _HOW_TO_USE_CACHE
+    if _HOW_TO_USE_CACHE is not None:
+        return _HOW_TO_USE_CACHE
+
+    from pathlib import Path as P
+    _this_file = P(__file__).resolve()          # .../backend/app/api/coach.py
+    _repo_root  = _this_file.parents[3]         # .../student_sys/
+    candidates = [
+        P("/app/HOW_TO_USE.md"),                # Docker mount
+        _repo_root / "frontend" / "HOW_TO_USE.md",  # dev
+        P("HOW_TO_USE.md"),
+        P("../frontend/HOW_TO_USE.md"),
+    ]
+    for path in candidates:
+        try:
+            raw = path.read_text(encoding="utf-8")
+            # Strip tsx/ts code blocks — they waste tokens and confuse the AI.
+            # Keep only the human-readable descriptions (8-9k chars for all 10 pages).
+            stripped = re.sub(r"```[a-z]*[\s\S]*?```", "", raw)
+            stripped = re.sub(r"\n{3,}", "\n\n", stripped).strip()
+            _HOW_TO_USE_CACHE = stripped[:12000]
+            return _HOW_TO_USE_CACHE
+        except (FileNotFoundError, OSError):
+            continue
+
+    _HOW_TO_USE_CACHE = (
+        "themcq pages: /upload (generate MCQs from PDF), /lectures (browse lectures), "
+        "/results/[id] (MCQs + summary), /quiz/[id] (take quiz), /coach (AI tutor), "
+        "/dashboard (readiness score + missions), /analytics (stats), "
+        "/billing (credits/plan), /account (profile)."
+    )
+    return _HOW_TO_USE_CACHE
+
+
+def _extract_page_section(knowledge: str, current_page: str) -> str:
+    """Return the HOW_TO_USE section that best matches current_page, or ''."""
+    if not current_page or current_page == "unknown":
+        return ""
+    lines = knowledge.split("\n")
+    # Build a list of (heading_line_index, route) pairs
+    sections: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        if line.startswith("## Page:"):
+            route = line.replace("## Page:", "").strip()
+            sections.append((i, route))
+
+    # Find the best matching section for the current path.
+    # Exact match first, then prefix match (handles /quiz/123 → /quiz/[id]).
+    best_idx: int | None = None
+    best_len = 0
+    for idx, route in sections:
+        # Normalise dynamic segments: /quiz/[id] → /quiz/
+        normalised = re.sub(r"\[.*?\]", "", route).rstrip("/")
+        if current_page == route:
+            best_idx = idx
+            break
+        if current_page.startswith(normalised) and len(normalised) > best_len:
+            best_idx = idx
+            best_len = len(normalised)
+
+    if best_idx is None:
+        return ""
+
+    # Collect lines from the heading until the next heading or end
+    start = best_idx
+    end = len(lines)
+    for idx, _ in sections:
+        if idx > start:
+            end = idx
+            break
+    return "\n".join(lines[start:end]).strip()
+
+
+@router.post("/companion/ask")
+async def companion_ask(
+    body: dict,
+    current_user: User = Depends(get_current_user),
+):
+    question = (body.get("question") or "").strip()
+    current_page = (body.get("current_page") or "unknown").strip()
+
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="Question too long for companion. Use the full coach instead.")
+
+    how_to_use = _load_how_to_use()
+
+    # Extract the section for the current page so it appears first in the prompt.
+    # Match the page heading even for dynamic routes (e.g. /quiz/123 → /quiz/[id]).
+    current_page_section = _extract_page_section(how_to_use, current_page)
+
+    page_context = (
+        f"THE USER IS CURRENTLY ON: {current_page}\n\n"
+        f"DOCS FOR THIS PAGE:\n{current_page_section}\n"
+        if current_page_section else
+        f"THE USER IS CURRENTLY ON: {current_page}\n"
+    )
+
+    system_prompt = f"""You are Jolie — themcq's friendly in-app guide, embedded in a small floating widget. Answer questions about how to USE the app directly in this widget.
+
+{page_context}
+FULL APP KNOWLEDGE BASE (all pages):
+{how_to_use}
+
+RULES:
+1. ALWAYS return an "answer". Never leave it null.
+2. SHORT — max 3 sentences, max 60 words. No bullet lists, no headers.
+3. Prioritize the current page docs above everything else when the question is about what the user sees right now.
+4. For broad questions like "how do I use this": give a 2-sentence overview (Upload PDF → get MCQs → quiz → coach). Never escalate these.
+5. Set "escalate" to true ONLY for tutoring requests ("explain X topic", "help me study Y") — NOT for app navigation.
+6. "escalate_reason" = a natural ready-to-send coach message.
+7. Never say "based on the documentation". Speak like a helpful teammate.
+
+Return ONLY valid JSON:
+{{
+  "answer": "your answer here — always fill this",
+  "escalate": true or false,
+  "escalate_reason": "pre-filled coach message or null"
+}}"""
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.CHAT_AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": question},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 300,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"]
+            parsed = json.loads(raw)
+            return {
+                "answer": parsed.get("answer"),
+                "escalate": bool(parsed.get("escalate", False)),
+                "escalate_reason": parsed.get("escalate_reason"),
+            }
+    except Exception:
+        return {
+            "answer": "I'm having trouble right now. Try the full Coach for help.",
+            "escalate": True,
+            "escalate_reason": question,
+        }

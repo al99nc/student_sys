@@ -6,6 +6,7 @@
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/db:/app/db
+      - ./frontend/HOW_TO_USE.md:/app/HOW_TO_USE.md:ro
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - ALGORITHM=${ALGORITHM:-HS256}
