@@ -22,7 +22,7 @@ import {
   CloudUpload, FileText, Loader2, CheckCircle2,
   BookOpen, Medal, Brain, Layers,
   ClipboardPaste, Image as ImageIcon,
-  AlignLeft, ImagePlus, XCircle,
+  AlignLeft, ImagePlus, XCircle, Copy, Check,
 } from "lucide-react";
 
 type Tab = "study" | "exam";
@@ -91,6 +91,34 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+// ── Bot username with one-click copy ─────────────────────────────────────────
+function BotUsernameCopy({ username }: { username: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(`@${username}`).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#229ED9]/10 border border-[#229ED9]/25 text-[#229ED9]">
+      <span className="font-mono text-xs font-semibold">@{username}</span>
+      <button
+        onClick={handleCopy}
+        className="ml-0.5 p-0.5 rounded hover:bg-[#229ED9]/20 transition-colors"
+        title="Copy username"
+      >
+        {copied
+          ? <Check className="w-3 h-3" />
+          : <Copy className="w-3 h-3" />
+        }
+      </button>
+    </div>
+  );
 }
 
 // ── Telegram tip announcement (shown once, 5s read) ──────────────────────────
@@ -192,82 +220,7 @@ function TelegramAnnouncement() {
   );
 }
 
-// ── Telegram in-app announcement (shown once when opening upload inside Telegram) ──
-function TelegramInAppAnnouncement({ onDismiss }: { onDismiss: () => void }) {
-  const [seconds, setSeconds] = useState(10);
-  const done = seconds === 0;
-  const { webApp } = useTelegram();
 
-  useEffect(() => {
-    if (done) return;
-    const t = setInterval(() => setSeconds((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => clearInterval(t);
-  }, [done]);
-
-  const save = () => localStorage.setItem("themcq_tg_upload_tip_v1", "1");
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-background/85 backdrop-blur-sm">
-      <div className="relative w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
-        <div className="h-1 bg-muted w-full overflow-hidden">
-          <div
-            className="h-full bg-foreground"
-            style={{
-              width: `${((10 - seconds) / 10) * 100}%`,
-              transition: seconds < 10 ? "width 1s linear" : "none",
-            }}
-          />
-        </div>
-        <div className="p-7 sm:p-9">
-          <div className="flex items-center justify-between mb-7">
-            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-              wait real quick
-            </span>
-            <span className="text-xs font-mono tabular-nums text-muted-foreground">
-              {done ? "✓ ok now go" : `${seconds}s`}
-            </span>
-          </div>
-          <div className="space-y-5 mb-8">
-            <h2 className="text-2xl font-bold text-foreground leading-snug">
-              bro you found the mini app 💀
-            </h2>
-            <p className="text-sm text-foreground/85 leading-relaxed">
-              okay real talk — you&apos;re already in telegram and you&apos;re trying to upload from HERE?? bestie we literally made this easier for you and you chose chaos 😭
-            </p>
-            <p className="text-sm text-foreground/85 leading-relaxed">
-              <span className="font-bold text-foreground">the actual move:</span> close this window, go to the bot chat, and just{" "}
-              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">forward your file</span>{" "}
-              directly. it pops up here automatically. zero digging through your files app. we did the work bestie ✨
-            </p>
-            <p className="text-sm text-foreground/85 leading-relaxed">
-              close this → go to bot → forward file → come back. that&apos;s it. that&apos;s the whole thing 🍳
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={done ? () => { save(); webApp?.close(); } : undefined}
-              disabled={!done}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-foreground text-background text-sm font-bold transition-opacity ${done ? "hover:opacity-90 cursor-pointer" : "opacity-50 cursor-not-allowed"}`}
-            >
-              close &amp; forward files →
-            </button>
-            <button
-              onClick={done ? () => { save(); onDismiss(); } : undefined}
-              disabled={!done}
-              className={`flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-                done
-                  ? "border-border text-foreground hover:bg-muted cursor-pointer"
-                  : "border-border/25 text-muted-foreground/35 cursor-not-allowed select-none"
-              }`}
-            >
-              {done ? "nah I'll upload here" : `wait ${seconds}s…`}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 function UploadContent() {
@@ -279,12 +232,6 @@ function UploadContent() {
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const { isInTelegram, mainButton } = useTelegram();
-  const [showTgAnnouncement, setShowTgAnnouncement] = useState(false);
-  useEffect(() => {
-    if (isInTelegram && !localStorage.getItem("themcq_tg_upload_tip_v1")) {
-      setShowTgAnnouncement(true);
-    }
-  }, [isInTelegram]);
 
   // ── User entitlements (for Smart Context gate) ───────────────────────────
   const [userPlan, setUserPlan]             = useState<"free" | "pro" | "enterprise">("free");
@@ -625,9 +572,7 @@ function UploadContent() {
   return (
     <div className="relative min-h-screen bg-background text-foreground flex flex-col">
       {!isInTelegram && <TelegramAnnouncement />}
-      {isInTelegram && showTgAnnouncement && (
-        <TelegramInAppAnnouncement onDismiss={() => setShowTgAnnouncement(false)} />
-      )}
+
 
       {!isInTelegram && <AppHeader activePage="Upload" />}
 
@@ -642,9 +587,10 @@ function UploadContent() {
             <p className="text-muted-foreground max-w-xl mx-auto text-lg font-medium leading-relaxed">
               Upload a PDF or paste your notes — AI converts them into exam-ready MCQs.
             </p>
-            <div className="flex justify-center pt-1">
+            <div className="flex flex-col items-center gap-2 pt-1">
+              <BotUsernameCopy username="themcq_bot" />
               <a
-                href="https://t.me/themcq_bot"
+                href="http://t.me/themcq_bot"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-[#229ED9]/15 border border-[#229ED9]/35 text-[#229ED9] font-semibold text-sm hover:bg-[#229ED9]/25 hover:border-[#229ED9]/60 transition-all duration-200"
@@ -652,7 +598,7 @@ function UploadContent() {
                 <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0" fill="currentColor">
                   <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
                 </svg>
-                Telegram
+                Open in Telegram
               </a>
             </div>
           </div>

@@ -219,38 +219,47 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const initializedRef = useRef(false);
+
   useEffect(() => {
-    const tg = (window as unknown as { Telegram?: { WebApp?: TelegramWebApp } })
-      .Telegram?.WebApp;
+    const init = () => {
+      if (initializedRef.current) return;
+      const tg = (window as unknown as { Telegram?: { WebApp?: TelegramWebApp } })
+        .Telegram?.WebApp;
 
-    // initData is non-empty only when running inside the Telegram client
-    if (!tg?.initData) return;
+      // initData is non-empty only when running inside the Telegram client
+      if (!tg?.initData) return;
 
-    tg.ready();   // removes Telegram's loading state
-    tg.expand();  // expand to full height
+      initializedRef.current = true;
+      tg.ready();
+      tg.expand();
+      tg.enableClosingConfirmation?.();
+      tg.disableVerticalSwipes?.();
 
-    // Prevent accidental Mini App close on swipe gestures
-    tg.enableClosingConfirmation?.();
-    tg.disableVerticalSwipes?.();
+      setWebApp(tg);
 
-    setWebApp(tg);
+      loginWithTelegram(tg.initData)
+        .then(() => {
+          const path = window.location.pathname;
+          if (path === "/" || path === "/auth") {
+            const firstName = tg.initDataUnsafe?.user?.first_name;
+            const dest = firstName
+              ? `/welcome?from=telegram&name=${encodeURIComponent(firstName)}`
+              : "/welcome?from=telegram";
+            window.location.href = dest;
+          }
+        })
+        .catch((err) =>
+          console.error("[TelegramProvider] auth error:", err)
+        );
+    };
 
-    // Auto-authenticate: exchange Telegram identity for a themcq JWT,
-    // then navigate to the welcome animation if user is on the landing or auth page.
-    loginWithTelegram(tg.initData)
-      .then(() => {
-        const path = window.location.pathname;
-        if (path === "/" || path === "/auth") {
-          const firstName = tg.initDataUnsafe?.user?.first_name;
-          const dest = firstName
-            ? `/welcome?from=telegram&name=${encodeURIComponent(firstName)}`
-            : "/welcome?from=telegram";
-          window.location.href = dest;
-        }
-      })
-      .catch((err) =>
-        console.error("[TelegramProvider] auth error:", err)
-      );
+    // Try immediately (works on reload when script is already cached)
+    init();
+
+    // Fallback: fires after the script finishes loading on a cold open
+    window.addEventListener("tgWebAppReady", init);
+    return () => window.removeEventListener("tgWebAppReady", init);
   }, []);
 
   return (

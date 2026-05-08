@@ -53,6 +53,7 @@ export default function RootLayout({
         <Script
           src="https://telegram.org/js/telegram-web-app.js"
           strategy="afterInteractive"
+          onLoad={() => window.dispatchEvent(new Event("tgWebAppReady"))}
         />
       </body>
     </html>

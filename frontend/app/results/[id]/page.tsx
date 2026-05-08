@@ -17,8 +17,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   Share2, Shuffle, RefreshCw, Check, X,
-  ChevronRight, Home, BarChart3, Zap, BookOpen, Lightbulb,
-  Brain, Target, TrendingUp, AlertTriangle, Calendar,
+  Home, BarChart3, Zap, BookOpen, Lightbulb,
+  Brain, AlertTriangle, Calendar,
   CheckCircle2, XCircle, Cloud, CloudOff, Loader2,
 } from "lucide-react";
 
@@ -111,64 +111,10 @@ function TimerDisplay({ startRef }: { startRef: React.MutableRefObject<number> }
   return <span className="font-mono text-[13px] text-muted-foreground tabular-nums">{m}:{s}</span>;
 }
 
-// ─── Performance types ────────────────────────────────────────────────────────
-
-interface WeakPoint {
-  topic: string;
-  accuracy_rate: number;
-  total_attempts: number;
-  consecutive_failures: number;
-  flagged_as_weak: boolean;
-  dangerous_misconception: boolean;
-  accuracy_trend?: number;
-}
-
-interface Readiness {
-  readiness_score: number;
-  total_questions_answered: number;
-  weak_topics_count: number;
-  strong_topics_count: number;
-  last_session_at: string | null;
-}
-
-interface NextAction {
-  action_type: string;
-  topic: string | null;
-  next_step: string;
-  reason: string[];
-  confidence_gap_alert: boolean;
-  short_message: string;
-  predicted_readiness_24h: number | null;
-}
-
-interface WeeklyQuiz {
-  assignment_id: string | null;
-  questions: unknown[];
-  weak_topics: string[];
-}
-
-interface AiInsight {
-  next_topic_to_study: string;
-  intervention_type: string;
-  personalized_message: string;
-  predicted_readiness_7d: number | null;
-  critical_insight: string | null;
-  daily_plan: { day: number; focus: string; question_count: number; priority: string }[];
-  behavioral_warning: string | null;
-  strongest_topic: string | null;
-  decay_alert: string | null;
-  urgency_level: string;
-}
-
 const BASE = "/api/v1/performance";
 
 async function perfGet<T>(path: string): Promise<T> {
   const res = await api.get<T>(`${BASE}${path}`);
-  return res.data;
-}
-
-async function perfPost<T>(path: string, body?: unknown): Promise<T> {
-  const res = await api.post<T>(`${BASE}${path}`, body);
   return res.data;
 }
 
@@ -207,13 +153,6 @@ export default function ResultsPage() {
   const [saveStatus, setSaveStatus]     = useState<"idle" | "saving" | "saved">("idle");
   const [retakeCount, setRetakeCount]   = useState(0);
 
-  const [weakPoints, setWeakPoints]   = useState<WeakPoint[]>([]);
-  const [readiness, setReadiness]     = useState<Readiness | null>(null);
-  const [nextAction, setNextAction]   = useState<NextAction | null>(null);
-  const [weeklyQuiz, setWeeklyQuiz]   = useState<WeeklyQuiz | null>(null);
-  const [aiInsight, setAiInsight]     = useState<AiInsight | null>(null);
-  const [aiInsightStatus, setAiInsightStatus] = useState<"loading" | "fresh" | "stale" | "no_data" | "error">("loading");
-  const [insightTab, setInsightTab]   = useState<"next" | "insight" | "plan" | "quiz">("next");
 
   const sessionStartRef     = useRef<number>(Date.now());
   const viewerPollRef       = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -238,36 +177,6 @@ export default function ResultsPage() {
     fetchResults();
   }, [lectureId, router]);
 
-  useEffect(() => {
-    if (!results) return;
-    loadPerformanceSidebar();
-  }, [results]);
-
-  const loadPerformanceSidebar = async () => {
-    await Promise.allSettled([
-      perfGet<WeakPoint[]>("/students/me/weak-points").then(setWeakPoints).catch(() => {}),
-      perfGet<Readiness>("/students/me/readiness").then(setReadiness).catch(() => {}),
-      perfGet<NextAction>("/students/me/next-action").then(setNextAction).catch(() => {}),
-      perfGet<WeeklyQuiz>("/weekly-quiz/pending").then(setWeeklyQuiz).catch(() => {}),
-      perfGet<{ status: string; insight: AiInsight | null }>("/students/me/ai-insight")
-        .then((data) => {
-          setAiInsightStatus(data.status as typeof aiInsightStatus);
-          if (data.insight) setAiInsight(data.insight);
-        })
-        .catch(() => setAiInsightStatus("error")),
-    ]);
-  };
-
-  const refreshSidebarAfterAnswer = useCallback(async () => {
-    try {
-      const [wp, rd, na] = await Promise.all([
-        perfGet<WeakPoint[]>("/students/me/weak-points"),
-        perfGet<Readiness>("/students/me/readiness"),
-        perfGet<NextAction>("/students/me/next-action"),
-      ]);
-      setWeakPoints(wp); setReadiness(rd); setNextAction(na);
-    } catch {}
-  }, []);
 
   useEffect(() => {
     if (loading || hasScrolledToResume.current || !results || Object.keys(answers).length === 0 || shuffleMode) return;
@@ -499,9 +408,6 @@ export default function ResultsPage() {
           if (Object.keys(updated).length === results.mcqs.length && perfSessionId.current) {
             await completePerformanceSession(perfSessionId.current);
             perfSessionId.current = null;
-            await loadPerformanceSidebar();
-          } else {
-            refreshSidebarAfterAnswer();
           }
         } catch {}
       })();
@@ -519,24 +425,7 @@ export default function ResultsPage() {
         setTimeout(() => setSaveStatus("idle"), 2000);
       } catch { setSaveStatus("idle"); }
     }, 800);
-  }, [pendingAnswer, answers, results, lectureId, shuffleMode, shuffledMcqs, prefetchNextQuestion, refreshSidebarAfterAnswer, resetLiveTimeline]);
-
-  const handleDismissQuiz = async () => {
-    if (!weeklyQuiz?.assignment_id) return;
-    try {
-      await perfPost(`/weekly-quiz/${weeklyQuiz.assignment_id}/dismiss`);
-      setWeeklyQuiz(null);
-    } catch {}
-  };
-
-  const handleRefreshInsight = async () => {
-    setAiInsightStatus("loading");
-    try {
-      const data = await perfGet<{ status: string; insight: AiInsight | null }>("/students/me/ai-insight?force=true");
-      setAiInsightStatus(data.status as typeof aiInsightStatus);
-      if (data.insight) setAiInsight(data.insight);
-    } catch { setAiInsightStatus("error"); }
-  };
+  }, [pendingAnswer, answers, results, lectureId, shuffleMode, shuffledMcqs, prefetchNextQuestion, resetLiveTimeline]);
 
   const handleReset = async () => {
     setConfirmRetake(false);
@@ -739,219 +628,6 @@ export default function ResultsPage() {
     </div>
   );
 
-  // ── Performance Sidebar ───────────────────────────────────────────────────────
-
-  const PerformanceSidebar = () => (
-    <Card className="overflow-hidden p-0">
-      {/* Tabs */}
-      <div className="flex border-b border-border">
-        {(["next", "insight", "plan", "quiz"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setInsightTab(t)}
-            className={cn(
-              "flex-1 py-2.5 text-[11px] font-bold uppercase tracking-wider border-0 border-b-2 cursor-pointer transition-all",
-              insightTab === t
-                ? "bg-violet-600/10 border-b-violet-500 text-violet-300"
-                : "border-b-transparent text-muted-foreground/40 hover:text-muted-foreground"
-            )}
-          >
-            {t === "next" ? "Next" : t === "insight" ? "AI" : t === "plan" ? "Plan" : "Quiz"}
-          </button>
-        ))}
-      </div>
-
-      <div className="p-4 flex flex-col gap-3.5">
-
-        {/* NEXT tab */}
-        {insightTab === "next" && (
-          <div className="flex flex-col gap-3.5">
-            {readiness && (
-              <div className="rounded-xl bg-muted/20 border border-border p-3.5">
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className="text-xs text-muted-foreground">Readiness Score</span>
-                  <span className="text-2xl font-extrabold text-foreground leading-none">{Math.round(readiness.readiness_score)}%</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-2.5">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-violet-600 to-cyan-400 transition-all duration-700"
-                    style={{ width: `${readiness.readiness_score}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-[11px] text-muted-foreground/50">
-                  <span>{readiness.weak_topics_count} weak</span>
-                  <span>{readiness.strong_topics_count} strong</span>
-                  <span>{readiness.total_questions_answered} answered</span>
-                </div>
-              </div>
-            )}
-
-            {nextAction ? (
-              <div className="flex flex-col gap-2.5">
-                <div className="rounded-xl bg-violet-600/5 border border-violet-600/20 p-3.5">
-                  <p className="text-[11px] font-bold text-violet-400 uppercase tracking-widest mb-1.5">Recommended Now</p>
-                  <p className={cn("text-[13px] font-semibold text-foreground", nextAction.topic && "mb-2.5")}>{nextAction.next_step}</p>
-                  {nextAction.topic && (
-                    <Badge variant="secondary" className="text-[11px]">{nextAction.topic}</Badge>
-                  )}
-                </div>
-                {nextAction.reason.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    {nextAction.reason.map((r, i) => (
-                      <p key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                        <ChevronRight className="w-3 h-3 text-violet-500 mt-0.5 flex-shrink-0" />{r}
-                      </p>
-                    ))}
-                  </div>
-                )}
-                {nextAction.confidence_gap_alert && (
-                  <div className="rounded-[9px] bg-orange-400/10 border border-orange-400/25 px-3 py-2 text-xs text-orange-400 flex items-center gap-2">
-                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                    Overconfidence pattern detected
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground/50">Complete a session to get your next action.</p>
-            )}
-
-            {weakPoints.length > 0 && (
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-2.5">Weak Topics</p>
-                <div className="flex flex-col gap-2">
-                  {weakPoints.slice(0, 4).map((wp) => (
-                    <div key={wp.topic} className="flex items-center gap-2">
-                      <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", wp.dangerous_misconception ? "bg-red-400" : "bg-orange-400")} />
-                      <span className="text-xs text-muted-foreground flex-1 truncate">{wp.topic}</span>
-                      <span className="text-xs font-semibold text-foreground">{Math.round((wp.accuracy_rate || 0) * 100)}%</span>
-                      {wp.accuracy_trend !== undefined && wp.accuracy_trend !== null && (
-                        <TrendingUp className={cn("w-3 h-3 flex-shrink-0", wp.accuracy_trend >= 0 ? "text-emerald-400" : "text-red-400 rotate-180")} />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Knowledge X-Ray entry point */}
-            <Link
-              href={`/xray/${lectureId}`}
-              className="flex items-center gap-3 px-3.5 py-3 rounded-xl border border-sky-500/25 bg-sky-500/5 hover:bg-sky-500/10 transition-colors"
-            >
-              <Brain className="w-4 h-4 text-sky-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-sky-300">Knowledge X-Ray</p>
-                <p className="text-[11px] text-muted-foreground">Find out what you know before studying</p>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
-            </Link>
-          </div>
-        )}
-
-        {/* AI INSIGHT tab */}
-        {insightTab === "insight" && (
-          <div className="flex flex-col gap-3.5">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">AI Insight</p>
-              <Button variant="outline" size="sm" onClick={handleRefreshInsight} className="h-7 text-xs gap-1.5">
-                <RefreshCw className="w-3 h-3" />Refresh
-              </Button>
-            </div>
-            {aiInsightStatus === "loading" && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />Generating insight...
-              </div>
-            )}
-            {aiInsightStatus === "no_data"  && <p className="text-xs text-muted-foreground/50">Complete at least one session to unlock AI insights.</p>}
-            {aiInsightStatus === "error"    && <p className="text-xs text-red-400">Could not load insight. Try refreshing.</p>}
-            {aiInsight && (aiInsightStatus === "fresh" || aiInsightStatus === "stale") && (
-              <div className="flex flex-col gap-3">
-                <span className={cn(
-                  "inline-block px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider border w-fit",
-                  aiInsight.urgency_level === "critical" ? "bg-red-500/10 text-red-400 border-red-500/25"
-                  : aiInsight.urgency_level === "elevated" ? "bg-orange-400/10 text-orange-400 border-orange-400/25"
-                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                )}>
-                  {aiInsight.urgency_level}
-                </span>
-                <div className="rounded-xl bg-violet-600/5 border border-violet-600/20 p-3.5">
-                  <p className="text-[13px] text-foreground leading-relaxed">{aiInsight.personalized_message}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-1.5">Study Now</p>
-                  <p className="text-[13px] text-muted-foreground">{aiInsight.next_topic_to_study}</p>
-                </div>
-                {aiInsight.critical_insight && (
-                  <div className="rounded-[10px] bg-muted/20 border border-border p-3">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-1.5">Hidden Pattern</p>
-                    <p className="text-[13px] text-muted-foreground">{aiInsight.critical_insight}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* PLAN tab */}
-        {insightTab === "plan" && (
-          <div className="flex flex-col gap-3.5">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">3-Day Study Plan</p>
-            {aiInsight?.daily_plan && aiInsight.daily_plan.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {aiInsight.daily_plan.map((day) => (
-                  <div key={day.day} className="rounded-xl border border-border bg-muted/10 p-3.5">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[13px] font-semibold text-foreground">Day {day.day}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={cn(
-                          "px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border",
-                          day.priority === "critical" ? "bg-red-500/10 text-red-400 border-red-500/20"
-                          : day.priority === "high"   ? "bg-orange-400/10 text-orange-400 border-orange-400/20"
-                          :                             "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                        )}>
-                          {day.priority}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground">{day.question_count}q</span>
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{day.focus}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground/50">Complete a session to generate your personalized plan.</p>
-            )}
-          </div>
-        )}
-
-        {/* QUIZ tab */}
-        {insightTab === "quiz" && (
-          <div className="flex flex-col gap-3.5">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">Weekly Review Quiz</p>
-            {weeklyQuiz?.assignment_id ? (
-              <div className="rounded-xl border border-border bg-muted/10 p-4 flex flex-col gap-3">
-                <p className="text-[13px] font-semibold text-foreground">{weeklyQuiz.questions.length} questions ready</p>
-                {weeklyQuiz.weak_topics.length > 0 && (
-                  <p className="text-xs text-muted-foreground">Covering: {weeklyQuiz.weak_topics.slice(0, 3).join(", ")}</p>
-                )}
-                <div className="flex gap-2">
-                  <Button asChild className="flex-1" size="sm">
-                    <Link href={`/quiz/${lectureId}?weekly=${weeklyQuiz.assignment_id}`}>Start Quiz</Link>
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleDismissQuiz}>Dismiss</Button>
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <Target className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2.5" />
-                <p className="text-xs text-muted-foreground/50">Answer 3+ questions in weak topics to unlock your weekly quiz.</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -1081,22 +757,6 @@ export default function ResultsPage() {
               </CardContent>
             </Card>
 
-            <PerformanceSidebar />
-
-            {results.key_concepts.length > 0 && (
-              <Card>
-                <CardHeader className="pb-0">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">Key Concepts</p>
-                </CardHeader>
-                <CardContent className="pt-3">
-                  <div className="flex flex-wrap gap-1.5">
-                    {results.key_concepts.slice(0, 6).map((concept, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs">{concept}</Badge>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Main content */}
