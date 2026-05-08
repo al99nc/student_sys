@@ -31,7 +31,7 @@ class PerformanceSession(Base):
     id                     = Column(String(36), primary_key=True, default=_uuid)
     student_id             = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     document_id            = Column(Integer, ForeignKey("lectures.id"), nullable=False, index=True)
-    mode                   = Column(String(20), nullable=False)          # highyield|exam|revision|quiz
+    mode                   = Column(String(20), nullable=False)          # revision|exam|quick_review|quiz
     started_at             = Column(DateTime, default=_utcnow, nullable=False, index=True)
     completed_at           = Column(DateTime, nullable=True, index=True)
     total_questions        = Column(Integer, nullable=False)
@@ -62,7 +62,7 @@ class McqQuestion(Base):
     option_d            = Column(Text, nullable=False)
     correct_answer      = Column(String(1), nullable=False)
     explanation         = Column(Text, nullable=False)
-    mode                = Column(String(20), nullable=False)              # highyield|exam|revision
+    mode                = Column(String(20), nullable=False)              # revision|exam|quick_review
     difficulty_type     = Column(String(20), nullable=False)              # recall|application|analysis
     created_at          = Column(DateTime, default=_utcnow, nullable=False)
     global_accuracy_rate = Column(Float, nullable=True)

@@ -61,7 +61,7 @@ _TRIVIAL_QUESTION_PATTERNS = re.compile(
 # POST-PROCESSING VALIDATORS
 # ─────────────────────────────────────────────────────────────────
 
-def _has_forbidden_option(mcq: dict, mode: str = "highyield") -> bool:
+def _has_forbidden_option(mcq: dict, mode: str = "revision") -> bool:
     if mode == "exam":
         return False
     for opt in mcq.get("options", []):
@@ -106,17 +106,17 @@ def _has_known_factual_error(mcq: dict) -> tuple[bool, str]:
     return False, ""
 
 
-def _is_trivial_question(mcq: dict, mode: str = "highyield") -> bool:
+def _is_trivial_question(mcq: dict, mode: str = "revision") -> bool:
     """Returns True for historical trivia, pure naming, or bullet-point conversions.
-    Only applied in highyield and exam modes — revision allows basic recall."""
-    if mode == "revision":
+    Only applied in revision and exam modes — quick_review allows basic recall."""
+    if mode == "quick_review":
         return False
     return bool(_TRIVIAL_QUESTION_PATTERNS.search(mcq.get("question", "")))
 
 
 def _fix_option_prefixes(mcq: dict) -> dict:
     """Ensure all options have A./B./C./D. prefixes.
-    Critical for revision mode where chunks may return raw option text."""
+    Critical for quick_review mode where chunks may return raw option text."""
     fixed = []
     for i, opt in enumerate(mcq.get("options", [])):
         prefix = chr(ord("A") + i) + ". "
@@ -211,7 +211,7 @@ def _shuffle_options(mcq: dict) -> dict:
     return mcq
 
 
-def _validate_and_filter_mcqs(mcqs: list, mode: str = "highyield") -> tuple[list, list]:
+def _validate_and_filter_mcqs(mcqs: list, mode: str = "revision") -> tuple[list, list]:
     valid = []
     rejected = []
     exam_catchall_count = 0
@@ -256,7 +256,7 @@ def _validate_and_filter_mcqs(mcqs: list, mode: str = "highyield") -> tuple[list
     return valid, rejected
 
 
-def _warn_answer_distribution(mcqs: list, mode: str = "highyield") -> None:
+def _warn_answer_distribution(mcqs: list, mode: str = "revision") -> None:
     counts = {"A": 0, "B": 0, "C": 0, "D": 0}
     for mcq in mcqs:
         letter = mcq.get("answer", "").upper()

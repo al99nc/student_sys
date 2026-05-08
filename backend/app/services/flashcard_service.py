@@ -44,7 +44,7 @@ def _build_user_prompt(chunk_text: str, topic: str, mode: str, num_cards: int) -
     return (
         f"LECTURE CONTENT:\n{chunk_text}\n\n"
         f"TOPIC: {topic}\n"
-        f"MODE: {mode} (highyield = focus on most tested concepts; exam = broad coverage; revision = quick recall cards)\n\n"
+        f"MODE: {mode} (revision = focus on most tested concepts; exam = broad coverage; quick_review = quick recall cards)\n\n"
         f"Generate {num_cards} flashcards. Return a JSON array:\n"
         "[\n"
         "  {\n"
@@ -120,7 +120,7 @@ async def generate_flashcards_for_document(
     text_chunks: list[str],
     topic: str,
     document_id: int,
-    mode: str = "highyield",
+    mode: str = "revision",
     num_cards: int = _FLASHCARD_MAX_CARDS_PER_CHUNK,
 ) -> list[dict]:
     """

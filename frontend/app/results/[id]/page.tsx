@@ -308,7 +308,7 @@ export default function ResultsPage() {
       try {
         let pqRes = await getPerformanceQuestions(lectureId);
         if (!pqRes.data || pqRes.data.length === 0) {
-          await savePerformanceQuestions(lectureId, "highyield", res.data.mcqs || []);
+          await savePerformanceQuestions(lectureId, "revision", res.data.mcqs || []);
           pqRes = await getPerformanceQuestions(lectureId);
         }
         const map: Record<string, string> = {};
@@ -479,7 +479,7 @@ export default function ResultsPage() {
       (async () => {
         try {
           if (!perfSessionId.current) {
-            const res = await startPerformanceSession(lectureId, "highyield", results.mcqs.length);
+            const res = await startPerformanceSession(lectureId, "revision", results.mcqs.length);
             perfSessionId.current = res.data.session_id;
           }
           await submitPerformanceAnswer(perfSessionId.current!, questionId, letter, mcq.answer, timeSpent, {

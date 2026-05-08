@@ -1028,8 +1028,8 @@ def save_questions(
     ).all()
     existing_texts = {q.question_text for q in existing}
 
-    valid_modes = {"highyield", "exam", "revision"}
-    mode = body.mode if body.mode in valid_modes else "highyield"
+    valid_modes = {"revision", "exam", "quick_review"}
+    mode = body.mode if body.mode in valid_modes else "revision"
 
     saved: list[McqQuestion] = []
 
@@ -1092,7 +1092,7 @@ def save_questions(
     if saved:
         from app.services.flashcard_service import generate_and_save_flashcards
         from app.db.database import SessionLocal
-        fc_mode = mode if mode in ("highyield", "exam", "revision") else "highyield"
+        fc_mode = mode if mode in ("revision", "exam", "quick_review") else "revision"
         background_tasks.add_task(
             generate_and_save_flashcards,
             document_id=body.document_id,

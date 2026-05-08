@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────
-# HIGH YIELD PROMPTS
+# REVISION PROMPTS
 # ─────────────────────────────────────────────────────────────────
-HIGHYIELD_SYSTEM_PROMPT = (
+REVISION_SYSTEM_PROMPT = (
     "You are a professor-level medical exam writer for postgraduate and clinical board examinations "
     "(USMLE, COMLEX, ABIM, FRCPath, etc.). "
     "Generate DIFFICULT, high-yield MCQs strictly from the provided lecture text. "
@@ -94,7 +94,7 @@ HIGHYIELD_SYSTEM_PROMPT = (
     "Regenerate any failing question before output."
 )
 
-HIGHYIELD_USER_PROMPT = """Generate high-yield MCQs from the lecture text below.
+REVISION_USER_PROMPT = """Generate revision MCQs from the lecture text below.
 
 QUANTITY: Rich lecture → up to 30 Qs. Short lecture → 10-15. Never pad. Stop at distinct objectives.
 
@@ -259,9 +259,9 @@ Lecture text:
 
 
 # ─────────────────────────────────────────────────────────────────
-# REVISION MODE PROMPTS
+# QUICK REVIEW MODE PROMPTS
 # ─────────────────────────────────────────────────────────────────
-REVISION_SYSTEM_PROMPT = (
+QUICK_REVIEW_SYSTEM_PROMPT = (
     "You are generating basic recall MCQs for medical students doing a quick pre-study review. "
     "Questions must be simple, direct, and test single facts. No clinical vignettes. No complex reasoning.\n\n"
 
@@ -303,7 +303,7 @@ REVISION_SYSTEM_PROMPT = (
     "Regenerate any failing question before output."
 )
 
-REVISION_USER_PROMPT = """Generate simple recall MCQs from the lecture text below.
+QUICK_REVIEW_USER_PROMPT = """Generate simple recall MCQs from the lecture text below.
 
 RULES:
 - Short stems (1-2 lines). Single fact per question.
@@ -856,13 +856,13 @@ Return ONLY this JSON:
 
 def _get_prompts(mode: str) -> tuple[str, str]:
     """Return (system_prompt, user_prompt_template) for the given mode.
-    Falls back to highyield for any unknown mode string."""
+    Falls back to revision for any unknown mode string."""
     if mode == "exam":
         return EXAM_SYSTEM_PROMPT, EXAM_USER_PROMPT
     if mode == "harder":
         return HARDER_SYSTEM_PROMPT, HARDER_USER_PROMPT
-    if mode == "revision":
-        return REVISION_SYSTEM_PROMPT, REVISION_USER_PROMPT
+    if mode == "quick_review":
+        return QUICK_REVIEW_SYSTEM_PROMPT, QUICK_REVIEW_USER_PROMPT
     if mode in ("essay", "essay_custom"):
         return ESSAY_SYSTEM_PROMPT, ESSAY_USER_PROMPT
-    return HIGHYIELD_SYSTEM_PROMPT, HIGHYIELD_USER_PROMPT
+    return REVISION_SYSTEM_PROMPT, REVISION_USER_PROMPT

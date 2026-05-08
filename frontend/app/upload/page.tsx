@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 
 type Tab = "study" | "exam";
-type Mode = "highyield" | "exam" | "harder";
+type Mode = "revision" | "exam" | "harder";
 type InputMode = "file" | "paste";
 
 // ── Validation types ─────────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ function UploadContent() {
   const [error, setError]               = useState("");
   const [step, setStep]                 = useState<"upload" | "process" | "done">("upload");
   const [tab, setTab]                   = useState<Tab>("study");
-  const [mode, setMode]                 = useState<Mode>("highyield");
+  const [mode, setMode]                 = useState<Mode>("revision");
   const [tgFileLoading, setTgFileLoading] = useState(false);
   const [tgFileReady, setTgFileReady]   = useState(false);
 
@@ -326,7 +326,7 @@ function UploadContent() {
       const label = essayMode ? "Generate Essay Questions"
         : mode === "harder" ? "Generate Harder Questions"
         : mode === "exam" ? "Generate Exam Questions"
-        : "Generate High Yield MCQs";
+        : "Generate Revision MCQs";
       mainButton.setText(label).show().enable();
       mainButton.onClick(handleSubmit);
       return () => { mainButton.offClick(handleSubmit); };
@@ -439,7 +439,7 @@ function UploadContent() {
   // ── Mode helpers ──────────────────────────────────────────────────────────
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
-    setMode(newTab === "study" ? "highyield" : "exam");
+    setMode(newTab === "study" ? "revision" : "exam");
   };
 
   // ── Processing pipeline ───────────────────────────────────────────────────
@@ -579,7 +579,7 @@ function UploadContent() {
     : essayMode ? "Generate Essay Questions"
     : mode === "harder" ? "Generate Harder Questions"
     : mode === "exam"   ? "Generate Exam Questions"
-    : "Generate High Yield MCQs";
+    : "Generate Revision MCQs";
 
   // ── ValidationBadge component ──────────────────────────────────────────────
   const ValidationBadge = ({ v }: { v: ValidationResult | null }) => {
@@ -678,7 +678,7 @@ function UploadContent() {
             {tab === "study" ? (
               <Card className="glass-panel border-l-4 border-primary text-left">
                 <CardContent className="p-5">
-                  <p className="font-bold text-foreground mb-1">High Yield MCQs</p>
+                  <p className="font-bold text-foreground mb-1">Revision MCQs</p>
                   <p className="text-xs text-muted-foreground">Balanced mix across all topics with clinical vignettes, mechanism questions, and key concept summaries.</p>
                 </CardContent>
               </Card>

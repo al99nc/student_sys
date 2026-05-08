@@ -439,7 +439,7 @@ async def estimate_lecture_processing(
     lecture_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    mode: str = Query("highyield", pattern="^(highyield|exam|harder|essay)$"),
+    mode: str = Query("revision", pattern="^(revision|exam|harder|essay)$"),
 ):
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id, Lecture.user_id == current_user.id
@@ -469,7 +469,7 @@ async def process_lecture(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    mode: str = Query("highyield", pattern="^(highyield|exam|harder|custom|essay|essay_custom)$"),
+    mode: str = Query("revision", pattern="^(revision|exam|harder|custom|essay|essay_custom)$"),
     custom_context: Optional[CustomContext] = None,
 ):
     """

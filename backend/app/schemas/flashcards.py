@@ -33,7 +33,7 @@ class ReviewResponse(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    mode: str = "highyield"
+    mode: str = "revision"
 
 
 class GenerateResponse(BaseModel):

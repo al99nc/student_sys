@@ -39,15 +39,15 @@ MAX_CHUNKS = 20
 # We target 93 % of TPM (7 500) so a single request never crashes.
 #
 # Input-token budget per mode (system prompt + user template, no text):
-#   highyield  ~6 000 chars  → ~1 500 tokens
-#   exam       ~8 500 chars  → ~2 100 tokens
-#   revision   ~3 600 chars  → ~  900 tokens
+#   revision    ~6 000 chars  → ~1 500 tokens
+#   exam        ~8 500 chars  → ~2 100 tokens
+#   quick_review ~3 600 chars  → ~  900 tokens
 # One 8 000-char chunk ≈ 2 000 tokens.
 #
 # max_output = 7 500 − chunk_tokens − prompt_tokens
-#   highyield:  7 500 − 2 000 − 1 500 = 4 000 → ~14.8 s @ 270 TPS
-#   exam:       7 500 − 2 000 − 2 100 = 3 400 → ~12.6 s @ 270 TPS
-#   revision:   7 500 − 2 000 −   900 = 4 600 → capped at 3 500
+#   revision:     7 500 − 2 000 − 1 500 = 4 000 → ~14.8 s @ 270 TPS
+#   exam:         7 500 − 2 000 − 2 100 = 3 400 → ~12.6 s @ 270 TPS
+#   quick_review: 7 500 − 2 000 −   900 = 4 600 → capped at 3 500
 #
 # Multi-chunk: processed sequentially; after each chunk we wait
 # _INTER_CHUNK_WAIT seconds so the TPM window fully resets before
@@ -68,7 +68,7 @@ SPEED_CONFIG = {
     # TPM budget = 8000 total (input + output per minute).
     # Chunk ~750 tokens + prompt ~1500 tokens = ~2250 input → 5750 headroom.
     # Cap output at 4500 to leave a safety margin and never hit the limit.
-    "highyield": {
+    "revision": {
         "max_tokens": 4_500,
         "temperature": 0.30,
         "presence_penalty": 0.3,
@@ -86,7 +86,7 @@ SPEED_CONFIG = {
         "presence_penalty": 0.4,
         "frequency_penalty": 0.4,
     },
-    "revision": {
+    "quick_review": {
         "max_tokens": 3_000,
         "temperature": 0.25,
         "presence_penalty": 0.2,
@@ -153,7 +153,7 @@ def _estimate_processing_time(
 ) -> dict:
     chunks = _chunk_text(text)
     n_chunks = len(chunks)
-    max_tokens = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])["max_tokens"]
+    max_tokens = SPEED_CONFIG.get(mode, SPEED_CONFIG["revision"])["max_tokens"]
     wait = inter_chunk_wait if inter_chunk_wait is not None else _INTER_CHUNK_WAIT
 
     per_chunk_seconds = max_tokens / ESTIMATED_TPS + 2   # +2 for network + prefill
@@ -231,7 +231,7 @@ async def _call_single_chunk(
             "Do NOT repeat questions from other chunks. Keep explanations concise.]"
         )
 
-    cfg = SPEED_CONFIG.get(mode, SPEED_CONFIG["highyield"])
+    cfg = SPEED_CONFIG.get(mode, SPEED_CONFIG["revision"])
     resolved_model = model or settings.FREE_AI_MODEL
 
     _is_openrouter = api_key and api_key == settings.open_rout_PAID_API_KEY
@@ -565,7 +565,7 @@ async def _call_chunk_with_rotation(
 
 async def generate_study_content(
     text: str,
-    mode: str = "highyield",
+    mode: str = "revision",
     *,
     is_premium: bool = False,
     custom_context: dict | None = None,
@@ -599,10 +599,10 @@ async def generate_study_content(
             weak_topics=custom_context.get("weak_topics", ""),
         )
 
-    # Normalise unknown modes to highyield
+    # Normalise unknown modes to revision
     if mode not in SPEED_CONFIG:
-        logger.warning(f"Unknown mode '{mode}' — falling back to highyield")
-        mode = "highyield"
+        logger.warning(f"Unknown mode '{mode}' — falling back to revision")
+        mode = "revision"
     _using_openrouter = is_premium and bool(settings.open_rout_PAID_API_KEY)
     if _using_openrouter:
         inter_wait = 0  # OpenRouter handles rate limits — no delay needed

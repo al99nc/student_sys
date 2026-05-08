@@ -41,7 +41,7 @@ api.interceptors.response.use(
   }
 );
 
-export type Difficulty = "highyield" | "exam" | "harder" | "essay";
+export type Difficulty = "revision" | "exam" | "harder" | "essay";
 
 export interface CustomContext {
   exam_type: string;
@@ -201,12 +201,12 @@ export const extractImageText = (imageFile: File) => {
 export const getLectures = () => api.get("/lectures");
 export const getSolvedLectures = () => api.get("/lectures/solved");
 
-export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "highyield") =>
+export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "revision") =>
   api.get(`/estimate/${lectureId}?mode=${difficulty}`);
 
 export const processLecture = (
   lectureId: number,
-  difficulty: Difficulty = "highyield",
+  difficulty: Difficulty = "revision",
   customContext?: CustomContext,
 ) =>
   api.post(
@@ -607,7 +607,7 @@ export interface FlashcardScheduleTopic {
   total_cards: number;
 }
 
-export const generateFlashcards = (documentId: number, mode = "highyield") =>
+export const generateFlashcards = (documentId: number, mode = "revision") =>
   api.post<{ generated_count: number; card_ids: string[] }>(
     `/api/v1/flashcards/generate/${documentId}`,
     { mode },
