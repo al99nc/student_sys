@@ -554,10 +554,10 @@ export default function ResultsPage() {
                 return (
                   <button
                     key={j}
-                    onClick={() => !isAnswered && !isPending && handleSelectAnswer(globalIdx, letter)}
+                    onClick={() => !isAnswered && handleSelectAnswer(globalIdx, letter)}
                     onMouseEnter={() => { if (!isAnswered) handleOptionHoverStart(letter); }}
                     onMouseLeave={() => { if (!isAnswered) handleOptionHoverEnd(letter); }}
-                    disabled={isAnswered || isPending}
+                    disabled={isAnswered}
                     className={cn(
                       "px-3.5 py-2.5 rounded-xl text-[13px] text-left transition-all border flex justify-between items-center gap-2 leading-snug",
                       isAnswered ? (
@@ -568,8 +568,8 @@ export default function ResultsPage() {
                             : "bg-muted/10 border-border text-muted-foreground/30 cursor-default"
                       ) : isPending ? (
                         isThisSelected
-                          ? "bg-violet-600/10 border-violet-500/35 text-foreground cursor-default"
-                          : "bg-muted/10 border-border text-muted-foreground cursor-default"
+                          ? "bg-violet-600/10 border-violet-500/35 text-foreground cursor-pointer"
+                          : "bg-muted/15 border-border text-muted-foreground hover:bg-violet-600/10 hover:border-violet-500/30 hover:text-violet-300 cursor-pointer"
                       ) : "bg-muted/15 border-border text-muted-foreground hover:bg-violet-600/10 hover:border-violet-500/30 hover:text-violet-300 cursor-pointer"
                     )}
                   >
@@ -588,7 +588,7 @@ export default function ResultsPage() {
                   <Brain className="w-3.5 h-3.5 text-violet-500" />
                   <p className="text-sm font-semibold text-foreground">How confident were you?</p>
                 </div>
-                <p className="text-xs text-muted-foreground mb-3.5">Your answer is locked in — this helps track your learning.</p>
+                <p className="text-xs text-muted-foreground mb-3.5">Still deciding? Change your answer above — pick confidence when you're ready.</p>
                 <div className="flex gap-2 flex-wrap">
                   {CONFIDENCE_OPTIONS.map((opt) => (
                     <button
