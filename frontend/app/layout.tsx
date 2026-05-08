@@ -1,7 +1,6 @@
 ﻿import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
-import Script from 'next/script'
 import { TelegramProvider } from '@/lib/TelegramProvider'
 import { MaterialSymbolsFont } from '@/components/material-symbols-font'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -49,12 +48,6 @@ export default function RootLayout({
           </TelegramProvider>
         </ErrorBoundary>
         {process.env.NODE_ENV === 'production' && <Analytics />}
-        {/* Must be in body, not head — afterInteractive requires body context */}
-        <Script
-          src="https://telegram.org/js/telegram-web-app.js"
-          strategy="afterInteractive"
-          onLoad={() => window.dispatchEvent(new Event("tgWebAppReady"))}
-        />
       </body>
     </html>
   )

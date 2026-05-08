@@ -1,6 +1,7 @@
 ﻿"use client";
 import { createContext, useEffect, useRef, useState, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import Script from "next/script";
 
 // ── Telegram WebApp type declarations ─────────────────────────────────────
 
@@ -263,17 +264,24 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <TelegramContext.Provider
-      value={{
-        webApp,
-        user: webApp?.initDataUnsafe?.user ?? null,
-        mainButton: webApp?.MainButton ?? null,
-        backButton: webApp?.BackButton ?? null,
-        isInTelegram: !!webApp?.initData,
-        startParam: webApp?.initDataUnsafe?.start_param ?? null,
-      }}
-    >
-      {children}
-    </TelegramContext.Provider>
+    <>
+      <Script
+        src="https://telegram.org/js/telegram-web-app.js"
+        strategy="afterInteractive"
+        onLoad={() => window.dispatchEvent(new Event("tgWebAppReady"))}
+      />
+      <TelegramContext.Provider
+        value={{
+          webApp,
+          user: webApp?.initDataUnsafe?.user ?? null,
+          mainButton: webApp?.MainButton ?? null,
+          backButton: webApp?.BackButton ?? null,
+          isInTelegram: !!webApp?.initData,
+          startParam: webApp?.initDataUnsafe?.start_param ?? null,
+        }}
+      >
+        {children}
+      </TelegramContext.Provider>
+    </>
   );
 }
