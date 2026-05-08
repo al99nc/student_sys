@@ -39,7 +39,7 @@ def _generate_job_id() -> str:
     return "".join(secrets.choice(alphabet) for _ in range(11))
 
 
-async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost: int) -> None:
+async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost: int, focus_instruction: str = "") -> None:
     """
     Runs in the background after HTTP response is sent.
     Opens its own DB session — never reuses the request session.
@@ -113,6 +113,7 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
             else:
                 ai_data = await generate_study_content(
                     text, mode=job.mode, is_premium=use_premium, custom_context=context_dict,
+                    focus_instruction=focus_instruction,
                 )
         except Exception as e:
             if spent and cost > 0:
@@ -471,6 +472,7 @@ async def process_lecture(
     current_user: User = Depends(get_current_user),
     mode: str = Query("revision", pattern="^(revision|exam|harder|custom|essay|essay_custom)$"),
     custom_context: Optional[CustomContext] = None,
+    focus: str = Query("", max_length=300),
 ):
     """
     Creates a processing job and starts generation in the background.
@@ -556,7 +558,7 @@ async def process_lecture(
     db.add(job)
     db.commit()
 
-    background_tasks.add_task(_run_processing_job, job_id, use_premium, spent, cost)
+    background_tasks.add_task(_run_processing_job, job_id, use_premium, spent, cost, focus)
 
     return {
         "job_id": job_id,

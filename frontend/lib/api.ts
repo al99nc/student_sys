@@ -208,16 +208,20 @@ export const processLecture = (
   lectureId: number,
   difficulty: Difficulty = "revision",
   customContext?: CustomContext,
-) =>
-  api.post(
-    `/process/${lectureId}?mode=${
-      difficulty === "essay"
-        ? customContext ? "essay_custom" : "essay"
-        : customContext ? "custom" : difficulty
-    }`,
+  focus?: string,
+) => {
+  const modeParam =
+    difficulty === "essay"
+      ? customContext ? "essay_custom" : "essay"
+      : customContext ? "custom" : difficulty;
+  const params = new URLSearchParams({ mode: modeParam });
+  if (focus && focus.trim()) params.append("focus", focus.trim());
+  return api.post(
+    `/process/${lectureId}?${params.toString()}`,
     customContext ?? null,
     { timeout: 600_000 },
   );
+};
 
 export const getStats = () => api.get("/stats");
 

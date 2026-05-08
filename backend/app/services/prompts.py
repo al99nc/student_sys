@@ -51,10 +51,21 @@ REVISION_SYSTEM_PROMPT = (
     "ANY 'Both X and Y' phrasing.\n"
     "Never recycle the same 4-option set across questions.\n\n"
 
-    "=== DISTRACTOR QUALITY ===\n"
-    "- Pathophysiology: related mechanisms or transporters, not random terms.\n"
-    "- Clinical: conditions in the same differential with overlapping features.\n"
-    "- Lab: real values in the wrong direction or wrong test.\n\n"
+    "=== DISTRACTOR QUALITY — MOST IMPORTANT RULE ===\n"
+    "Each wrong option MUST be FACTUALLY INCORRECT as the answer to THIS specific question.\n"
+    "A distractor that is true in any context = INVALID. Delete it and write a false one.\n"
+    "FORBIDDEN distractor types:\n"
+    "  ✗ A correct answer that is 'less specific' than the best answer\n"
+    "  ✗ A correct answer that is 'less complete' than the best answer\n"
+    "  ✗ A correct answer that applies to a slightly different scenario\n"
+    "  ✗ A correct answer that is true in a different context\n"
+    "  ✗ Two options that are both mechanisms of the same drug/process\n"
+    "REQUIRED distractor types — pick from these:\n"
+    "  ✓ A mechanism that is the opposite of the correct one\n"
+    "  ✓ A mechanism that belongs to a DIFFERENT drug/condition in the same class\n"
+    "  ✓ A value/direction that is factually reversed (e.g. increased when answer is decreased)\n"
+    "  ✓ A step that comes before or after the correct step in the pathway\n"
+    "  ✓ A complication of a different disease, not this one\n\n"
 
     "=== ANTI-REPETITION ===\n"
     "- List 30 DISTINCT educational objectives before generating. No overlaps.\n"
@@ -90,7 +101,13 @@ REVISION_SYSTEM_PROMPT = (
     "9. A/B/C/D each between 15%-35% of total. Fix distribution before output.\n"
     "10. Type 1 ≤ 35% of total. Convert excess recall to vignettes.\n"
     "11. Zero historical trivia / naming / bullet-point conversion questions.\n"
-    "12. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
+    "12. DISTRACTOR CHECK — for EVERY question, verify:\n"
+    "    - Is option A (if wrong) factually incorrect? Not just 'less specific' — actually false?\n"
+    "    - Is option B (if wrong) factually incorrect? Not just 'less complete' — actually false?\n"
+    "    - Is option C (if wrong) factually incorrect? Not correct in any context?\n"
+    "    - Is option D (if wrong) factually incorrect? Not correct in any context?\n"
+    "    If ANY wrong option could be defended as correct — delete it and write a false one.\n"
+    "13. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
     "Regenerate any failing question before output."
 )
 
@@ -134,6 +151,9 @@ DIFFICULTY: 30% recall, 50% application, 20% analysis. If Type 1 > 35%, convert 
 4. No trivial/naming/historical questions. 5. No same-diagnosis same-stage pairs.
 6. IDA marrow correct. 7. ACD serum iron correct. 8. Consistent explanations.
 9. A/B/C/D each 15-35%. Fix before submitting.
+10. DISTRACTOR VERIFICATION — for every question:
+    Read each wrong option. Ask: is this factually incorrect? Not 'less specific', not 'also correct but not the BEST answer' — ACTUALLY WRONG.
+    If a wrong option could be argued as correct → rewrite it as a clearly false statement.
 
 AUTOPSY RULE: Every MCQ must include "distractors": an object where each key is a wrong option letter
 and value is 1 sentence explaining WHY it is wrong. Omit the correct answer from distractors.
@@ -207,6 +227,11 @@ EXAM_SYSTEM_PROMPT = (
     "Every MCQ must include 'distractors': keys = wrong option letters, values = 1 sentence why wrong.\n"
     "Example (answer=B): {\"A\":\"Wrong because...\",\"C\":\"Incorrect — this is true for X not Y.\",\"D\":\"Applies to Z context only.\"}\n\n"
 
+    "=== DISTRACTOR QUALITY — CRITICAL ===\n"
+    "For FALSE EXCEPT questions: verify that the 3 'false' options are ACTUALLY FALSE — not true statements that are just less important.\n"
+    "For all other questions: each wrong option must be factually incorrect, not merely 'less specific' or 'less complete'.\n"
+    "A wrong option that a knowledgeable student could defend as correct = invalid. Rewrite it as something false.\n\n"
+
     "OUTPUT: Return ONLY valid JSON. No markdown. No trailing commas. No text outside the object."
 )
 
@@ -221,7 +246,8 @@ Count as you write. Fix before submitting if wrong:
 - 15% → Exact mechanism (receptor/transporter/enzyme/channel)
 - 10% → Classification trap (which does NOT belong)
 
-FALSE EXCEPT — CRITICAL RULE: Only ONE option must be true. Verify the other three are actually false.
+FALSE EXCEPT — CRITICAL RULE: Only ONE option must be true. Verify the other three are ACTUALLY FALSE — not just 'less important' or 'less specific'.
+ALL QUESTION TYPES: Each wrong option must be factually incorrect. An option that is 'also correct but not the best answer' is INVALID — rewrite it as something false.
 
 FORBIDDEN QUESTION TYPES:
 - "Who first discovered X" / "X was first described in which country"
@@ -272,6 +298,12 @@ QUICK_REVIEW_SYSTEM_PROMPT = (
     "- Options must be consistent in format: all single words, or all short phrases, never mixed.\n"
     "- No clinical vignettes, no complex pathophysiology chains.\n"
     "- Cover every major concept in the lecture once.\n\n"
+
+    "=== DISTRACTOR RULE ===\n"
+    "Each of the 3 wrong options must be FACTUALLY INCORRECT.\n"
+    "Do not use 'also correct but less specific' answers as distractors.\n"
+    "Do not use correct synonyms or alternative names as distractors.\n"
+    "Each wrong option must be something a student who knows the material would immediately recognize as false.\n\n"
 
     "=== FORBIDDEN ===\n"
     "- 'All of the above' / 'None of the above' / 'Both A and B' — FORBIDDEN.\n"
@@ -366,8 +398,10 @@ HARDER_SYSTEM_PROMPT = (
     "vignettes solvable in 1 step | vague labs | obvious answers | naming/trivia questions.\n\n"
 
     "=== DISTRACTORS ===\n"
-    "Every wrong option correct in a DIFFERENT clinical context. "
-    "Most common student error must appear as a wrong option.\n\n"
+    "Every wrong option must be FACTUALLY INCORRECT for this specific question.\n"
+    "'Correct in a different context' does NOT mean the option is wrong — if a student could argue it, rewrite it.\n"
+    "The most common student error must appear as a wrong option — but it must still be factually false.\n"
+    "FORBIDDEN: options that are correct but 'less specific', correct but 'less complete', or correct for a slightly different scenario.\n\n"
 
     "=== FACTUAL ACCURACY ===\n"
     "  ✗ IDA = iron overload (wrong — IDA = depleted stores)\n"
@@ -632,8 +666,10 @@ def build_contextual_prompt(
         "=== UNIVERSAL QUESTION CRAFTING RULES ===\n"
         "- OPTION PARALLELISM: All 4 options must be at the same conceptual level.\n"
         "  Never mix a root cause with a downstream effect in the same option list.\n"
-        "- DISTRACTOR QUALITY: Each wrong option must be correct in a DIFFERENT context\n"
-        "  or represent a real and common student misconception — never random noise.\n"
+        "- DISTRACTOR QUALITY: Each wrong option must be FACTUALLY INCORRECT as the answer\n"
+        "  to THIS specific question. An option that is 'also correct but less specific' or\n"
+        "  'correct in a different context' is NOT a valid distractor — it is a second correct answer.\n"
+        "  Rewrite any such option as something factually false.\n"
         "- SCENARIO UNIQUENESS: No two application questions test the same concept.\n"
         "  Different scenarios, different reasoning paths.\n"
         "- SPECIFICITY: Use the most precise technical term available — never vague paraphrases.\n"
@@ -681,8 +717,11 @@ def build_contextual_prompt(
         "7. A/B/C/D each between 15%-35% of total answers. Fix distribution before output.\n"
         f"8. Difficulty matches {diff_label}: verify distribution is {diff_dist}\n"
         "9. Distractors are plausible and field-appropriate — not random.\n"
-        f"10. No single topic has more than 2 questions. If any does, delete the excess.\n"
-        "11. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
+        "10. DISTRACTOR CHECK: for every question, confirm each wrong option is FACTUALLY INCORRECT\n"
+        "    — not 'less specific', not 'also true but not best', not 'correct in another context'.\n"
+        "    If any wrong option could be argued as correct, rewrite it as something false.\n"
+        f"11. No single topic has more than 2 questions. If any does, delete the excess.\n"
+        "12. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
         "Regenerate any failing question before output."
     )
 

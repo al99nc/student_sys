@@ -216,6 +216,7 @@ async def _call_single_chunk(
     *,
     model: str | None = None,
     custom_prompts: tuple[str, str] | None = None,
+    focus_instruction: str = "",
 ) -> tuple[dict, float]:
     if custom_prompts is not None:
         system_prompt, user_prompt_template = custom_prompts
@@ -223,6 +224,19 @@ async def _call_single_chunk(
     else:
         system_prompt, user_prompt_template = _get_prompts(mode)
         user_prompt = user_prompt_template.format(text=text)
+
+    if focus_instruction and focus_instruction.strip():
+        focus_block = (
+            f"\n\n=== STUDENT FOCUS INSTRUCTION — HIGHEST PRIORITY ===\n"
+            f"The student specifically wants questions on: {focus_instruction.strip()}\n"
+            f"RULES:\n"
+            f"- At least 60% of questions MUST directly address this focus area.\n"
+            f"- Questions outside this focus are ONLY allowed if the lecture has insufficient content on it.\n"
+            f"- If the focus mentions specific drugs/topics/mechanisms, every question should test one of those specifically.\n"
+            f"- Do NOT ignore this instruction or treat it as a suggestion — it is a hard constraint.\n"
+            f"=== END FOCUS INSTRUCTION ===\n"
+        )
+        user_prompt = focus_block + user_prompt
 
     if total_chunks > 1:
         user_prompt += (
@@ -473,6 +487,7 @@ async def _call_chunk_with_rotation(
     *,
     model: str,
     custom_prompts: tuple[str, str] | None = None,
+    focus_instruction: str = "",
 ) -> tuple[dict, float]:
     """Call a single chunk, rotating keys on TPM, daily-limit, and invalid-key errors.
 
@@ -497,7 +512,7 @@ async def _call_chunk_with_rotation(
         try:
             return await _call_single_chunk(
                 text, mode, chunk_index, total_chunks, api_key=key, model=model,
-                custom_prompts=custom_prompts,
+                custom_prompts=custom_prompts, focus_instruction=focus_instruction,
             )
         except RuntimeError as e:
             err_str = str(e)
@@ -542,7 +557,7 @@ async def _call_chunk_with_rotation(
             try:
                 return await _call_single_chunk(
                     text, mode, chunk_index, total_chunks, api_key=key, model=model,
-                    custom_prompts=custom_prompts,
+                    custom_prompts=custom_prompts, focus_instruction=focus_instruction,
                 )
             except RuntimeError as e:
                 last_error = e
@@ -569,6 +584,7 @@ async def generate_study_content(
     *,
     is_premium: bool = False,
     custom_context: dict | None = None,
+    focus_instruction: str = "",
 ) -> Dict[str, Any]:
     if is_premium:
         if settings.open_rout_PAID_API_KEY:
@@ -651,6 +667,7 @@ async def generate_study_content(
                 _call_chunk_with_rotation(
                     available_keys, chunks[i], mode, i, total_chunks,
                     model=ai_model, custom_prompts=_custom_prompts,
+                    focus_instruction=focus_instruction,
                 )
                 for i in batch_indices
             ]

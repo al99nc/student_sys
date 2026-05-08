@@ -22,7 +22,7 @@ import {
   CloudUpload, FileText, Loader2, CheckCircle2,
   BookOpen, Medal, Brain, Layers,
   ClipboardPaste, Image as ImageIcon,
-  AlignLeft, ImagePlus, XCircle, Copy, Check,
+  AlignLeft, ImagePlus, XCircle, Copy, Check, X,
 } from "lucide-react";
 
 type Tab = "study" | "exam";
@@ -238,6 +238,7 @@ function UploadContent() {
   const [extraUsageEnabled, setExtraUsage]  = useState(false);
   const [creditBalance, setCreditBalance]   = useState(0);
   const [customContext, setCustomContext]    = useState<CustomContext | null>(null);
+  const [focusInstruction, setFocusInstruction] = useState<string>("");
 
   // ── Essay mode toggle ────────────────────────────────────────────────────
   const [essayMode, setEssayMode]       = useState(false);
@@ -394,7 +395,12 @@ function UploadContent() {
     setUploading(true);
     setError("");
     try {
-      const res = await processLecture(id, essayMode ? "essay" : mode as Difficulty, customContext ?? undefined);
+      const res = await processLecture(
+        id,
+        essayMode ? "essay" : mode as Difficulty,
+        customContext ?? undefined,
+        focusInstruction.trim() || undefined,
+      );
       const jobId = res.data.job_id;
       router.push(`/upload/${jobId}`);
     } catch (err: unknown) {
@@ -465,6 +471,7 @@ function UploadContent() {
       setStep("upload");
     } finally {
       setUploading(false);
+      setFocusInstruction("");
     }
   };
 
@@ -697,6 +704,46 @@ function UploadContent() {
             value={customContext}
             onChange={setCustomContext}
           />
+
+          {/* Focus instruction input */}
+          {!customContext && (
+            <div className="w-full max-w-3xl mx-auto">
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Focus on specific topics{" "}
+                <span className="text-xs text-muted-foreground/60 font-normal">(optional)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={focusInstruction}
+                  onChange={(e) => setFocusInstruction(e.target.value)}
+                  placeholder='e.g. "antiepileptic drugs" or "only side effects" or "mechanisms of action"'
+                  maxLength={300}
+                  className="
+                    w-full px-4 py-3 rounded-xl
+                    bg-muted/30 border border-border/40
+                    text-sm text-foreground
+                    placeholder:text-muted-foreground/40
+                    focus:outline-none focus:border-primary/60
+                    transition-colors
+                  "
+                />
+                {focusInstruction && (
+                  <button
+                    onClick={() => setFocusInstruction("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {focusInstruction && (
+                <p className="mt-1.5 text-xs text-indigo-400">
+                  ✓ AI will prioritize &quot;{focusInstruction}&quot; when generating questions
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Input Mode Tabs */}
           <div className="w-full max-w-3xl mx-auto">
