@@ -10,109 +10,65 @@ type WidgetState = "closed" | "input" | "answering" | "answered" | "opening";
 
 const HIDDEN_PAGES = ["/auth", "/", "/admin"];
 
-// ── Animated face button ──────────────────────────────────────────────────────
+// ── Jolie sparkle icon ────────────────────────────────────────────────────────
 
-function CompanionFace({ state }: { state: WidgetState }) {
-  // Eyes: different shapes per state
-  // closed   → look-around pupils + blink
-  // input    → wide awake eyes, looking forward
-  // answering→ bouncing dot eyes (thinking)
-  // answered → happy crescent eyes
-  // opening  → spinning swirl
+function JolieIcon({ state }: { state: WidgetState }) {
+  const isThinking = state === "answering" || state === "opening";
+  const isHappy    = state === "answered";
 
-  const isIdle      = state === "closed";
-  const isThinking  = state === "answering";
-  const isHappy     = state === "answered";
-  const isLoading   = state === "opening";
-  const isInput     = state === "input";
+  // Inline keyframes so Tailwind purge never removes them
+  const keyframes = `
+    @keyframes jDraw {
+      0%       { stroke-dashoffset: 320; opacity: 0.25; }
+      55%      { stroke-dashoffset: 0;   opacity: 1;    }
+      80%      { stroke-dashoffset: 0;   opacity: 1;    }
+      100%     { stroke-dashoffset: 320; opacity: 0.25; }
+    }
+    @keyframes jSpin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes jPop {
+      0%,100% { transform: scale(1);   }
+      40%     { transform: scale(1.35);}
+      70%     { transform: scale(0.9); }
+    }
+    .j-main  { stroke-dasharray:320; animation: jDraw 2.6s ease-in-out infinite; }
+    .j-cross1{ stroke-dasharray:320; animation: jDraw 2.6s ease-in-out infinite; animation-delay:.35s; }
+    .j-cross2{ stroke-dasharray:320; animation: jDraw 2.6s ease-in-out infinite; animation-delay:.65s; }
+    .j-spin  { transform-origin:12px 12px; animation: jSpin .9s linear infinite; }
+    .j-pop   { transform-origin:12px 12px; animation: jPop  .5s ease-out forwards; }
+  `;
 
   return (
-    <svg viewBox="0 0 40 40" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg
+      viewBox="0 0 24 24"
+      width="26" height="26"
+      fill="none"
+      stroke="white"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <style>{keyframes}</style>
 
-      {/* ── Left eye ── */}
-      {(isIdle || isInput) && (
-        <g className={isIdle ? "companion-eye" : ""}>
-          {/* eye white */}
-          <circle cx="13" cy="17" r="5.5" fill="white" fillOpacity="0.95" />
-          {/* pupil — animated when idle */}
-          <circle
-            cx="13" cy="17" r="3"
-            fill="#6366f1"
-            className={isIdle ? "companion-pupil" : ""}
-            style={isInput ? { transform: "translate(0.5px,-0.5px)" } : undefined}
-          />
-          {/* shine */}
-          <circle cx="14.5" cy="15.5" r="1" fill="white" fillOpacity="0.7" />
-        </g>
-      )}
-
-      {/* ── Right eye ── */}
-      {(isIdle || isInput) && (
-        <g className={isIdle ? "companion-eye" : ""}>
-          <circle cx="27" cy="17" r="5.5" fill="white" fillOpacity="0.95" />
-          <circle
-            cx="27" cy="17" r="3"
-            fill="#6366f1"
-            className={isIdle ? "companion-pupil" : ""}
-            style={isInput ? { transform: "translate(0.5px,-0.5px)" } : undefined}
-          />
-          <circle cx="28.5" cy="15.5" r="1" fill="white" fillOpacity="0.7" />
-        </g>
-      )}
-
-      {/* ── Thinking eyes (bouncing dots) ── */}
-      {isThinking && (
-        <>
-          <circle cx="13" cy="17" r="3.5" fill="white" fillOpacity="0.9"
-            className="companion-think" style={{ animationDelay: "0s" }} />
-          <circle cx="27" cy="17" r="3.5" fill="white" fillOpacity="0.9"
-            className="companion-think" style={{ animationDelay: "0.2s" }} />
-          {/* third dot — ellipsis feel */}
-          <circle cx="20" cy="17" r="2.5" fill="white" fillOpacity="0.6"
-            className="companion-think" style={{ animationDelay: "0.1s" }} />
-        </>
-      )}
-
-      {/* ── Happy eyes (crescents) ── */}
-      {isHappy && (
-        <>
-          {/* left happy eye */}
-          <path d="M8 19 Q13 12 18 19" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-          {/* right happy eye */}
-          <path d="M22 19 Q27 12 32 19" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-        </>
-      )}
-
-      {/* ── Loading swirl (opening) ── */}
-      {isLoading && (
-        <g>
-          <circle cx="20" cy="17" r="6" stroke="white" strokeWidth="2" strokeOpacity="0.3" fill="none" />
-          <path d="M20 11 A6 6 0 0 1 26 17" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none">
-            <animateTransform attributeName="transform" type="rotate" from="0 20 17" to="360 20 17" dur="0.8s" repeatCount="indefinite" />
-          </path>
-        </g>
-      )}
-
-      {/* ── Mouth ── */}
-      {isIdle && (
-        /* neutral soft smile */
-        <path d="M15 26 Q20 29.5 25 26" stroke="white" strokeWidth="2" strokeLinecap="round" fill="none" strokeOpacity="0.85" />
-      )}
-      {isInput && (
-        /* slight open smile */
-        <path d="M14 26 Q20 31 26 26" stroke="white" strokeWidth="2.2" strokeLinecap="round" fill="none" strokeOpacity="0.9" />
-      )}
-      {isThinking && (
-        /* flat / wavy thinking mouth */
-        <path d="M15 27 Q17.5 25.5 20 27 Q22.5 28.5 25 27" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none" strokeOpacity="0.7" />
-      )}
-      {isHappy && (
-        /* big happy smile */
-        <path d="M13 26 Q20 33 27 26" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none" strokeOpacity="0.95" />
-      )}
-      {isLoading && (
-        <path d="M16 28 Q20 30 24 28" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none" strokeOpacity="0.5" />
-      )}
+      <g className={isThinking ? "j-spin" : isHappy ? "j-pop" : ""}>
+        {/* Main 4-point star */}
+        <path
+          className={!isThinking && !isHappy ? "j-main" : ""}
+          d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+        />
+        {/* Small cross top-right */}
+        <path
+          className={!isThinking && !isHappy ? "j-cross1" : ""}
+          d="M20 3v4M22 5h-4"
+        />
+        {/* Small cross bottom-left */}
+        <path
+          className={!isThinking && !isHappy ? "j-cross2" : ""}
+          d="M4 17v2M5 18H3"
+        />
+      </g>
     </svg>
   );
 }
@@ -332,8 +288,8 @@ export function CompanionWidget() {
           transition-all duration-300 active:scale-90 touch-manipulation
           overflow-hidden
           ${state === "closed"
-            ? "bg-gradient-to-br from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500"
-            : "bg-gradient-to-br from-indigo-700 via-indigo-600 to-violet-700 ring-2 ring-indigo-400/50"
+            ? "bg-black hover:bg-zinc-950 border border-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+            : "bg-black border border-white/30 ring-2 ring-white/15 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
           }
         `}
       >
@@ -342,11 +298,11 @@ export function CompanionWidget() {
 
         {/* pulse ring — only when idle/closed */}
         {state === "closed" && (
-          <span className="absolute inset-0 rounded-2xl animate-ping bg-indigo-400/15 pointer-events-none" />
+          <span className="absolute inset-0 rounded-2xl animate-ping bg-white/5 pointer-events-none" />
         )}
 
-        {/* face — always visible, expression changes */}
-        <CompanionFace state={state} />
+        {/* icon — always visible, animates per state */}
+        <JolieIcon state={state} />
       </button>
     </div>
   );

@@ -93,10 +93,10 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-// ── Telegram tip announcement (shown once, forced 25s read) ──────────────────
+// ── Telegram tip announcement (shown once, 5s read) ──────────────────────────
 function TelegramAnnouncement() {
   const [visible, setVisible] = useState(false);
-  const [seconds, setSeconds] = useState(25);
+  const [seconds, setSeconds] = useState(5);
   const done = seconds === 0;
 
   useEffect(() => {
@@ -129,8 +129,8 @@ function TelegramAnnouncement() {
           <div
             className="h-full bg-foreground"
             style={{
-              width: `${((25 - seconds) / 25) * 100}%`,
-              transition: seconds < 25 ? "width 1s linear" : "none",
+              width: `${((5 - seconds) / 5) * 100}%`,
+              transition: seconds < 5 ? "width 1s linear" : "none",
             }}
           />
         </div>

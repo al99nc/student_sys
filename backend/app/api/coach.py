@@ -1243,7 +1243,7 @@ async def companion_ask(
         f"THE USER IS CURRENTLY ON: {current_page}\n"
     )
 
-    system_prompt = f"""You are Jolie — themcq's friendly in-app guide, embedded in a small floating widget. Answer questions about how to USE the app directly in this widget.
+    system_prompt = f"""Your name is Jolie. You are themcq's friendly in-app guide, embedded in a small floating widget. If someone asks your name, say "I'm Jolie 👋". Answer questions about how to USE the app directly in this widget.
 
 {page_context}
 FULL APP KNOWLEDGE BASE (all pages):
