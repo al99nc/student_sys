@@ -11,7 +11,7 @@ from pathlib import Path
 from collections import defaultdict
 from typing import List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query, Request
 from sqlalchemy.orm import Session
 from app.db.database import get_db, SessionLocal
 from datetime import datetime, timezone
@@ -23,6 +23,7 @@ from app.services.pdf_service import extract_text_from_pdf
 from app.services.ai_service import generate_study_content, _estimate_processing_time
 from app.services.generator import generate_essay_content, grade_essay_answer
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.entitlements import (
     assert_can_upload,
     plan_tier,
@@ -323,7 +324,9 @@ async def upload_text(
 
 
 @router.post("/extract-image-text")
+@limiter.limit("10/minute")
 async def extract_image_text(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -465,7 +468,9 @@ async def estimate_lecture_processing(
 
 
 @router.post("/process/{lecture_id}")
+@limiter.limit("10/minute")
 async def process_lecture(
+    request: Request,
     lecture_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -967,7 +972,9 @@ def get_solved(
 
 
 @router.post("/essay/grade")
+@limiter.limit("20/minute")
 async def grade_essay(
+    request: Request,
     body: EssayGradeRequest,
     current_user: User = Depends(get_current_user),
 ):

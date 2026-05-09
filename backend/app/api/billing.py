@@ -333,7 +333,9 @@ def create_subscription_session(
 
 
 @router.post("/cancel-subscription", status_code=200)
+@limiter.limit("5/minute")
 def cancel_subscription(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

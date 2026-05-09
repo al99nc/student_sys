@@ -18,12 +18,13 @@ from uuid import uuid4
 from datetime import datetime, timezone, date
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.entitlements import (
     assert_can_send_coach_message,
     is_premium,
@@ -283,7 +284,9 @@ def delete_conversation(
 # ── POST /conversations/{id}/messages ────────────────────────────────────────
 
 @router.post("/conversations/{conv_id}/messages")
+@limiter.limit("30/minute")
 async def send_message(
+    request: Request,
     conv_id: str,
     body: dict,
     debug: bool = Query(False, description="Include debug block with memory decision info"),
@@ -643,7 +646,9 @@ class PracticeGenerateRequest(BaseModel):
 
 
 @router.post("/practice/generate")
+@limiter.limit("10/minute")
 async def generate_practice(
+    request: Request,
     body: PracticeGenerateRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -687,7 +692,9 @@ class PracticeMCQRequest(BaseModel):
 
 
 @router.post("/practice/mcqs/{conversation_id}")
+@limiter.limit("10/minute")
 async def generate_practice_mcqs(
+    request: Request,
     conversation_id: str,
     body: PracticeMCQRequest,
     db: Session = Depends(get_db),
@@ -736,7 +743,9 @@ class PracticeEssayRequest(BaseModel):
 
 
 @router.post("/practice/essay/{conversation_id}")
+@limiter.limit("10/minute")
 async def generate_practice_essay(
+    request: Request,
     conversation_id: str,
     body: PracticeEssayRequest,
     db: Session = Depends(get_db),
@@ -1218,7 +1227,9 @@ def _extract_page_section(knowledge: str, current_page: str) -> str:
 
 
 @router.post("/companion/ask")
+@limiter.limit("30/minute")
 async def companion_ask(
+    request: Request,
     body: dict,
     current_user: User = Depends(get_current_user),
 ):

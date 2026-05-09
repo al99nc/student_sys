@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.db.database import get_db
 from app.api.deps import get_current_user
 from app.models.models import User, Lecture
@@ -1340,7 +1341,9 @@ INSIGHT_STALE_AFTER_N_ANSWERS = 10   # put this in settings if you prefer
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.get("/students/me/ai-insight")
+@limiter.limit("10/hour")
 async def get_ai_insight(
+    request: Request,
     background_tasks: BackgroundTasks,
     force: bool = Query(False, description="Force regeneration even if fresh"),
     db: Session = Depends(get_db),
@@ -2423,7 +2426,9 @@ async def _call_ai_pipeline(context: dict, student_id: int, db: Session) -> dict
 
 
 @router.post("/students/me/chat")
+@limiter.limit("30/minute")
 async def chat_with_coach(
+    request: Request,
     body: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
