@@ -10,16 +10,16 @@ import {
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { StepNav } from "@/components/step-nav";
+import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   Share2, Shuffle, RefreshCw, Check, X,
-  Home, BarChart3, Zap, BookOpen, Lightbulb,
+  Zap, BookOpen, Lightbulb,
   Brain, AlertTriangle, Calendar,
-  CheckCircle2, XCircle, Cloud, CloudOff, Loader2,
+  CheckCircle2, XCircle, Loader2, Clock, Timer, Power,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -153,6 +153,14 @@ export default function ResultsPage() {
   const [saveStatus, setSaveStatus]     = useState<"idle" | "saving" | "saved">("idle");
   const [retakeCount, setRetakeCount]   = useState(0);
 
+  // Timer widget state
+  const [timerOpen, setTimerOpen] = useState(false);
+  const [timerMinutes, setTimerMinutes] = useState(25);
+  const [timerActive, setTimerActive] = useState(false);
+  const [timerRemaining, setTimerRemaining] = useState(0);
+  const [keepAwake, setKeepAwake] = useState(false);
+  const wakeLockRef = useRef<any>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sessionStartRef     = useRef<number>(Date.now());
   const viewerPollRef       = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -176,6 +184,59 @@ export default function ResultsPage() {
     if (!isAuthenticated()) { router.push("/auth"); return; }
     fetchResults();
   }, [lectureId, router]);
+
+  // Timer countdown effect
+  useEffect(() => {
+    if (timerActive && timerRemaining > 0) {
+      timerIntervalRef.current = setInterval(() => {
+        setTimerRemaining(prev => {
+          if (prev <= 1) {
+            setTimerActive(false);
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => {
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      };
+    }
+  }, [timerActive, timerRemaining]);
+
+  // Wake lock effect
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch (err) {
+        console.log('Wake Lock error:', err);
+      }
+    };
+
+    const releaseWakeLock = async () => {
+      if (wakeLockRef.current) {
+        try {
+          await wakeLockRef.current.release();
+          wakeLockRef.current = null;
+        } catch (err) {
+          console.log('Wake Lock release error:', err);
+        }
+      }
+    };
+
+    if (keepAwake) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    return () => {
+      releaseWakeLock();
+    };
+  }, [keepAwake]);
 
 
   useEffect(() => {
@@ -451,12 +512,31 @@ export default function ResultsPage() {
     }
   };
 
+  const handleStartTimer = () => {
+    setTimerRemaining(timerMinutes * 60);
+    setTimerActive(true);
+  };
+
+  const handleStopTimer = () => {
+    setTimerActive(false);
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // ── Loading ──────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      <div className="min-h-screen bg-background">
+        <AppHeader activePage="Lectures" />
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
       </div>
     );
   }
@@ -465,20 +545,23 @@ export default function ResultsPage() {
 
   if (error === "not_found") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="max-w-sm w-full bg-card rounded-2xl border border-border p-8 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-muted border border-border flex items-center justify-center mx-auto mb-6">
-            <AlertTriangle className="w-7 h-7 text-muted-foreground" />
+      <div className="min-h-screen bg-background">
+        <AppHeader activePage="Lectures" />
+        <div className="flex items-center justify-center px-4 py-20">
+          <div className="max-w-sm w-full bg-card rounded-2xl border border-border p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-muted border border-border flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="w-7 h-7 text-muted-foreground" />
+            </div>
+            <h2 className="text-[22px] font-extrabold tracking-tight text-foreground mb-2">Not Processed Yet</h2>
+            <p className="text-sm text-muted-foreground mb-7 leading-relaxed">
+              Generate study materials for this lecture to get started.
+            </p>
+            <Button onClick={handleProcess} disabled={processing} size="lg" className="w-full">
+              {processing
+                ? <><Loader2 className="w-4 h-4 animate-spin" />Processing...</>
+                : "Generate Study Materials"}
+            </Button>
           </div>
-          <h2 className="text-[22px] font-extrabold tracking-tight text-foreground mb-2">Not Processed Yet</h2>
-          <p className="text-sm text-muted-foreground mb-7 leading-relaxed">
-            Generate study materials for this lecture to get started.
-          </p>
-          <Button onClick={handleProcess} disabled={processing} size="lg" className="w-full">
-            {processing
-              ? <><Loader2 className="w-4 h-4 animate-spin" />Processing...</>
-              : "Generate Study Materials"}
-          </Button>
         </div>
       </div>
     );
@@ -632,34 +715,129 @@ export default function ResultsPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className={cn("min-h-screen bg-background text-foreground", isMobile ? "pb-[120px]" : "pb-12")}>
+    <div className="min-h-screen bg-background text-foreground pb-20 md:pb-8">
+      <AppHeader activePage="Lectures" />
 
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" className="flex items-center gap-2.5 no-underline">
-            <div className="w-8 h-8 rounded-[10px] bg-violet-600 flex items-center justify-center text-[11px] font-black text-white flex-shrink-0">
-              cQ
-            </div>
-            {!isMobile && <span className="text-foreground font-bold text-sm">themcq</span>}
-          </Link>
+      <main className="max-w-7xl mx-auto px-4 py-6 md:px-8 md:py-10 relative">
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl border border-border bg-muted/20 flex items-center justify-center">
-              {saveStatus === "saving" && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
-              {saveStatus === "saved"  && <Cloud    className="w-[18px] h-[18px] text-emerald-400" />}
-              {saveStatus === "idle"   && <CloudOff className="w-[18px] h-[18px] text-muted-foreground" />}
-            </div>
-          </div>
+        {/* Timer Widget - Static Button */}
+        <div className="fixed top-20 right-4 z-40">
+          {!timerOpen ? (
+            <button
+              onClick={() => setTimerOpen(true)}
+              className="w-12 h-12 rounded-full bg-card border-2 border-primary/40 shadow-lg flex items-center justify-center hover:bg-muted/50 transition-colors"
+              title="Study Timer"
+            >
+              {timerActive ? (
+                <Timer className="w-5 h-5 text-primary animate-pulse" />
+              ) : (
+                <Clock className="w-5 h-5 text-muted-foreground" />
+              )}
+            </button>
+          ) : (
+            <>
+              {/* Click outside to close timer */}
+              <div
+                className="fixed inset-0 z-30"
+                onClick={() => setTimerOpen(false)}
+              />
+              
+              <div 
+                className="bg-card border-2 border-primary/30 rounded-2xl shadow-xl p-4 w-[280px] relative z-40"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-semibold text-foreground">Study Timer</span>
+                  </div>
+                  <button
+                    onClick={() => setTimerOpen(false)}
+                    className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-muted/50 transition-colors"
+                  >
+                    <X className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                </div>
+
+                {timerActive ? (
+                  <div className="space-y-3">
+                    <div className="text-center">
+                      <div className="text-4xl font-bold text-foreground font-mono">
+                        {formatTime(timerRemaining)}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">Time remaining</p>
+                    </div>
+                    <Button
+                      onClick={handleStopTimer}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                    >
+                      Stop Timer
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-2 block">
+                        Study Duration (minutes)
+                      </label>
+                      <div className="flex gap-2">
+                        {[15, 25, 45, 60].map((mins) => (
+                          <button
+                            key={mins}
+                            onClick={() => setTimerMinutes(mins)}
+                            className={cn(
+                              "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
+                              timerMinutes === mins
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            {mins}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
+                      <div className="flex items-center gap-2">
+                        <Power className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-xs text-foreground">Keep screen on</span>
+                      </div>
+                      <button
+                        onClick={() => setKeepAwake(!keepAwake)}
+                        className={cn(
+                          "w-10 h-5 rounded-full transition-colors relative",
+                          keepAwake ? "bg-primary" : "bg-muted-foreground/30"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform",
+                            keepAwake ? "translate-x-5" : "translate-x-0.5"
+                          )}
+                        />
+                      </button>
+                    </div>
+
+                    <Button
+                      onClick={handleStartTimer}
+                      size="sm"
+                      className="w-full"
+                    >
+                      Start Timer
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: `Lecture #${lectureId}` }]} />
-      </header>
-
-      <main className={cn("max-w-7xl mx-auto", isMobile ? "px-3.5 py-5" : "px-5 py-7")}>
 
         {/* Title */}
-        <div className="mb-6">
-          <h1 className={cn("font-extrabold tracking-tight text-foreground mb-3", isMobile ? "text-[22px]" : "text-[28px]")}>
+        <div className="mb-8">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-foreground mb-3">
             Study Materials
           </h1>
           <div className="flex flex-wrap gap-2">
@@ -698,7 +876,7 @@ export default function ResultsPage() {
         )}
 
         {/* Content grid */}
-        <div className={cn("grid gap-5 items-start", isMobile ? "grid-cols-1" : "grid-cols-[300px_1fr]")}>
+        <div className="grid gap-5 items-start grid-cols-1 lg:grid-cols-[300px_1fr]">
 
           {/* Sidebar */}
           <div className="flex flex-col gap-4">
@@ -832,56 +1010,6 @@ export default function ResultsPage() {
           </div>
         </div>
       </main>
-
-      {/* Mobile tools bar */}
-      {isMobile && (
-        <div className="fixed bottom-14 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur flex justify-around items-center px-4 py-2.5 gap-2">
-          <Button asChild variant="secondary" size="sm" className="gap-1.5 text-violet-300 bg-violet-600/10 border-violet-600/25 hover:bg-violet-600/15">
-            <Link href={`/quiz/${lectureId}`}>
-              <Zap className="w-3.5 h-3.5" />Quiz
-            </Link>
-          </Button>
-          <Button asChild variant="secondary" size="sm" className="gap-1.5 text-sky-300 bg-sky-600/10 border-sky-600/25 hover:bg-sky-600/15">
-            <Link href={`/xray/${lectureId}`}>
-              <Brain className="w-3.5 h-3.5" />X-Ray
-            </Link>
-          </Button>
-          <Button
-            onClick={handleToggleShuffle}
-            variant={shuffleMode ? "default" : "outline"}
-            size="sm"
-            className="gap-1.5"
-          >
-            <Shuffle className="w-3.5 h-3.5" />
-            {shuffleMode ? "Sectioned" : "Shuffle"}
-          </Button>
-          <Button
-            onClick={shareToken ? handleCopyLink : handleShare}
-            disabled={sharing}
-            variant={copied ? "default" : "outline"}
-            size="sm"
-            className="gap-1.5"
-          >
-            {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-            {copied ? "Copied" : "Share"}
-          </Button>
-        </div>
-      )}
-
-      {/* Mobile nav */}
-      {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background flex justify-around items-center px-4 pb-[max(10px,env(safe-area-inset-bottom))] pt-2.5">
-          <Link href="/dashboard" className="flex flex-col items-center gap-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors no-underline">
-            <Home className="w-5 h-5" /><span className="text-[11px]">Home</span>
-          </Link>
-          <div className="flex flex-col items-center gap-1 text-violet-500">
-            <BookOpen className="w-5 h-5" /><span className="text-[11px]">Study</span>
-          </div>
-          <Link href="/analytics" className="flex flex-col items-center gap-1 text-muted-foreground/40 hover:text-muted-foreground transition-colors no-underline">
-            <BarChart3 className="w-5 h-5" /><span className="text-[11px]">Stats</span>
-          </Link>
-        </nav>
-      )}
     </div>
   );
 }
