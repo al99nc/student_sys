@@ -1,5 +1,5 @@
 "use client";
-export const dynamic = "force-dynamic";
+import { Suspense } from "react";
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { requestMagicLink, saveOnboarding } from "@/lib/api";
@@ -28,7 +28,7 @@ const STEP_ICONS = ["person", "school", "domain", "military_tech"];
 
 type Screen = "form" | "sent" | "onboarding";
 
-export default function AuthPage() {
+function AuthPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isInTelegram } = useTelegram();
@@ -415,5 +415,13 @@ export default function AuthPage() {
         </p>
       </main>
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense>
+      <AuthPageInner />
+    </Suspense>
   );
 }
