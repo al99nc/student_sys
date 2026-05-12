@@ -62,3 +62,12 @@ class OnboardingUpdate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+
+class MagicLinkRequest(BaseModel):
+    email: EmailStr
+
+
+class MagicLinkResponse(BaseModel):
+    message: str
+    email: str

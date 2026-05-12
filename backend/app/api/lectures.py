@@ -145,6 +145,7 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
             else:
                 existing.mcqs = json.dumps(ai_data.get("mcqs", []))
             existing.custom_context = saved_context
+            existing.mode = job.mode
             db.commit()
         else:
             result = Result(
@@ -154,8 +155,14 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
                 mcqs=json.dumps(ai_data.get("mcqs", [])) if not is_essay_mode else "[]",
                 essays=json.dumps(ai_data.get("questions", [])) if is_essay_mode else None,
                 custom_context=saved_context,
+                mode=job.mode,
             )
             db.add(result)
+            db.commit()
+
+        ai_title = ai_data.get("_meta", {}).get("ai_title", "") if not is_essay_mode else ""
+        if ai_title:
+            lecture.title = ai_title
             db.commit()
 
         job.status = "done"
@@ -396,9 +403,16 @@ def get_lectures(
     current_user: User = Depends(get_current_user),
 ):
     lectures = db.query(Lecture).filter(Lecture.user_id == current_user.id).order_by(Lecture.created_at.desc()).all()
+    lecture_ids = [l.id for l in lectures]
     results_map = {
         r.lecture_id: r
-        for r in db.query(Result).filter(Result.lecture_id.in_([l.id for l in lectures])).all()
+        for r in db.query(Result).filter(Result.lecture_id.in_(lecture_ids)).all()
+    }
+    active_jobs_map = {
+        j.lecture_id: j.id
+        for j in db.query(ProcessingJob)
+            .filter(ProcessingJob.lecture_id.in_(lecture_ids), ProcessingJob.status.in_(["pending", "processing"]))
+            .all()
     }
     out = []
     for lec in lectures:
@@ -406,6 +420,7 @@ def get_lectures(
         d = LectureOut.model_validate(lec)
         d.is_processed = result is not None
         d.has_essays = bool(result and result.essays)
+        d.pending_job_id = active_jobs_map.get(lec.id)
         out.append(d)
     return out
 
@@ -666,6 +681,8 @@ def get_results(
     return ResultOut(
         id=result.id,
         lecture_id=result.lecture_id,
+        lecture_title=lecture.title,
+        mode=result.mode,
         summary=result.summary,
         key_concepts=json.loads(result.key_concepts) if result.key_concepts else [],
         mcqs=json.loads(result.mcqs) if result.mcqs else [],

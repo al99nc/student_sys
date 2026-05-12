@@ -12,7 +12,13 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    # "!" sentinel is stored for passwordless (magic-link) accounts — always reject.
+    if not hashed_password or not hashed_password.startswith("$2"):
+        return False
+    try:
+        return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    except Exception:
+        return False
 
 
 def needs_rehash(hashed_password: str) -> bool:

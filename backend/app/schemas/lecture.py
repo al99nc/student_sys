@@ -14,6 +14,7 @@ class LectureOut(BaseModel):
     topic_area: Optional[str] = None
     is_processed: bool = False
     has_essays: bool = False
+    pending_job_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -29,6 +30,8 @@ class MCQ(BaseModel):
 class ResultOut(BaseModel):
     id: int
     lecture_id: int
+    lecture_title: Optional[str] = None
+    mode: Optional[str] = None
     summary: Optional[str] = None
     key_concepts: Optional[List[str]] = None
     mcqs: Optional[List[MCQ]] = None

@@ -1,9 +1,25 @@
-﻿"use client";
+"use client";
 import { useEffect, useState, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { getSharedResult, pingSharedSession, getQuizSession, saveQuizSession, retakeQuizSession } from "@/lib/api";
+import { useParams } from "next/navigation";
+import {
+  getSharedResult, pingSharedSession,
+  getQuizSession, saveQuizSession, retakeQuizSession,
+} from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import Link from "next/link";
+import { AppHeader } from "@/components/app-header";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import {
+  Share2, Shuffle, RefreshCw, Check, X,
+  BookOpen, Lightbulb, AlertTriangle,
+  CheckCircle2, XCircle, Loader2,
+  Cloud, CloudOff,
+} from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface MCQ {
   question: string;
@@ -22,6 +38,8 @@ interface SharedResult {
   view_count: number;
 }
 
+type ActiveTab = "mcqs" | "summary" | "concepts";
+
 function groupByTopic(mcqs: MCQ[]): Record<string, MCQ[]> {
   return mcqs.reduce((acc, mcq, idx) => {
     const topic = mcq.topic || "General";
@@ -31,51 +49,35 @@ function groupByTopic(mcqs: MCQ[]): Record<string, MCQ[]> {
   }, {} as Record<string, MCQ[]>);
 }
 
-const TOPIC_EMOJIS: Record<string, string> = {
-  Pathophysiology: "🧬", Diagnosis: "🔬", Treatment: "💊", Complications: "⚠️",
-  Anatomy: "🫀", Pharmacology: "💉", Neurology: "🧠", Cardiology: "❤️",
-  Respiratory: "🫁", General: "📋",
-};
-
-function getEmoji(topic: string): string {
-  for (const [key, emoji] of Object.entries(TOPIC_EMOJIS)) {
-    if (topic.toLowerCase().includes(key.toLowerCase())) return emoji;
-  }
-  return "📌";
-}
-
-type ActiveTab = "mcqs" | "summary" | "concepts";
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SharedPage() {
   const params = useParams();
-  const token = params.token as string;
-  const router = useRouter();
+  const token  = params.token as string;
 
-  const [result, setResult] = useState<SharedResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
-  const [score, setScore] = useState(0);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const [retakeCount, setRetakeCount] = useState(0);
-  const [confirmRetake, setConfirmRetake] = useState(false);
-  const [sessionRestored, setSessionRestored] = useState(false);
-  const [shuffleMode, setShuffleMode] = useState(false);
-  const [shuffledMcqs, setShuffledMcqs] = useState<Array<MCQ & { _index: number }>>([]);
-  const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("mcqs");
+  const [result,           setResult]           = useState<SharedResult | null>(null);
+  const [loading,          setLoading]          = useState(true);
+  const [error,            setError]            = useState("");
+  const [selectedAnswers,  setSelectedAnswers]  = useState<Record<number, string>>({});
+  const [score,            setScore]            = useState(0);
+  const [isLoggedIn,       setIsLoggedIn]       = useState(false);
+  const [saveStatus,       setSaveStatus]       = useState<"idle" | "saving" | "saved">("idle");
+  const [retakeCount,      setRetakeCount]      = useState(0);
+  const [confirmRetake,    setConfirmRetake]    = useState(false);
+  const [shuffleMode,      setShuffleMode]      = useState(false);
+  const [shuffledMcqs,     setShuffledMcqs]     = useState<Array<MCQ & { _index: number }>>([]);
+  const [copied,           setCopied]           = useState(false);
+  const [activeTab,        setActiveTab]        = useState<ActiveTab>("mcqs");
   const [guestRetakeBlocked, setGuestRetakeBlocked] = useState(false);
-  const sessionIdRef = useRef<string>("");
+
+  const sessionIdRef    = useRef<string>("");
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimeoutRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Check auth token from localStorage (SSR-safe — runs client-side only)
     const loggedIn = isAuthenticated();
     setIsLoggedIn(loggedIn);
 
-    // Retrieve or generate a session ID for this browser tab
     let sid = sessionStorage.getItem(`themcq_sid_${token}`);
     if (!sid) {
       sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -87,8 +89,7 @@ export default function SharedPage() {
       try {
         const res = await getSharedResult(token);
         setResult(res.data);
-        // If user has a valid token, restore their saved session for this lecture
-        if (isAuthenticated()) {
+        if (loggedIn) {
           try {
             const sessionRes = await getQuizSession(res.data.lecture_id);
             const saved = sessionRes.data.answers || {};
@@ -101,8 +102,6 @@ export default function SharedPage() {
               setScore(correct);
               setSaveStatus("saved");
               setTimeout(() => setSaveStatus("idle"), 1500);
-              setSessionRestored(true);
-              setTimeout(() => setSessionRestored(false), 4000);
             }
           } catch {}
         }
@@ -116,20 +115,15 @@ export default function SharedPage() {
 
     load();
 
-    // Ping immediately then every 15s so the owner sees this as an active viewer
     const ping = () => {
       pingSharedSession(token, sessionIdRef.current).then(res => {
         sessionIdRef.current = res.data.session_id;
         sessionStorage.setItem(`themcq_sid_${token}`, res.data.session_id);
       }).catch(() => {});
     };
-
     ping();
     pingIntervalRef.current = setInterval(ping, 15000);
-
-    return () => {
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-    };
+    return () => { if (pingIntervalRef.current) clearInterval(pingIntervalRef.current); };
   }, [token]);
 
   const handleSelectAnswer = (globalIndex: number, letter: string) => {
@@ -140,7 +134,6 @@ export default function SharedPage() {
       setScore(correct);
     }
     setSelectedAnswers(updated);
-    // Auto-save to the user's account if logged in
     if (isLoggedIn && result) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       setSaveStatus("saving");
@@ -149,16 +142,14 @@ export default function SharedPage() {
           await saveQuizSession(result.lecture_id, updated);
           setSaveStatus("saved");
           setTimeout(() => setSaveStatus("idle"), 2000);
-        } catch {
-          setSaveStatus("idle");
-        }
+        } catch { setSaveStatus("idle"); }
       }, 800);
     }
   };
 
-  const handleToggleShuffle = (mcqs: MCQ[]) => {
-    if (!shuffleMode) {
-      const indexed = mcqs.map((mcq, i) => ({ ...mcq, _index: i }));
+  const handleToggleShuffle = () => {
+    if (!shuffleMode && result) {
+      const indexed = result.mcqs.map((mcq, i) => ({ ...mcq, _index: i }));
       setShuffledMcqs([...indexed].sort(() => Math.random() - 0.5));
       setShuffleMode(true);
     } else {
@@ -166,37 +157,27 @@ export default function SharedPage() {
     }
   };
 
-  const copyToClipboard = async (text: string) => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const el = document.createElement("textarea");
-      el.value = text;
-      el.style.position = "fixed";
-      el.style.opacity = "0";
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
-  };
-
   const handleCopyLink = async () => {
-    await copyToClipboard(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(window.location.href);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = window.location.href;
+        el.style.position = "fixed"; el.style.opacity = "0";
+        document.body.appendChild(el); el.select();
+        document.execCommand("copy"); document.body.removeChild(el);
+      }
+      setCopied(true); setTimeout(() => setCopied(false), 2500);
+    } catch {}
   };
 
   const handleReset = async () => {
     setConfirmRetake(false);
-    // Feature 6: gate second retake for guests
     if (!isLoggedIn) {
       const key = `themcq_guest_shared_retakes_${token}`;
       const count = parseInt(localStorage.getItem(key) || "0");
-      if (count >= 1) {
-        setGuestRetakeBlocked(true);
-        return;
-      }
+      if (count >= 1) { setGuestRetakeBlocked(true); return; }
       localStorage.setItem(key, String(count + 1));
     }
     if (isLoggedIn && result) {
@@ -205,111 +186,140 @@ export default function SharedPage() {
         setRetakeCount(res.data.retake_count);
       } catch {}
     }
-    setSelectedAnswers({});
-    setScore(0);
-    setSaveStatus("idle");
-    setGuestRetakeBlocked(false);
+    setSelectedAnswers({}); setScore(0); setSaveStatus("idle"); setGuestRetakeBlocked(false);
   };
+
+  // ── Loading ──────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#111220" }}>
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-container" />
+      <div className="min-h-screen bg-background">
+        <AppHeader activePage="Lectures" />
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
       </div>
     );
   }
 
   if (error === "not_found" || !result) {
     return (
-      <div className="min-h-screen flex items-center justify-center relative" style={{ backgroundColor: "#111220" }}>
-        <div className="grain-overlay" />
-        <div className="text-center glass-panel rounded-3xl p-12 max-w-md mx-4 relative z-10">
-          <div className="w-16 h-16 rounded-2xl bg-tertiary/20 flex items-center justify-center mx-auto mb-6">
-            <span className="material-symbols-outlined text-3xl text-tertiary">link_off</span>
+      <div className="min-h-screen bg-background">
+        <AppHeader activePage="Lectures" />
+        <div className="flex items-center justify-center px-4 py-20">
+          <div className="max-w-sm w-full bg-card rounded-2xl border border-border p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-muted border border-border flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="w-7 h-7 text-muted-foreground" />
+            </div>
+            <h2 className="text-[22px] font-extrabold tracking-tight text-foreground mb-2">Link Not Found</h2>
+            <p className="text-sm text-muted-foreground mb-7 leading-relaxed">
+              This share link is invalid or has been removed.
+            </p>
+            <Button asChild size="lg" className="w-full">
+              <Link href="/">Go to themcq</Link>
+            </Button>
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Link Not Found</h2>
-          <p className="text-on-surface-variant mb-8">This share link is invalid or has been removed.</p>
-          <Link href="/" className="synapse-gradient text-white font-bold px-8 py-3 rounded-xl inline-block hover:-translate-y-1 transition-transform">
-            Go to themcq
-          </Link>
         </div>
       </div>
     );
   }
 
   const answeredCount = Object.keys(selectedAnswers).length;
-  const totalCount = result.mcqs.length;
-  const grouped = groupByTopic(result.mcqs);
-  const scorePercent = totalCount > 0 ? Math.round((score / totalCount) * 100) : 0;
+  const totalCount    = result.mcqs.length;
+  const grouped       = groupByTopic(result.mcqs);
+  const scorePercent  = totalCount > 0 ? Math.round((score / totalCount) * 100) : 0;
+
+  // ── MCQ List ─────────────────────────────────────────────────────────────────
 
   const MCQList = ({ mcqs }: { mcqs: Array<MCQ & { _index: number }> }) => (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-3.5">
       {mcqs.map((mcq, displayIdx) => {
-        const globalIdx = mcq._index;
-        const selected = selectedAnswers[globalIdx];
+        const globalIdx  = mcq._index;
+        const selected   = selectedAnswers[globalIdx];
         const isAnswered = selected !== undefined;
-        const isCorrect = selected === mcq.answer;
+        const isCorrect  = selected === mcq.answer;
 
         return (
           <div
             key={globalIdx}
-            className={`glass-panel p-8 rounded-xl transition-all duration-300 hover:-translate-y-1 border-l-4 ${
-              isAnswered ? (isCorrect ? "border-green-500/50" : "border-error/50") : "border-primary-container/30"
-            }`}
+            id={`mcq-${globalIdx}`}
+            className={cn(
+              "bg-muted/5 border border-border rounded-2xl px-[22px] py-5 scroll-mt-[72px] transition-colors",
+              isAnswered && isCorrect  && "border-l-[3px] border-l-emerald-400",
+              isAnswered && !isCorrect && "border-l-[3px] border-l-red-400",
+            )}
           >
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-on-surface-variant bg-surface-container-highest px-2 py-1 rounded">
-                Question {displayIdx + 1 < 10 ? `0${displayIdx + 1}` : displayIdx + 1}
+            {/* Header */}
+            <div className="flex justify-between items-start mb-3.5">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 px-2.5 py-1 bg-muted/20 border border-border rounded-[7px]">
+                Q{String(displayIdx + 1).padStart(2, "0")}
               </span>
               {isAnswered && (
-                <span className={`px-2 py-1 text-[10px] font-bold rounded uppercase flex items-center gap-1 ${isCorrect ? "bg-green-500/10 text-green-400" : "bg-error/10 text-error"}`}>
-                  <span className="material-symbols-outlined text-sm">{isCorrect ? "check_circle" : "cancel"}</span>
+                <span className={cn(
+                  "flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border",
+                  isCorrect
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                    : "bg-red-500/10 text-red-400 border-red-500/25"
+                )}>
+                  {isCorrect ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                   {isCorrect ? "Correct" : "Incorrect"}
                 </span>
               )}
             </div>
 
-            <h3 className="text-lg font-bold text-white mb-6 leading-snug">{mcq.question}</h3>
+            {/* Question */}
+            <p className="text-sm font-medium text-foreground mb-4 leading-relaxed">{mcq.question}</p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Options */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {mcq.options.map((option, j) => {
-                const letter = option.charAt(0);
+                const letter         = option.charAt(0);
                 const isThisSelected = selected === letter;
-                const isThisCorrect = letter === mcq.answer;
-                let cls = "bg-surface-container-highest border border-outline-variant/10 text-on-surface-variant cursor-pointer hover:border-primary-container/50 hover:bg-primary-container/10 hover:text-white";
-                if (isAnswered) {
-                  if (isThisCorrect) cls = "bg-primary-container/20 border border-primary/30 text-white cursor-default";
-                  else if (isThisSelected) cls = "bg-error/20 border border-error/30 text-error cursor-default";
-                  else cls = "bg-surface-container-highest border border-outline-variant/10 text-on-surface-variant/50 cursor-default";
-                }
+                const isThisCorrect  = letter === mcq.answer;
+
                 return (
                   <button
                     key={j}
                     onClick={() => handleSelectAnswer(globalIdx, letter)}
-                    className={`p-4 rounded-xl text-sm text-left transition-all flex justify-between items-center ${cls}`}
+                    disabled={isAnswered}
+                    className={cn(
+                      "px-3.5 py-2.5 rounded-xl text-[13px] text-left transition-all border flex justify-between items-center gap-2 leading-snug",
+                      isAnswered ? (
+                        isThisCorrect
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-foreground cursor-default"
+                          : isThisSelected
+                            ? "bg-red-500/10 border-red-500/30 text-muted-foreground cursor-default"
+                            : "bg-muted/10 border-border text-muted-foreground/30 cursor-default"
+                      ) : "bg-muted/15 border-border text-muted-foreground hover:bg-violet-600/10 hover:border-violet-500/30 hover:text-violet-300 cursor-pointer"
+                    )}
                   >
                     <span>{option}</span>
-                    {isAnswered && isThisCorrect && <span className="material-symbols-outlined text-primary text-sm">done_all</span>}
-                    {isAnswered && isThisSelected && !isThisCorrect && <span className="material-symbols-outlined text-error text-sm">close</span>}
+                    {isAnswered && isThisCorrect    && <Check className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
+                    {isAnswered && isThisSelected && !isThisCorrect && <X className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
                   </button>
                 );
               })}
             </div>
 
+            {/* Explanation */}
             {isAnswered && mcq.explanation && (
-              <div className={`mt-4 px-4 py-3 rounded-xl text-sm flex items-start gap-2 ${isCorrect ? "bg-green-500/5 border border-green-500/20 text-green-300" : "bg-primary-container/5 border border-primary/20 text-primary-fixed-dim"}`}>
-                <span className="material-symbols-outlined text-sm flex-shrink-0 mt-0.5">arrow_forward</span>
-                <span><strong>Answer: {mcq.answer}</strong> — {mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}</span>
+              <div className={cn(
+                "mt-3.5 p-3.5 rounded-xl border text-sm",
+                isCorrect ? "bg-emerald-500/5 border-emerald-500/20" : "bg-violet-600/5 border-violet-600/20"
+              )}>
+                <p className="text-muted-foreground leading-relaxed">
+                  <span className="font-semibold text-foreground">Answer: {mcq.answer}</span>
+                  {" — "}{mcq.explanation.replace(/^[A-D]\s*[—–-]\s*/i, "")}
+                </p>
               </div>
             )}
 
-            {/* Feature 3: wrong answer nudge for guests */}
+            {/* Guest upsell on wrong answer */}
             {isAnswered && !isCorrect && !isLoggedIn && (
               <div className="mt-2 flex items-center justify-between px-1">
-                <span className="text-xs text-on-surface-variant/60">Track your weak spots</span>
-                <Link href={`/auth?redirect=/shared/${token}`} className="text-xs font-bold text-secondary hover:text-white transition-colors flex items-center gap-1">
-                  Sign up free
-                  <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                <span className="text-xs text-muted-foreground/50">Track your weak spots</span>
+                <Link href={`/auth?redirect=/shared/${token}`} className="text-xs font-semibold text-violet-400 hover:text-violet-300 transition-colors">
+                  Sign up free →
                 </Link>
               </div>
             )}
@@ -319,342 +329,246 @@ export default function SharedPage() {
     </div>
   );
 
+  // ── Render ────────────────────────────────────────────────────────────────────
+
   return (
-    <div className={`relative min-h-screen text-on-surface md:pb-16 ${isLoggedIn ? "pb-36" : "pb-20"}`} style={{ backgroundColor: "#111220", backgroundImage: "radial-gradient(at 0% 0%, rgba(123,47,255,0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0,210,253,0.05) 0px, transparent 50%)", backgroundAttachment: "fixed" }}>
-      <div className="grain-overlay" />
+    <div className="min-h-screen bg-background text-foreground pb-20 md:pb-8">
+      <AppHeader activePage="Lectures" />
 
-      {/* Restore toast */}
-      {sessionRestored && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/30 shadow-xl text-sm text-white">
-          <span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span>
-          Your saved progress has been restored from your account
-        </div>
-      )}
+      <main className="max-w-7xl mx-auto px-4 py-6 md:px-8 md:py-10">
 
-      {/* Header — logo + cloud icon only on mobile; full buttons on desktop */}
-      <header className="fixed top-0 w-full flex justify-between items-center px-5 py-4 bg-slate-950/80 backdrop-blur-xl z-50 shadow-[0px_8px_24px_rgba(123,47,255,0.15)]">
-        <div className="flex items-center gap-3">
-          <Link href={isLoggedIn ? "/dashboard" : "/"} className="text-2xl font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent hover:opacity-80 transition-opacity">
-            themcq
-          </Link>
-          <span className="hidden md:inline px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant bg-surface-container-high border border-outline-variant/20 rounded">Shared</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Cloud save icon — always visible, text only on desktop */}
-          {isLoggedIn ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-emerald-500/20">
-              {saveStatus === "saving"
-                ? <span className="material-symbols-outlined text-sm text-on-surface-variant animate-spin">sync</span>
-                : <span className="material-symbols-outlined text-sm text-emerald-400">cloud_done</span>}
-              <span className="hidden md:inline text-xs font-semibold text-emerald-400">
-                {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved" : "Cloud saving ON"}
-              </span>
-            </div>
-          ) : (
-            <div className="relative group">
-              <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg glass-panel border border-orange-500/20 text-orange-400">
-                <span className="material-symbols-outlined text-sm">cloud_off</span>
-                <span className="hidden md:inline text-xs font-semibold">Not saving</span>
-              </button>
-              <div className="absolute top-full right-0 mt-2 w-64 glass-panel rounded-xl p-4 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 border border-outline-variant/20 shadow-xl">
-                <p className="font-bold text-white text-sm mb-1">Your answers are not saved</p>
-                <p className="text-on-surface-variant text-xs mb-3 leading-relaxed">Create a free themcq account to auto-save answers, track retakes, and generate MCQs from your own PDFs.</p>
-                <Link href="/" className="block text-center synapse-gradient text-white font-bold py-2 rounded-lg text-xs hover:-translate-y-0.5 transition-transform">
-                  Create Free Account
-                </Link>
-              </div>
-            </div>
-          )}
-
-          {/* Desktop-only action buttons */}
-          <div className="hidden md:flex items-center gap-2">
+        {/* Title */}
+        <div className="mb-8">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40 mb-2">Shared Study Materials</p>
+          <h1 className="text-3xl sm:text-4xl font-semibold text-foreground mb-3 break-words">
+            {result.lecture_title}
+          </h1>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary" className="gap-1.5 text-xs">
+              <BookOpen className="w-3 h-3" />{totalCount} MCQs
+            </Badge>
             {result.view_count > 0 && (
-              <span className="flex items-center gap-1.5 text-xs text-on-surface-variant mr-1">
-                <span className="material-symbols-outlined text-sm">visibility</span>
+              <Badge variant="outline" className="gap-1.5 text-xs text-muted-foreground">
                 {result.view_count} views
-              </span>
+              </Badge>
             )}
-            <Link
-              href={`/shared/${token}/quiz`}
-              className="flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg glass-panel border border-secondary/30 text-secondary hover:text-white transition-all"
-            >
-              <span className="material-symbols-outlined text-sm">bolt</span>
-              Quiz Mode
-            </Link>
-            <button
-              onClick={handleCopyLink}
-              className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${copied ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "glass-panel text-on-surface-variant hover:text-white"}`}
-            >
-              <span className="material-symbols-outlined text-sm">{copied ? "check" : "share"}</span>
-              {copied ? "Copied!" : "Share"}
-            </button>
-            {isLoggedIn && (
-              <>
-                <button
-                  onClick={() => result && handleToggleShuffle(result.mcqs)}
-                  className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg transition-all ${shuffleMode ? "synapse-gradient text-white" : "glass-panel text-on-surface-variant hover:text-white"}`}
-                >
-                  <span className="material-symbols-outlined text-sm">shuffle</span>
-                  {shuffleMode ? "Sectioned" : "Shuffle"}
-                </button>
-                <Link href="/dashboard" className="flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg glass-panel text-on-surface-variant hover:text-white transition-all">
-                  <span className="material-symbols-outlined text-sm">home</span>
-                  Home
-                </Link>
-              </>
-            )}
-            {!isLoggedIn && (
-              <Link href="/" className="text-sm font-bold px-3 py-1.5 rounded-lg synapse-gradient text-white hover:-translate-y-0.5 transition-transform">
-                Try themcq
-              </Link>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* ── Mobile subbar: page-specific tools, logged-in users only ── */}
-      {isLoggedIn && <div className="md:hidden fixed bottom-[56px] w-full z-[51]">
-        {/* Label strip */}
-        <div className="flex items-center gap-2 px-4 pt-1.5">
-          <div className="h-px flex-1 bg-white/10" />
-          <span className="text-[8px] font-black uppercase tracking-[0.2em] text-on-surface-variant/40">Page tools</span>
-          <div className="h-px flex-1 bg-white/10" />
-        </div>
-        <div className="flex justify-around items-center py-1.5 px-4 bg-slate-800/80 backdrop-blur-xl border-t border-white/8">
-          <Link
-            href={`/shared/${token}/quiz`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/10 border border-secondary/25 text-secondary"
-          >
-            <span className="material-symbols-outlined text-[18px]">bolt</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest">Quiz Mode</span>
-          </Link>
-
-          {isLoggedIn ? (
-            <button
-              onClick={() => result && handleToggleShuffle(result.mcqs)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
-                shuffleMode
-                  ? "bg-white/15 border-white/20 text-white"
-                  : "bg-white/5 border-white/10 text-slate-400"
-              }`}
-            >
-              <span className="material-symbols-outlined text-[18px]">shuffle</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest">{shuffleMode ? "Sectioned" : "Shuffle"}</span>
-            </button>
-          ) : (
-            <Link href={`/auth?redirect=/shared/${token}`} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400">
-              <span className="material-symbols-outlined text-[18px]">person_add</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest">Sign up</span>
-            </Link>
-          )}
-
-          <button
-            onClick={handleCopyLink}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
-              copied
-                ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
-                : "bg-white/5 border-white/10 text-slate-400"
-            }`}
-          >
-            <span className="material-symbols-outlined text-[18px]">{copied ? "check" : "share"}</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest">{copied ? "Copied!" : "Share"}</span>
-          </button>
-        </div>
-      </div>}
-
-      {/* ── Mobile main nav: permanent app navigation ── */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 flex justify-around items-center px-4 bg-slate-950/95 backdrop-blur-xl border-t border-white/5"
-        style={{ paddingTop: "0.75rem", paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}>
-        {isLoggedIn ? (
-          <>
-            <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[22px]">home</span>
-              <span className="text-[10px] uppercase tracking-widest">Home</span>
-            </Link>
-            <Link href="/upload" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[22px]">upload_file</span>
-              <span className="text-[10px] uppercase tracking-widest">Upload</span>
-            </Link>
-            <Link href="/analytics" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[22px]">insights</span>
-              <span className="text-[10px] uppercase tracking-widest">Stats</span>
-            </Link>
-          </>
-        ) : (
-          <>
-            <Link href="/" className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[22px]">home</span>
-              <span className="text-[10px] uppercase tracking-widest">Home</span>
-            </Link>
-            <Link href={`/shared/${token}/quiz`} className="flex flex-col items-center gap-0.5 text-secondary">
-              <span className="material-symbols-outlined text-[22px]">bolt</span>
-              <span className="text-[10px] uppercase tracking-widest">Quiz</span>
-            </Link>
-            <Link href={`/auth?redirect=/shared/${token}`} className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[22px]">person_add</span>
-              <span className="text-[10px] uppercase tracking-widest">Sign up</span>
-            </Link>
-          </>
-        )}
-      </nav>
-
-      <main className="pt-24 px-6 md:px-12 max-w-7xl mx-auto">
-        <div className="pt-6 mb-8">
-          <p className="text-xs font-bold tracking-widest text-secondary uppercase mb-2">Shared Study Materials</p>
-          <h2 className="text-2xl md:text-4xl font-extrabold text-white tracking-tight mb-4 break-words line-clamp-3 max-w-full">{result.lecture_title}</h2>
-          <div className="flex flex-wrap gap-3">
-            <span className="px-3 py-1 bg-surface-container-high rounded-full border border-outline-variant/20 text-xs font-medium text-primary flex items-center gap-1">
-              <span className="material-symbols-outlined text-sm">quiz</span>
-              {totalCount} MCQs
-            </span>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-outline-variant/10 mb-8 gap-8 overflow-x-auto scrollbar-hide">
-          {(["mcqs", "summary", "concepts"] as ActiveTab[]).map((t) => (
+        <div className="flex gap-1 p-1 bg-muted/10 border border-border rounded-xl w-fit mb-6">
+          {(["mcqs", "summary", "concepts"] as const).map(tab => (
             <button
-              key={t}
-              onClick={() => setActiveTab(t)}
-              className={`pb-4 text-sm font-bold border-b-2 whitespace-nowrap px-2 transition-all ${activeTab === t ? "border-primary-container text-white" : "border-transparent text-on-surface-variant hover:text-white"}`}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "px-4 py-1.5 rounded-[9px] text-[13px] font-semibold border-0 cursor-pointer transition-all",
+                activeTab === tab
+                  ? "bg-violet-600/15 text-violet-300"
+                  : "bg-transparent text-muted-foreground hover:text-foreground"
+              )}
             >
-              {t === "mcqs" ? "MCQs" : t === "summary" ? "Summary" : "Key Concepts"}
+              {tab === "mcqs" ? "MCQs" : tab === "summary" ? "Summary" : "Key Concepts"}
             </button>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-20">
+        {/* Content grid */}
+        <div className="grid gap-5 items-start grid-cols-1 lg:grid-cols-[300px_1fr]">
+
           {/* Sidebar */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-            <div className="glass-panel p-8 rounded-xl shadow-[0px_8px_24px_rgba(123,47,255,0.15)] relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-primary-container/10 blur-3xl rounded-full -mr-16 -mt-16" />
-              <div className="relative z-10">
-                <p className="text-secondary font-bold uppercase tracking-[0.2em] text-xs mb-3">Progress</p>
-                <div className="h-3 w-full bg-surface-container-highest rounded-full mb-4 overflow-hidden">
+          <div className="flex flex-col gap-4">
+            <Card>
+              <CardHeader className="pb-0">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/40">Performance</p>
+              </CardHeader>
+              <CardContent className="pt-2">
+                <div className="flex items-baseline gap-2 mb-3.5">
+                  <span className="text-5xl font-extrabold text-foreground leading-none">{score}</span>
+                  <span className="text-lg text-muted-foreground">/ {totalCount}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-3">
                   <div
-                    className="h-full synapse-gradient rounded-full transition-all duration-500"
-                    style={{ width: `${totalCount > 0 ? (answeredCount / totalCount) * 100 : 0}%` }}
+                    className="h-full rounded-full bg-gradient-to-r from-violet-600 to-cyan-400 transition-all duration-700"
+                    style={{ width: `${totalCount > 0 ? (score / totalCount) * 100 : 0}%` }}
                   />
                 </div>
-                <p className="text-sm text-on-surface-variant mb-4">
-                  {answeredCount}/{totalCount} answered
-                </p>
-                {confirmRetake ? (
-                  <div className="bg-error/10 border border-error/30 rounded-xl p-4 mb-3">
-                    <p className="text-sm font-bold text-white mb-1">Clear all answers?</p>
-                    <p className="text-xs text-on-surface-variant mb-3">Your current progress will be lost.</p>
-                    <div className="flex gap-2">
-                      <button onClick={handleReset} className="flex-1 py-2 bg-error text-white font-bold rounded-lg text-sm hover:bg-error/80 transition-colors">
-                        Yes, clear
-                      </button>
-                      <button onClick={() => setConfirmRetake(false)} className="flex-1 py-2 glass-panel text-on-surface-variant font-bold rounded-lg text-sm hover:text-white transition-colors">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
+                {answeredCount > 0 && (
+                  <p className="text-[13px] text-muted-foreground mb-1">{scorePercent}% accuracy — {answeredCount}/{totalCount} answered</p>
+                )}
+                {isLoggedIn && retakeCount > 0 && (
+                  <p className="text-xs text-muted-foreground/40 mb-3.5">{retakeCount} retake{retakeCount !== 1 ? "s" : ""} completed</p>
+                )}
+
+                {/* Cloud save indicator */}
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium mb-3.5",
+                  isLoggedIn
+                    ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400"
+                    : "bg-orange-500/5 border-orange-500/20 text-orange-400"
+                )}>
+                  {isLoggedIn ? (
+                    <>
+                      {saveStatus === "saving"
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Cloud className="w-3.5 h-3.5" />}
+                      {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved to your account" : "Cloud saving on"}
+                    </>
+                  ) : (
+                    <>
+                      <CloudOff className="w-3.5 h-3.5" />
+                      Answers not saved —{" "}
+                      <Link href={`/auth?redirect=/shared/${token}`} className="underline underline-offset-2 hover:text-orange-300 transition-colors">
+                        sign up free
+                      </Link>
+                    </>
+                  )}
+                </div>
 
                 {/* Guest retake gate */}
                 {guestRetakeBlocked ? (
-                  <div className="border border-secondary/30 rounded-xl p-4 bg-secondary/5">
-                    <p className="text-sm font-bold text-white mb-1">Sign up to retake</p>
-                    <p className="text-xs text-on-surface-variant mb-3">Track improvement across unlimited retakes.</p>
-                    <Link href={`/auth?redirect=/shared/${token}`} className="block text-center synapse-gradient text-white font-bold py-2.5 rounded-lg text-sm hover:-translate-y-0.5 transition-transform">
-                      Sign up free
-                    </Link>
+                  <div className="rounded-xl bg-violet-600/10 border border-violet-600/20 p-3.5 mb-3.5">
+                    <p className="text-[13px] font-semibold text-foreground mb-1">Sign up to retake</p>
+                    <p className="text-xs text-muted-foreground mb-3">Track improvement across unlimited retakes.</p>
+                    <Button asChild size="sm" className="w-full">
+                      <Link href={`/auth?redirect=/shared/${token}`}>Sign up free</Link>
+                    </Button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => answeredCount > 0 ? setConfirmRetake(true) : handleReset()}
-                    className="w-full py-3 synapse-gradient text-white font-bold rounded-xl shadow-lg hover:-translate-y-1 transition-transform flex items-center justify-center gap-2"
-                  >
-                    <span className="material-symbols-outlined text-sm">refresh</span>
-                    Retake
-                  </button>
-                )}
-              </div>
-            </div>
+                ) : null}
 
-            {result.key_concepts.length > 0 && (
-              <div className="glass-panel p-6 rounded-xl border border-outline-variant/10">
-                <h4 className="text-sm font-bold text-white mb-4 uppercase tracking-widest">Key Concepts</h4>
-                <div className="flex flex-wrap gap-2">
-                  {result.key_concepts.slice(0, 6).map((concept, i) => (
-                    <span key={i} className="text-xs px-3 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant/10 text-on-surface-variant">
-                      {concept}
-                    </span>
-                  ))}
+                {confirmRetake && (
+                  <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-3.5 mb-3.5">
+                    <p className="text-[13px] font-semibold text-foreground mb-1">Clear all answers?</p>
+                    <p className="text-xs text-muted-foreground mb-3">Your current progress will be lost.</p>
+                    <div className="flex gap-2">
+                      <Button onClick={handleReset} variant="destructive" size="sm" className="flex-1">Yes, retake</Button>
+                      <Button onClick={() => setConfirmRetake(false)} variant="outline" size="sm" className="flex-1">Cancel</Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className={cn("flex gap-2.5", (confirmRetake || guestRetakeBlocked) ? "" : "mt-3.5")}>
+                  {!guestRetakeBlocked && (
+                    <Button
+                      onClick={() => answeredCount > 0 ? setConfirmRetake(true) : handleReset()}
+                      size="sm"
+                      className="flex-1"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />Retake
+                    </Button>
+                  )}
+                  <Button
+                    onClick={handleToggleShuffle}
+                    variant={shuffleMode ? "default" : "outline"}
+                    size="sm"
+                    className="w-10 px-0"
+                    title="Shuffle"
+                  >
+                    <Shuffle className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    onClick={handleCopyLink}
+                    variant="outline"
+                    size="sm"
+                    className="w-10 px-0"
+                    title="Copy share link"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
+                  </Button>
                 </div>
-              </div>
-            )}
+              </CardContent>
+            </Card>
           </div>
 
-          {/* Main Content */}
-          <div className="lg:col-span-8 space-y-6">
+          {/* Main content */}
+          <div className="flex flex-col gap-4">
+
             {activeTab === "mcqs" && (
-              shuffleMode ? (
-                <MCQList mcqs={shuffledMcqs} />
-              ) : Object.entries(grouped).map(([topic, mcqs]) => (
-                <div key={topic}>
-                  <div className="flex items-center gap-3 mb-4">
-                    <span className="text-xl">{getEmoji(topic)}</span>
-                    <h3 className="font-bold text-white">{topic}</h3>
-                    <span className="text-xs text-on-surface-variant">{mcqs.length} questions</span>
-                  </div>
-                  <MCQList mcqs={mcqs as Array<MCQ & { _index: number }>} />
-                </div>
-              ))
+              shuffleMode
+                ? <MCQList mcqs={shuffledMcqs} />
+                : Object.entries(grouped).map(([topic, mcqs]) => (
+                    <div key={topic}>
+                      <div className="flex items-center gap-2.5 mb-3">
+                        <h3 className="text-sm font-bold text-muted-foreground">{topic}</h3>
+                        <Badge variant="outline" className="text-[11px] text-muted-foreground/50">
+                          {mcqs.length} questions
+                        </Badge>
+                      </div>
+                      <MCQList mcqs={mcqs as Array<MCQ & { _index: number }>} />
+                    </div>
+                  ))
             )}
 
             {activeTab === "summary" && (
-              <div className="glass-panel p-8 rounded-xl">
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="material-symbols-outlined text-primary">summarize</span>
-                  <h3 className="font-bold text-white text-xl">Summary</h3>
-                </div>
-                <p className="text-on-surface-variant leading-relaxed">{result.summary}</p>
-              </div>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2.5 text-base font-semibold">
+                    <BookOpen className="w-[17px] h-[17px] text-violet-500" />Summary
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground leading-[1.75]">{result.summary}</p>
+                </CardContent>
+              </Card>
             )}
 
             {activeTab === "concepts" && (
-              <div className="glass-panel p-8 rounded-xl">
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="material-symbols-outlined text-tertiary">lightbulb</span>
-                  <h3 className="font-bold text-white text-xl">High-Yield Key Concepts</h3>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2.5 text-base font-semibold">
+                    <Lightbulb className="w-[17px] h-[17px] text-violet-500" />High-Yield Key Concepts
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-2.5">
+                    {result.key_concepts.map((concept, i) => (
+                      <span key={i} className="px-4 py-1.5 rounded-[10px] text-[13px] bg-violet-600/10 border border-violet-600/20 text-violet-300">
+                        {concept}
+                      </span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Score banner */}
+            {answeredCount === totalCount && totalCount > 0 && activeTab === "mcqs" && (
+              <div className={cn(
+                "bg-muted/5 border border-border border-l-[3px] rounded-2xl px-5 py-4 flex items-center justify-between gap-4 flex-wrap",
+                scorePercent >= 70 ? "border-l-emerald-400" : "border-l-orange-400"
+              )}>
+                <div>
+                  <p className="font-bold text-[15px] text-foreground mb-1">
+                    {scorePercent >= 70 ? "Great work!" : "Keep studying!"} — {score}/{totalCount} ({scorePercent}%)
+                  </p>
+                  <p className="text-[13px] text-muted-foreground">
+                    {scorePercent >= 70
+                      ? "You're well-prepared for this topic."
+                      : "Review the explanations for questions you missed."}
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  {result.key_concepts.map((concept, i) => (
-                    <span key={i} className="px-4 py-2 rounded-full bg-tertiary/10 border border-tertiary/20 text-tertiary text-sm font-medium">
-                      {concept}
-                    </span>
-                  ))}
-                </div>
+                <Button onClick={() => setConfirmRetake(true)} size="sm" className="flex-shrink-0">
+                  Retake
+                </Button>
               </div>
             )}
 
-            {answeredCount === totalCount && totalCount > 0 && activeTab === "mcqs" && (
-              <div className="rounded-xl p-6 flex items-center justify-between glass-panel border-l-4 border-primary-container/30">
-                <p className="font-bold text-white text-lg">All questions answered!</p>
-                <button onClick={() => setConfirmRetake(true)} className="synapse-gradient text-white font-bold px-6 py-2 rounded-xl text-sm hover:-translate-y-0.5 transition-transform">
-                  Retake
-                </button>
+            {/* Guest CTA */}
+            {!isLoggedIn && (
+              <div className="bg-muted/5 border border-border rounded-2xl px-5 py-4 flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="font-bold text-[14px] text-foreground mb-0.5">Generate MCQs from your own notes</p>
+                  <p className="text-[13px] text-muted-foreground">Upload any lecture PDF and get MCQs instantly — free.</p>
+                </div>
+                <Button asChild size="sm" className="flex-shrink-0">
+                  <Link href="/">Try themcq</Link>
+                </Button>
               </div>
             )}
           </div>
         </div>
       </main>
-
-      {/* Desktop footer CTA for guests */}
-      {!isLoggedIn && (
-        <div className="hidden md:flex fixed bottom-0 w-full z-40 justify-center py-3 bg-slate-950/60 backdrop-blur-md border-t border-white/5">
-          <Link href="/" className="flex items-center gap-2 text-xs text-on-surface-variant hover:text-white transition-colors">
-            <span className="font-bold bg-gradient-to-r from-[#7B2FFF] to-[#00D2FD] bg-clip-text text-transparent">themcq</span>
-            <span>— Upload your own lecture and generate MCQs instantly</span>
-            <span className="material-symbols-outlined text-sm">arrow_forward</span>
-          </Link>
-        </div>
-      )}
     </div>
   );
 }
+

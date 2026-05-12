@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { isAuthenticated } from "@/lib/auth";
+import { getPerformanceContext } from "@/lib/performance-context";
 import {
   coachListConversations,
   coachCreateConversation,
@@ -218,6 +219,8 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks which conversations have already received the performance context prefix.
+  const sentContextForConv = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -471,7 +474,17 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     setMessages(prev => [...prev, optimisticUser, thinkingMsg]);
 
     try {
-      const res = await coachSendMessage(convId!, text, imgData ?? undefined, imgMime ?? undefined, quizResult, selectedModel);
+      // Prepend performance context once per conversation so the coach is
+      // aware of the student's right/wrong history from the first message.
+      let messageToSend = text;
+      if (!sentContextForConv.current.has(convId!)) {
+        const perfCtx = await getPerformanceContext();
+        if (perfCtx) {
+          messageToSend = `${perfCtx}\n\n${text}`;
+          sentContextForConv.current.add(convId!);
+        }
+      }
+      const res = await coachSendMessage(convId!, messageToSend, imgData ?? undefined, imgMime ?? undefined, quizResult, selectedModel);
       const { user_message, assistant_message } = res.data;
       setMessages(prev =>
         prev.filter(m => m.id !== optimisticUser.id && m.id !== thinkingId)

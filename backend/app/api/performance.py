@@ -27,6 +27,7 @@ from app.models.performance import (
     LearningPattern,
     StudentAiInsight,
     FsrsCard,
+    DailyTestCache,
 )
 from app.schemas.performance import (
     StartSessionRequest,
@@ -2997,6 +2998,109 @@ def get_daily_mission(
         "streak_days": streak,
         "completed": answered_today >= goal,
         "fsrs_due_count": fsrs_due,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# DAILY TEST  (AI-curated 10-question test, cached 24 h per student)
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/students/me/daily-test")
+def get_daily_test(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns today's AI-curated daily test.
+    On first call each day, picks 10 questions from the recommended topic
+    (via _build_next_best_action) and caches the selection.
+    Subsequent calls the same day return the same set instantly.
+    """
+    from datetime import date as _date
+    today = datetime.now(timezone.utc).date()
+
+    cache = db.query(DailyTestCache).filter(
+        DailyTestCache.student_id == current_user.id,
+        DailyTestCache.date == today,
+    ).first()
+
+    if not cache:
+        action = _build_next_best_action(current_user.id, db)
+        topic: str = action.get("topic") or ""
+
+        lecture_ids_q = db.query(Lecture.id).filter(Lecture.user_id == current_user.id).subquery()
+
+        questions: list[McqQuestion] = []
+        if topic:
+            questions = (
+                db.query(McqQuestion)
+                .filter(
+                    McqQuestion.document_id.in_(lecture_ids_q),
+                    func.lower(McqQuestion.topic).contains(topic.lower()),
+                )
+                .order_by(func.random())
+                .limit(10)
+                .all()
+            )
+
+        # Fallback: any questions from student's lectures
+        if len(questions) < 5:
+            exclude_ids = [q.id for q in questions]
+            extra = (
+                db.query(McqQuestion)
+                .filter(
+                    McqQuestion.document_id.in_(lecture_ids_q),
+                    McqQuestion.id.notin_(exclude_ids),
+                )
+                .order_by(func.random())
+                .limit(10 - len(questions))
+                .all()
+            )
+            questions = questions + extra
+
+        if not topic:
+            topic = questions[0].topic if questions else "General Review"
+
+        cache = DailyTestCache(
+            student_id=current_user.id,
+            date=today,
+            topic=topic,
+            question_ids=[q.id for q in questions],
+        )
+        db.add(cache)
+        db.commit()
+        db.refresh(cache)
+
+    questions = (
+        db.query(McqQuestion)
+        .filter(McqQuestion.id.in_(cache.question_ids))
+        .all()
+    )
+    # Preserve the original selection order
+    order_map = {qid: i for i, qid in enumerate(cache.question_ids)}
+    questions.sort(key=lambda q: order_map.get(q.id, 999))
+
+    return {
+        "topic": cache.topic,
+        "question_count": len(questions),
+        "generated_at": cache.generated_at.isoformat(),
+        "date": str(cache.date),
+        "has_questions": len(questions) > 0,
+        "questions": [
+            {
+                "id": q.id,
+                "topic": q.topic,
+                "question_text": q.question_text,
+                "option_a": q.option_a,
+                "option_b": q.option_b,
+                "option_c": q.option_c,
+                "option_d": q.option_d,
+                "correct_answer": q.correct_answer,
+                "explanation": q.explanation,
+                "difficulty_type": q.difficulty_type,
+            }
+            for q in questions
+        ],
     }
 
 

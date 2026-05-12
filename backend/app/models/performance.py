@@ -246,6 +246,22 @@ class StudentAiInsight(Base):
     is_current                      = Column(Boolean, default=True, server_default="1", nullable=False)
 
 
+class DailyTestCache(Base):
+    """One AI-curated daily test per student per calendar date (24-hour cache)."""
+    __tablename__ = "daily_test_cache"
+
+    id           = Column(String(36), primary_key=True, default=_uuid)
+    student_id   = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    date         = Column(Date, nullable=False)
+    topic        = Column(String(255), nullable=False)
+    question_ids = Column(JSON, nullable=False)   # list[str] UUIDs
+    generated_at = Column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "date", name="uq_daily_test_student_date"),
+    )
+
+
 class FsrsCard(Base):
     """
     FSRS spaced-repetition card state for one student × one question.

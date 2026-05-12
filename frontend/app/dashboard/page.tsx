@@ -2,19 +2,16 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getDashboard, getLectures, getMySharedSessions, getNextBestAction, getDailyMission, DailyMission } from "@/lib/api";
-import { isAuthenticated, logout } from "@/lib/auth";
+import { getDashboard, getLectures, getMySharedSessions, getNextBestAction, getDailyMission, DailyMission, getFlashcardStats, FlashcardStats, getDueFlashcards, FlashcardOut, getDailyTest, DailyTestData } from "@/lib/api";
+import { isAuthenticated } from "@/lib/auth";
 import { prefetch } from "@/lib/prefetch-cache";
 import { AppHeader } from "@/components/app-header";
-import { StepNav } from "@/components/step-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
-  Upload,
   BookOpen,
-  TrendingUp,
   Target,
   Bot,
   ArrowRight,
@@ -36,6 +33,7 @@ interface Lecture {
   created_at: string;
   is_processed: boolean;
   has_essays: boolean;
+  pending_job_id?: string | null;
 }
 
 interface SharedSession {
@@ -81,6 +79,11 @@ export default function DashboardPage() {
   } | null>(null);
   const [userName, setUserName] = useState("Student");
   const [dailyMission, setDailyMission] = useState<DailyMission | null>(null);
+  const [dailyTest, setDailyTest] = useState<DailyTestData | null>(null);
+  const [loadingDailyTest, setLoadingDailyTest] = useState(true);
+  const [flashcardStats, setFlashcardStats] = useState<FlashcardStats | null>(null);
+  const [loadingFlashcards, setLoadingFlashcards] = useState(true);
+  const [previewFlashcard, setPreviewFlashcard] = useState<FlashcardOut | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -116,6 +119,20 @@ export default function DashboardPage() {
 
     (prefetch.dailyMission ?? getDailyMission())
       .then((res) => { if (res) setDailyMission(res.data); })
+      .catch(() => {});
+
+    getDailyTest()
+      .then((res) => { if (res) setDailyTest(res.data); })
+      .catch(() => {})
+      .finally(() => setLoadingDailyTest(false));
+
+    getFlashcardStats()
+      .then((res) => { if (res) setFlashcardStats(res.data); })
+      .catch(() => {})
+      .finally(() => setLoadingFlashcards(false));
+
+    getDueFlashcards(undefined, 1)
+      .then((res) => { if (res?.data?.cards?.length) setPreviewFlashcard(res.data.cards[0]); })
       .catch(() => {});
   };
 
@@ -176,57 +193,204 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Daily Mission */}
-            <Card className={dailyMission?.completed ? "border-emerald-500/40" : ""}>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
+            {/* ── Daily Test ── */}
+            <Card className="overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-primary to-purple-500" />
+              <CardContent className="p-5">
+
+                {/* header row */}
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-primary" />
-                    <p className="text-sm font-bold text-foreground">Daily Mission</p>
+                    <Brain className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-bold uppercase tracking-wide text-primary">
+                      Daily Test
+                    </span>
                   </div>
-                  {dailyMission && (
-                    <div className="flex items-center gap-1.5">
-                      <Flame className="h-3.5 w-3.5 text-orange-500" />
-                      <span className="text-sm font-bold text-foreground">{dailyMission.streak_days}d</span>
+                  <div className="flex items-center gap-2">
+                    {dailyMission && (
+                      <div className="flex items-center gap-1">
+                        <Flame className="h-3.5 w-3.5 text-orange-500" />
+                        <span className="text-xs font-bold text-foreground">{dailyMission.streak_days}d</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* loading skeleton */}
+                {loadingDailyTest ? (
+                  <div className="animate-pulse space-y-2.5">
+                    <div className="h-3 bg-muted rounded w-2/3" />
+                    <div className="h-3 bg-muted rounded w-full" />
+                    <div className="h-3 bg-muted rounded w-4/5" />
+                    <div className="h-2 bg-muted rounded w-1/2 mt-1" />
+                    {[1,2,3,4].map(i => (
+                      <div key={i} className="flex items-center gap-2 mt-1">
+                        <div className="h-6 w-6 bg-muted rounded-md flex-shrink-0" />
+                        <div className="h-2 bg-muted rounded flex-1" />
+                      </div>
+                    ))}
+                  </div>
+
+                ) : !dailyTest || !dailyTest.has_questions ? (
+                  <div className="flex flex-col items-center text-center gap-2 py-4">
+                    <BookOpen className="h-9 w-9 text-muted-foreground" />
+                    <p className="text-sm font-semibold text-foreground">No test yet</p>
+                    <p className="text-xs text-muted-foreground">Upload and process a lecture to get your daily test.</p>
+                    <Button variant="outline" size="sm" className="mt-1 w-full" asChild>
+                      <Link href="/upload" prefetch={false}>Upload Lecture</Link>
+                    </Button>
+                  </div>
+
+                ) : (
+                  <>
+                    {/* Topic + AI badge */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge variant="outline" className="text-[10px] px-2">
+                        <Zap className="h-2.5 w-2.5 mr-1 text-primary" />
+                        AI-picked · refreshes daily
+                      </Badge>
                     </div>
+
+                    {/* Question preview */}
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 mb-3">
+                      <p className="text-[11px] font-semibold text-primary uppercase tracking-wide mb-1.5">
+                        {dailyTest.questions[0].topic}
+                      </p>
+                      <p className="text-sm font-medium text-foreground leading-snug line-clamp-3">
+                        {dailyTest.questions[0].question_text}
+                      </p>
+                    </div>
+
+                    {/* Option preview — blurred to tease */}
+                    <div className="space-y-1.5 mb-4">
+                      {(["A","B","C","D"] as const).map((letter) => {
+                        const key = `option_${letter.toLowerCase()}` as "option_a"|"option_b"|"option_c"|"option_d";
+                        return (
+                          <div
+                            key={letter}
+                            className="flex items-center gap-2.5 px-3 py-2 rounded-xl border border-border bg-card"
+                          >
+                            <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold bg-muted text-muted-foreground flex-shrink-0">
+                              {letter}
+                            </span>
+                            <span className="text-xs text-foreground/80 blur-sm select-none flex-1 line-clamp-1">
+                              {dailyTest.questions[0][key]}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Progress bar if mission in progress */}
+                    {dailyMission && dailyMission.answered_today > 0 && (
+                      <div className="mb-3">
+                        <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                          <span>{dailyMission.answered_today} answered today</span>
+                          <span className={dailyMission.accuracy_today >= 70 ? "text-emerald-500" : "text-orange-500"}>
+                            {dailyMission.accuracy_today}% accuracy
+                          </span>
+                        </div>
+                        <Progress
+                          value={Math.min(100, (dailyMission.answered_today / dailyMission.goal) * 100)}
+                          className={`h-1.5 ${dailyMission.completed ? "[&>div]:bg-emerald-500" : ""}`}
+                        />
+                      </div>
+                    )}
+
+                    <Button size="sm" className="w-full" asChild>
+                      <Link href="/daily-test" prefetch={false}>
+                        <Target className="h-3.5 w-3.5 mr-1.5" />
+                        Start Your Daily Test
+                        <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                      </Link>
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ── Flashcard of the Day ── */}
+            <Card className="overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-primary to-purple-500" />
+              <CardContent className="p-5">
+
+                {/* header row */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-bold uppercase tracking-wide text-primary">
+                      Flashcard of the Day
+                    </span>
+                  </div>
+                  {flashcardStats && flashcardStats.cards_due_today > 0 && (
+                    <Badge variant="secondary" className="text-[10px] px-2.5 py-0.5 font-bold">
+                      {flashcardStats.cards_due_today} due
+                    </Badge>
                   )}
                 </div>
 
-                {!dailyMission ? (
-                  <div className="animate-pulse space-y-2">
-                    <div className="h-2 bg-muted rounded w-3/4" />
-                    <div className="h-2 bg-muted rounded w-1/2" />
+                {/* loading skeleton */}
+                {loadingFlashcards ? (
+                  <div className="animate-pulse space-y-2.5">
+                    <div className="h-3 bg-muted rounded w-full" />
+                    <div className="h-3 bg-muted rounded w-3/4" />
+                    <div className="h-16 bg-muted rounded-xl mt-2" />
                   </div>
+
+                ) : !flashcardStats || flashcardStats.total_cards_seen === 0 ? (
+                  /* no flashcards generated yet */
+                  <div className="flex flex-col items-center text-center gap-2 py-4">
+                    <BookOpen className="h-9 w-9 text-muted-foreground" />
+                    <p className="text-sm font-semibold text-foreground">No flashcards yet</p>
+                    <p className="text-xs text-muted-foreground">Generate cards after uploading a lecture.</p>
+                    <Button variant="outline" size="sm" className="mt-1 w-full" asChild>
+                      <Link href="/lectures" prefetch={false}>Go to Lectures</Link>
+                    </Button>
+                  </div>
+
+                ) : flashcardStats.cards_due_today === 0 ? (
+                  /* all done today */
+                  <div className="flex flex-col items-center text-center gap-2 py-4">
+                    <CheckCircle2 className="h-9 w-9 text-emerald-500" />
+                    <p className="text-sm font-semibold text-foreground">All done!</p>
+                    <p className="text-xs text-muted-foreground">No flashcards due today — great work.</p>
+                  </div>
+
                 ) : (
                   <>
-                    <div className="flex items-end justify-between mb-2">
-                      <span className="text-3xl font-bold text-foreground">{dailyMission.answered_today}</span>
-                      <span className="text-sm text-muted-foreground mb-1">/ {dailyMission.goal} questions</span>
-                    </div>
-                    <Progress
-                      value={Math.min(100, (dailyMission.answered_today / dailyMission.goal) * 100)}
-                      className={`h-2 mb-3 ${dailyMission.completed ? "[&>div]:bg-emerald-500" : ""}`}
-                    />
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>
-                        {dailyMission.completed
-                          ? "Mission complete!"
-                          : `${dailyMission.goal - dailyMission.answered_today} left`}
-                      </span>
-                      {dailyMission.answered_today > 0 && (
-                        <span className={dailyMission.accuracy_today >= 70 ? "text-emerald-500" : "text-orange-500"}>
-                          {dailyMission.accuracy_today}% accuracy
-                        </span>
+                    {/* flip-card style preview */}
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 mb-3 min-h-[90px] flex flex-col justify-between">
+                      {previewFlashcard ? (
+                        <>
+                          <p className="text-[11px] font-semibold text-primary uppercase tracking-wide mb-1.5">
+                            {previewFlashcard.topic}
+                          </p>
+                          <p className="text-sm font-medium text-foreground leading-snug line-clamp-3">
+                            {previewFlashcard.front}
+                          </p>
+                          <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            <span>Tap to reveal answer</span>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center self-center">
+                          {flashcardStats.cards_due_today} card{flashcardStats.cards_due_today !== 1 ? "s" : ""} ready to review
+                        </p>
                       )}
                     </div>
-                    {dailyMission.fsrs_due_count > 0 && (
-                      <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
-                        <Brain className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-                        <p className="text-xs text-foreground">
-                          <span className="font-bold text-primary">{dailyMission.fsrs_due_count}</span> questions due for spaced review
-                        </p>
-                      </div>
-                    )}
+
+                    <p className="text-xs text-muted-foreground mb-3">
+                      {flashcardStats.cards_mastered} mastered · {flashcardStats.total_reviews} reviews
+                    </p>
+
+                    <Button size="sm" className="w-full" asChild>
+                      <Link href="/flashcards" prefetch={false}>
+                        <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                        Review Flashcards
+                        <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                      </Link>
+                    </Button>
                   </>
                 )}
               </CardContent>
@@ -428,7 +592,11 @@ export default function DashboardPage() {
                         )
                         .slice(0, 5)
                         .map((lecture) => {
-                          const href = lecture.is_processed ? `/results/${lecture.id}` : `/upload`;
+                          const href = lecture.is_processed
+                            ? `/results/${lecture.id}`
+                            : lecture.pending_job_id
+                            ? `/upload/${lecture.pending_job_id}`
+                            : `/upload`;
                           return (
                             <Link
                               key={lecture.id}

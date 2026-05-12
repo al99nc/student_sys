@@ -23,14 +23,65 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+UTILITY_MODEL = "llama-3.1-8b-instant"
+
+
+# ─────────────────────────────────────────────────────────────────
+# SUBJECT DETECTION
+# ─────────────────────────────────────────────────────────────────
+SUBJECT_DETECTION_SYSTEM = "You are a medical text classifier. Return only valid JSON, no markdown."
+
+SUBJECT_DETECTION_USER = """\
+Read this medical lecture text and return ONLY this JSON with no extra text:
+{
+  "subject": "one of: pharmacology | cardiology | neurology | anatomy | physiology | biochemistry | pathology | microbiology | immunology | surgery | pediatrics | obstetrics | psychiatry | other",
+  "subtopics": ["list", "of", "3-6", "main", "subtopics", "covered"],
+  "key_facts": ["5-8 critical facts from this text that must be accurate in any MCQ about it"],
+  "common_misconceptions": ["3-5 common student errors related to this specific content"]
+}
+
+Text:
+{text_sample}
+"""
+
+# ─────────────────────────────────────────────────────────────────
+# MCQ VALIDATOR
+# ─────────────────────────────────────────────────────────────────
+VALIDATOR_SYSTEM = "You are a medical MCQ quality auditor. Return only valid JSON, no markdown."
+
+VALIDATOR_USER = """\
+Review these MCQs and flag problems. Return ONLY this JSON:
+{
+  "flagged": [
+    {
+      "index": 0,
+      "reason": "distractor B could be argued as correct because...",
+      "fix": "change B to say X instead, which is actually false"
+    }
+  ]
+}
+
+Flag a question if ANY of these are true:
+1. A wrong option could be argued as correct by a knowledgeable student
+2. Two questions test the exact same concept (flag the second one, reason: "duplicate of index N")
+3. The question stem gives away the answer
+4. A clinical vignette is solvable in one obvious step with no reasoning needed
+5. The question uses "all the following are FALSE EXCEPT" but has MORE THAN ONE true option among A/B/C/D — flag as: "false_except_multiple_true"
+6. The question uses "all the following are FALSE EXCEPT" but ALL options are false — flag as: "false_except_no_true"
+
+If no problems found, return: {"flagged": []}
+
+MCQs:
+{mcqs_json}
+"""
 
 
 # ─────────────────────────────────────────────────────────────────
 # CHUNKING CONFIGURATION
 # ─────────────────────────────────────────────────────────────────
-CHUNK_SIZE = 2_000
-CHUNK_OVERLAP = 150
-MAX_CHUNKS = 20
+CHUNK_SIZE    = 5500
+CHUNK_OVERLAP = 400
+MAX_CHUNKS    = 8
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -75,7 +126,7 @@ SPEED_CONFIG = {
         "frequency_penalty": 0.3,
     },
     "exam": {
-        "max_tokens": 4_000,
+        "max_tokens": 3_400,   # 7500 - 2000 (chunk) - 2100 (prompt) = 3400 safe ceiling
         "temperature": 0.35,
         "presence_penalty": 0.3,
         "frequency_penalty": 0.3,
@@ -203,6 +254,132 @@ def _parse_groq_retry_after(error_msg: str) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────
+# SUBJECT DETECTION + DYNAMIC FACTS + VALIDATOR
+# ─────────────────────────────────────────────────────────────────
+
+async def detect_subject(
+    text_sample: str,
+    api_key: str | None = None,
+) -> dict | None:
+    resolved_key = api_key or settings.AI_API_KEY
+    resolved_model = UTILITY_MODEL
+    user_msg = SUBJECT_DETECTION_USER.replace("{text_sample}", text_sample)
+    headers = {
+        "Authorization": f"Bearer {resolved_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": resolved_model,
+        "messages": [
+            {"role": "system", "content": SUBJECT_DETECTION_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 800,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(GROQ_URL, headers=headers, json=payload)
+            resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"].get("content") or ""
+        cleaned = _THINKING_TAG_PATTERN.sub("", raw).strip()
+        cleaned = re.sub(r"```(?:json)?", "", cleaned).strip().rstrip("```").strip()
+        return json.loads(cleaned)
+    except Exception as e:
+        logger.warning(f"Subject detection failed: {e} — continuing without it")
+        return None
+
+
+def build_ai_title(subject_data: dict | None) -> str:
+    if not subject_data:
+        return ""
+    subject = subject_data.get("subject", "").replace("_", " ").title()
+    subtopics = subject_data.get("subtopics", [])
+    if subtopics:
+        topics_str = ", ".join(str(t).strip() for t in subtopics[:3])
+        return f"{subject}: {topics_str}" if subject else topics_str
+    return subject
+
+
+def build_dynamic_facts_block(subject_data: dict | None) -> str:
+    if not subject_data:
+        return (
+            "=== CRITICAL FACTUAL ACCURACY ===\n"
+            "All facts must come exclusively from the lecture text.\n"
+            "If uncertain about a fact, skip the question."
+        )
+    lines = ["=== CRITICAL FACTUAL ACCURACY ==="]
+    lines.append(f"Subject: {subject_data.get('subject', 'general medicine')}")
+    lines.append("Key facts that MUST be accurate in every question:")
+    for fact in subject_data.get("key_facts", []):
+        lines.append(f"  ✓ {fact}")
+    lines.append("Common misconceptions to AVOID introducing as correct answers:")
+    for err in subject_data.get("common_misconceptions", []):
+        lines.append(f"  ✗ {err}")
+    lines.append("If uncertain about any fact from this subject, skip the question.")
+    return "\n".join(lines)
+
+
+async def validate_and_clean(
+    mcqs: list[dict],
+    api_key: str | None = None,
+) -> list[dict]:
+    if len(mcqs) < 5:
+        return mcqs
+    resolved_key = api_key or settings.AI_API_KEY
+    resolved_model = UTILITY_MODEL
+    try:
+        MAX_VALIDATE = 20
+        sample = mcqs[:MAX_VALIDATE]
+        mcqs_json = json.dumps(
+            [{"index": i, **q} for i, q in enumerate(sample)],
+            ensure_ascii=False,
+        )
+        user_msg = VALIDATOR_USER.replace("{mcqs_json}", mcqs_json)
+        headers = {
+            "Authorization": f"Bearer {resolved_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": resolved_model,
+            "messages": [
+                {"role": "system", "content": VALIDATOR_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2_000,
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(GROQ_URL, headers=headers, json=payload)
+            resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"].get("content") or ""
+        cleaned = _THINKING_TAG_PATTERN.sub("", raw).strip()
+        cleaned = re.sub(r"```(?:json)?", "", cleaned).strip().rstrip("```").strip()
+        result = json.loads(cleaned)
+        flagged = result.get("flagged", [])
+        duplicate_indices: set[int] = set()
+        for item in flagged:
+            idx = item.get("index")
+            reason = item.get("reason", "")
+            if idx is None or not isinstance(idx, int) or idx >= len(mcqs):
+                continue
+            if "duplicate" in reason.lower():
+                duplicate_indices.add(idx)
+                logger.warning(f"[validator] Removing duplicate MCQ at index {idx}: {reason}")
+            elif "false_except_multiple_true" in reason.lower() or "false_except_no_true" in reason.lower():
+                duplicate_indices.add(idx)
+                logger.warning(f"[validator] Removing broken FALSE EXCEPT at index {idx}: {reason}")
+            else:
+                logger.warning(f"[validator] Quality issue at index {idx}: {reason}")
+        if duplicate_indices:
+            mcqs = [q for i, q in enumerate(mcqs) if i not in duplicate_indices]
+        return mcqs
+    except Exception as e:
+        logger.warning(f"MCQ validation failed: {e} — returning original MCQs")
+        return mcqs
+
+
+# ─────────────────────────────────────────────────────────────────
 # SINGLE CHUNK API CALL
 # ─────────────────────────────────────────────────────────────────
 
@@ -217,6 +394,7 @@ async def _call_single_chunk(
     model: str | None = None,
     custom_prompts: tuple[str, str] | None = None,
     focus_instruction: str = "",
+    dynamic_facts_block: str = "",
 ) -> tuple[dict, float]:
     if custom_prompts is not None:
         system_prompt, user_prompt_template = custom_prompts
@@ -224,6 +402,9 @@ async def _call_single_chunk(
     else:
         system_prompt, user_prompt_template = _get_prompts(mode)
         user_prompt = user_prompt_template.format(text=text)
+
+    if "{dynamic_facts_block}" in system_prompt:
+        system_prompt = system_prompt.replace("{dynamic_facts_block}", dynamic_facts_block)
 
     if focus_instruction and focus_instruction.strip():
         focus_block = (
@@ -488,6 +669,7 @@ async def _call_chunk_with_rotation(
     model: str,
     custom_prompts: tuple[str, str] | None = None,
     focus_instruction: str = "",
+    dynamic_facts_block: str = "",
 ) -> tuple[dict, float]:
     """Call a single chunk, rotating keys on TPM, daily-limit, and invalid-key errors.
 
@@ -513,6 +695,7 @@ async def _call_chunk_with_rotation(
             return await _call_single_chunk(
                 text, mode, chunk_index, total_chunks, api_key=key, model=model,
                 custom_prompts=custom_prompts, focus_instruction=focus_instruction,
+                dynamic_facts_block=dynamic_facts_block,
             )
         except RuntimeError as e:
             err_str = str(e)
@@ -558,6 +741,7 @@ async def _call_chunk_with_rotation(
                 return await _call_single_chunk(
                     text, mode, chunk_index, total_chunks, api_key=key, model=model,
                     custom_prompts=custom_prompts, focus_instruction=focus_instruction,
+                    dynamic_facts_block=dynamic_facts_block,
                 )
             except RuntimeError as e:
                 last_error = e
@@ -600,6 +784,13 @@ async def generate_study_content(
     if not available_keys:
         logger.warning("No API keys configured — returning mock data")
         return _get_mock_response()
+
+    # Step 1: detect subject from first 3000 chars for dynamic factual accuracy injection
+    subject_data = await detect_subject(
+        text[:3000],
+        api_key=available_keys[0],
+    )
+    facts_block = build_dynamic_facts_block(subject_data)
 
     # Build custom prompts once if context is provided, then use mode="custom"
     _custom_prompts: tuple[str, str] | None = None
@@ -668,6 +859,7 @@ async def generate_study_content(
                     available_keys, chunks[i], mode, i, total_chunks,
                     model=ai_model, custom_prompts=_custom_prompts,
                     focus_instruction=focus_instruction,
+                    dynamic_facts_block=facts_block,
                 )
                 for i in batch_indices
             ]
@@ -691,6 +883,7 @@ async def generate_study_content(
             )
 
         valid_mcqs = _fix_explanation_prefix(valid_mcqs)
+        valid_mcqs = await validate_and_clean(valid_mcqs)
         _warn_answer_distribution(valid_mcqs, mode)
         if mode in ("exam", "harder"):
             _warn_exam_format_distribution(valid_mcqs)
@@ -700,6 +893,7 @@ async def generate_study_content(
             "mode": mode,
             "ai_model": ai_model,
             "premium_tier": is_premium,
+            "ai_title": build_ai_title(subject_data),
             "total_generated": len(raw_mcqs),
             "total_after_dedup": len(deduped),
             "total_valid": len(valid_mcqs),

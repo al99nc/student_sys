@@ -114,6 +114,7 @@ class Result(Base):
     view_count = Column(Integer, default=0, server_default="0")
     custom_context = Column(Text, nullable=True)
     essays = Column(Text, nullable=True)
+    mode = Column(String(20), nullable=True)
 
     lecture = relationship("Lecture", back_populates="result")
 
@@ -135,6 +136,19 @@ class QuizSession(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "lecture_id", name="uq_user_lecture_session"),
     )
+
+
+class MagicLinkToken(Base):
+    """Passwordless auth token — raw token sent via email, only hash stored here."""
+
+    __tablename__ = "magic_link_tokens"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    email = Column(String, nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Integer, default=0, server_default="0", nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class ProcessingJob(Base):

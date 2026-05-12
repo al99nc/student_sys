@@ -127,6 +127,9 @@ export const signup = (email: string, password: string) =>
 export const login = (email: string, password: string) =>
   api.post("/auth/login", { email, password });
 
+export const requestMagicLink = (email: string) =>
+  api.post<{ message: string; email: string }>("/auth/request-link", { email });
+
 export const getMe = () => api.get<UserOut>("/auth/me");
 
 export interface BillingConfig {
@@ -503,6 +506,55 @@ export interface DailyMission {
 
 export const getDailyMission = () =>
   api.get<DailyMission>("/api/v1/performance/students/me/daily-mission");
+
+export interface DailyTestQuestion {
+  id: string;
+  topic: string;
+  question_text: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_answer: string;
+  explanation: string;
+  difficulty_type: string;
+}
+
+export interface DailyTestData {
+  topic: string;
+  question_count: number;
+  generated_at: string;
+  date: string;
+  has_questions: boolean;
+  questions: DailyTestQuestion[];
+}
+
+export const getDailyTest = () =>
+  api.get<DailyTestData>("/api/v1/performance/students/me/daily-test");
+
+export interface NextSessionDueQuestion {
+  id: string;
+  question_text: string;
+  topic: string;
+  days_overdue: number;
+  lapses: number;
+  state: number;
+}
+
+export interface NextSessionTopic {
+  topic: string;
+  due_count: number;
+  priority: "critical" | "high" | "normal";
+  questions: NextSessionDueQuestion[];
+}
+
+export interface NextSessionResponse {
+  due_count: number;
+  topics: NextSessionTopic[];
+}
+
+export const getNextSession = () =>
+  api.get<NextSessionResponse>("/api/v1/performance/next-session");
 
 export interface XrayQuestion {
   id: string;

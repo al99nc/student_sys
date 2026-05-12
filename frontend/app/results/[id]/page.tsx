@@ -9,6 +9,7 @@ import {
   startPerformanceSession, submitPerformanceAnswer, completePerformanceSession,
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { invalidatePerformanceContext } from "@/lib/performance-context";
 import { api } from "@/lib/api";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
@@ -17,9 +18,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   Share2, Shuffle, RefreshCw, Check, X,
-  Zap, BookOpen, Lightbulb,
+  Zap, BookOpen, Lightbulb, ChevronRight,
   Brain, AlertTriangle, Calendar,
-  CheckCircle2, XCircle, Loader2, Clock, Timer, Power,
+  CheckCircle2, XCircle, Loader2, Clock, Timer, Power, Pause, Play,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -35,6 +36,8 @@ interface MCQ {
 interface Results {
   id: number;
   lecture_id: number;
+  lecture_title?: string;
+  mode?: string;
   summary: string;
   key_concepts: string[];
   mcqs: MCQ[];
@@ -153,10 +156,23 @@ export default function ResultsPage() {
   const [saveStatus, setSaveStatus]     = useState<"idle" | "saving" | "saved">("idle");
   const [retakeCount, setRetakeCount]   = useState(0);
 
+  const [showButtonsHint, setShowButtonsHint] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && !localStorage.getItem("themcq_buttons_hint_seen")) {
+      const t = setTimeout(() => setShowButtonsHint(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, []);
+  const dismissHint = () => {
+    setShowButtonsHint(false);
+    localStorage.setItem("themcq_buttons_hint_seen", "1");
+  };
+
   // Timer widget state
   const [timerOpen, setTimerOpen] = useState(false);
   const [timerMinutes, setTimerMinutes] = useState(25);
   const [timerActive, setTimerActive] = useState(false);
+  const [timerPaused, setTimerPaused] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState(0);
   const [keepAwake, setKeepAwake] = useState(false);
   const wakeLockRef = useRef<any>(null);
@@ -192,6 +208,7 @@ export default function ResultsPage() {
         setTimerRemaining(prev => {
           if (prev <= 1) {
             setTimerActive(false);
+            setTimerPaused(false);
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             return 0;
           }
@@ -469,6 +486,7 @@ export default function ResultsPage() {
           if (Object.keys(updated).length === results.mcqs.length && perfSessionId.current) {
             await completePerformanceSession(perfSessionId.current);
             perfSessionId.current = null;
+            invalidatePerformanceContext();
           }
         } catch {}
       })();
@@ -515,10 +533,24 @@ export default function ResultsPage() {
   const handleStartTimer = () => {
     setTimerRemaining(timerMinutes * 60);
     setTimerActive(true);
+    setTimerPaused(false);
+  };
+
+  const handlePauseTimer = () => {
+    setTimerActive(false);
+    setTimerPaused(true);
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+  };
+
+  const handleResumeTimer = () => {
+    setTimerActive(true);
+    setTimerPaused(false);
   };
 
   const handleStopTimer = () => {
     setTimerActive(false);
+    setTimerPaused(false);
+    setTimerRemaining(0);
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
   };
 
@@ -720,8 +752,52 @@ export default function ResultsPage() {
 
       <main className="max-w-7xl mx-auto px-4 py-6 md:px-8 md:py-10 relative">
 
+        {/* Buttons hint popup */}
+        {showButtonsHint && (
+          <div className="fixed top-20 right-[72px] z-50 w-[240px] bg-card border border-border rounded-2xl shadow-xl p-4">
+            <p className="text-[13px] font-bold text-foreground mb-3">yo here's what these do 👀</p>
+            <div className="flex flex-col gap-2.5 mb-3.5">
+              <div className="flex items-start gap-2.5">
+                <span className="text-base leading-none mt-0.5">🔗</span>
+                <div>
+                  <p className="text-[12px] font-semibold text-foreground">Share</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">copy the link and drop it in the group chat. your friends study too, right? no cap</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <span className="text-base leading-none mt-0.5">⏱️</span>
+                <div>
+                  <p className="text-[12px] font-semibold text-foreground">Study Timer</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">set a timer so you actually study and don't just vibe on here fr fr</p>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={dismissHint}
+              className="w-full py-1.5 rounded-lg bg-violet-600/15 border border-violet-600/25 text-violet-300 text-[12px] font-semibold hover:bg-violet-600/25 transition-colors"
+            >
+              got it ✓
+            </button>
+          </div>
+        )}
+
         {/* Timer Widget - Static Button */}
-        <div className="fixed top-20 right-4 z-40">
+        <div className="fixed top-20 right-4 z-40 flex flex-col gap-2">
+          {/* Share Button */}
+          <button
+            onClick={shareToken ? handleCopyLink : handleShare}
+            disabled={sharing}
+            className="w-12 h-12 rounded-full bg-card border-2 border-primary/40 shadow-lg flex items-center justify-center hover:bg-muted/50 transition-colors"
+            title={shareToken ? "Copy share link" : "Share"}
+          >
+            {sharing ? (
+              <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+            ) : copied ? (
+              <Check className="w-5 h-5 text-emerald-400" />
+            ) : (
+              <Share2 className="w-5 h-5 text-muted-foreground" />
+            )}
+          </button>
           {!timerOpen ? (
             <button
               onClick={() => setTimerOpen(true)}
@@ -730,6 +806,8 @@ export default function ResultsPage() {
             >
               {timerActive ? (
                 <Timer className="w-5 h-5 text-primary animate-pulse" />
+              ) : timerPaused ? (
+                <Pause className="w-5 h-5 text-yellow-400" />
               ) : (
                 <Clock className="w-5 h-5 text-muted-foreground" />
               )}
@@ -759,22 +837,30 @@ export default function ResultsPage() {
                   </button>
                 </div>
 
-                {timerActive ? (
+                {(timerActive || timerPaused) ? (
                   <div className="space-y-3">
                     <div className="text-center">
-                      <div className="text-4xl font-bold text-foreground font-mono">
+                      <div className={cn("text-4xl font-bold font-mono", timerPaused ? "text-yellow-400" : "text-foreground")}>
                         {formatTime(timerRemaining)}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">Time remaining</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {timerPaused ? "Paused" : "Time remaining"}
+                      </p>
                     </div>
-                    <Button
-                      onClick={handleStopTimer}
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                    >
-                      Stop Timer
-                    </Button>
+                    <div className="flex gap-2">
+                      {timerActive ? (
+                        <Button onClick={handlePauseTimer} variant="outline" size="sm" className="flex-1">
+                          <Pause className="w-3.5 h-3.5" />Pause
+                        </Button>
+                      ) : (
+                        <Button onClick={handleResumeTimer} size="sm" className="flex-1">
+                          <Play className="w-3.5 h-3.5" />Resume
+                        </Button>
+                      )}
+                      <Button onClick={handleStopTimer} variant="outline" size="sm" className="flex-1">
+                        Stop
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -835,10 +921,21 @@ export default function ResultsPage() {
           )}
         </div>
 
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-1.5 text-[13px] text-muted-foreground mb-6 flex-wrap">
+          <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
+          <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 opacity-40" />
+          <Link href="/lectures" className="hover:text-foreground transition-colors">Lectures</Link>
+          <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 opacity-40" />
+          <span className="text-foreground font-medium truncate max-w-[260px] sm:max-w-none">
+            {results.lecture_title || "Study Materials"}
+          </span>
+        </nav>
+
         {/* Title */}
         <div className="mb-8">
           <h1 className="text-3xl sm:text-4xl font-semibold text-foreground mb-3">
-            Study Materials
+            {results.lecture_title || "Study Materials"}
           </h1>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary" className="gap-1.5 text-xs">
@@ -847,6 +944,21 @@ export default function ResultsPage() {
             <Badge variant="outline" className="gap-1.5 text-xs text-muted-foreground">
               <Calendar className="w-3 h-3" />{new Date(results.created_at).toLocaleDateString()}
             </Badge>
+            {results.mode && (() => {
+              const MODE_LABELS: Record<string, { label: string; className: string }> = {
+                revision:     { label: "Revision",     className: "border-violet-500/30 text-violet-400 bg-violet-500/10" },
+                exam:         { label: "Exam",         className: "border-amber-500/30 text-amber-400 bg-amber-500/10" },
+                harder:       { label: "Hard Mode",    className: "border-red-500/30 text-red-400 bg-red-500/10" },
+                quick_review: { label: "Quick Review", className: "border-sky-500/30 text-sky-400 bg-sky-500/10" },
+                custom:       { label: "Smart Context", className: "border-emerald-500/30 text-emerald-400 bg-emerald-500/10" },
+              };
+              const m = MODE_LABELS[results.mode];
+              return m ? (
+                <span className={cn("inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-semibold border", m.className)}>
+                  <Zap className="w-3 h-3" />{m.label}
+                </span>
+              ) : null;
+            })()}
           </div>
         </div>
 
@@ -930,6 +1042,22 @@ export default function ResultsPage() {
                     className="w-10 px-0"
                   >
                     <Shuffle className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    onClick={shareToken ? handleCopyLink : handleShare}
+                    disabled={sharing}
+                    variant="outline"
+                    size="sm"
+                    className="w-10 px-0"
+                    title={shareToken ? "Copy share link" : "Share"}
+                  >
+                    {sharing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : copied ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Share2 className="w-3.5 h-3.5" />
+                    )}
                   </Button>
                 </div>
               </CardContent>

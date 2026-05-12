@@ -36,14 +36,7 @@ REVISION_SYSTEM_PROMPT = (
     "  ✗ Bullet-point conversions: if the lecture has 'X = Y', do NOT make 'What is X?' with "
     "answer Y. Use that fact as a distractor or incorporate into a vignette.\n\n"
 
-    "=== CRITICAL FACTUAL ACCURACY ===\n"
-    "Auto-rejected:\n"
-    "  ✗ IDA causes iron overload — IDA = DEPLETED stores.\n"
-    "  ✗ IDA bone marrow = decreased erythropoiesis — correct = INCREASED erythroid activity + ABSENT iron stores.\n"
-    "  ✗ ACD has normal/elevated serum iron — ACD = LOW serum iron + HIGH ferritin.\n"
-    "  ✗ Sickle cell = hypochromic microcytic — sickle cell is normocytic.\n"
-    "  ✗ PNS damage = ataxia — PNS damage = peripheral neuropathy.\n"
-    "If uncertain about a fact, skip the question.\n\n"
+    "{dynamic_facts_block}\n\n"
 
     "=== OPTION RULES ===\n"
     "FORBIDDEN in any option: 'All of the above', 'None of the above', 'Both A and B', "
@@ -51,7 +44,7 @@ REVISION_SYSTEM_PROMPT = (
     "ANY 'Both X and Y' phrasing.\n"
     "Never recycle the same 4-option set across questions.\n\n"
 
-    "=== DISTRACTOR QUALITY — MOST IMPORTANT RULE ===\n"
+    "=== DISTRACTOR RULES ===\n"
     "Each wrong option MUST be FACTUALLY INCORRECT as the answer to THIS specific question.\n"
     "A distractor that is true in any context = INVALID. Delete it and write a false one.\n"
     "FORBIDDEN distractor types:\n"
@@ -101,12 +94,7 @@ REVISION_SYSTEM_PROMPT = (
     "9. A/B/C/D each between 15%-35% of total. Fix distribution before output.\n"
     "10. Type 1 ≤ 35% of total. Convert excess recall to vignettes.\n"
     "11. Zero historical trivia / naming / bullet-point conversion questions.\n"
-    "12. DISTRACTOR CHECK — for EVERY question, verify:\n"
-    "    - Is option A (if wrong) factually incorrect? Not just 'less specific' — actually false?\n"
-    "    - Is option B (if wrong) factually incorrect? Not just 'less complete' — actually false?\n"
-    "    - Is option C (if wrong) factually incorrect? Not correct in any context?\n"
-    "    - Is option D (if wrong) factually incorrect? Not correct in any context?\n"
-    "    If ANY wrong option could be defended as correct — delete it and write a false one.\n"
+    "12. DISTRACTOR CHECK: every wrong option is factually false — not 'less specific', not 'correct in another context'.\n"
     "13. Every MCQ has a 'distractors' object with entries for all wrong options.\n"
     "Regenerate any failing question before output."
 )
@@ -210,12 +198,7 @@ EXAM_SYSTEM_PROMPT = (
     "'None of the above' ONLY when no other option is correct.\n"
     "'Both X and Y' phrasing FORBIDDEN.\n\n"
 
-    "=== FACTUAL ACCURACY ===\n"
-    "Auto-rejected:\n"
-    "  ✗ IDA causes iron overload\n"
-    "  ✗ IDA bone marrow = decreased erythropoiesis (correct = absent iron stores)\n"
-    "  ✗ ACD = normal/elevated serum iron (correct = LOW iron + HIGH ferritin)\n"
-    "  ✗ Sickle cell is microcytic\n\n"
+    "{dynamic_facts_block}\n\n"
 
     "=== EXPLANATION RULES ===\n"
     "Start: correct letter + dash (e.g. 'B — ').\n"
@@ -227,7 +210,7 @@ EXAM_SYSTEM_PROMPT = (
     "Every MCQ must include 'distractors': keys = wrong option letters, values = 1 sentence why wrong.\n"
     "Example (answer=B): {\"A\":\"Wrong because...\",\"C\":\"Incorrect — this is true for X not Y.\",\"D\":\"Applies to Z context only.\"}\n\n"
 
-    "=== DISTRACTOR QUALITY — CRITICAL ===\n"
+    "=== DISTRACTOR RULES ===\n"
     "For FALSE EXCEPT questions: verify that the 3 'false' options are ACTUALLY FALSE — not true statements that are just less important.\n"
     "For all other questions: each wrong option must be factually incorrect, not merely 'less specific' or 'less complete'.\n"
     "A wrong option that a knowledgeable student could defend as correct = invalid. Rewrite it as something false.\n\n"
@@ -311,10 +294,7 @@ QUICK_REVIEW_SYSTEM_PROMPT = (
     "- Pure naming: 'X is also known as?' — FORBIDDEN.\n"
     "- Duplicate questions — each concept tested exactly once.\n\n"
 
-    "=== FACTUAL ACCURACY ===\n"
-    "  ✗ IDA causes iron overload — IDA = depleted stores.\n"
-    "  ✗ IDA bone marrow = decreased erythropoiesis — correct = absent iron stores.\n"
-    "  ✗ ACD = normal/elevated serum iron — ACD = LOW serum iron + HIGH ferritin.\n\n"
+    "{dynamic_facts_block}\n\n"
 
     "=== OUTPUT FORMAT ===\n"
     "Return ONLY valid JSON:\n"
@@ -403,11 +383,7 @@ HARDER_SYSTEM_PROMPT = (
     "The most common student error must appear as a wrong option — but it must still be factually false.\n"
     "FORBIDDEN: options that are correct but 'less specific', correct but 'less complete', or correct for a slightly different scenario.\n\n"
 
-    "=== FACTUAL ACCURACY ===\n"
-    "  ✗ IDA = iron overload (wrong — IDA = depleted stores)\n"
-    "  ✗ IDA marrow = decreased erythropoiesis (wrong — absent iron stores + increased erythroid activity)\n"
-    "  ✗ ACD = normal/elevated serum iron (wrong — LOW iron + HIGH ferritin)\n"
-    "  ✗ Sickle cell = microcytic (wrong — normocytic)\n\n"
+    "{dynamic_facts_block}\n\n"
 
     "=== DISTRACTOR AUTOPSY ===\n"
     "Every MCQ: include 'distractors' object. Keys = wrong option letters only. "

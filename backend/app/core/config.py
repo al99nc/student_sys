@@ -131,6 +131,17 @@ class Settings(BaseSettings):
     # Example: Groq free tier = 200 000 TPD → set to 180 000 (10 % safety margin)
     GLOBAL_DAILY_TOKEN_BUDGET: int = 50_000_000
 
+    # ── Google OAuth 2.0 ─────────────────────────────────────────────────────
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    # Public URL of the *backend* — used to build the OAuth redirect_uri.
+    # e.g. https://api.themcq.xyz  or  http://localhost:8000
+    BACKEND_URL: str = "http://localhost:8000"
+
+    # ── Resend (transactional email) ─────────────────────────────────────────
+    # API key from resend.com dashboard — used for magic-link auth emails.
+    RESEND_API_KEY: str = ""
+
     # ── Wayl Payment Gateway (IQD — Iraqi Dinar) ─────────────────────────────
     # API key from your Wayl merchant dashboard.
     WAYL_API_KEY: str = ""

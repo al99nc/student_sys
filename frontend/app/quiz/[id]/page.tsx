@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { getResults, recordQuizResult, coachGeneratePractice, FreshMCQ } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { invalidatePerformanceContext } from "@/lib/performance-context";
 import { StepNav } from "@/components/step-nav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -144,6 +145,7 @@ export default function QuizPage() {
       setRevealed(false);
     } else {
       recordQuizResult(lectureId, score, questions.length, fromConvId ? "coach" : "quiz_page").catch(() => {});
+      invalidatePerformanceContext();
       setPhase("result");
     }
   };

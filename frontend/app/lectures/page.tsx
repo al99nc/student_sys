@@ -53,6 +53,7 @@ interface RawLecture {
   created_at: string;
   is_processed: boolean;
   has_essays: boolean;
+  pending_job_id?: string | null;
 }
 
 type Tab = "all" | "uploaded";
@@ -201,7 +202,11 @@ export default function LecturesPage() {
             <div className={`grid gap-3 ${allUploads.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
               {allUploads.map((upload) => {
                 const isReady = upload.is_processed;
-                const href = isReady ? `/results/${upload.id}` : `/upload`;
+                const href = isReady
+                  ? `/results/${upload.id}`
+                  : upload.pending_job_id
+                  ? `/upload/${upload.pending_job_id}`
+                  : `/upload`;
                 return (
                   <Link key={upload.id} href={href} prefetch={false}>
                     <div className="flex items-center gap-3 p-4 rounded-xl border hover:border-primary/40 hover:bg-muted/20 transition-all duration-150">
