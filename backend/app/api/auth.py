@@ -44,7 +44,7 @@ def _hash_token(raw: str) -> str:
 async def _send_magic_link_email(email: str, token: str) -> None:
     if not settings.RESEND_API_KEY:
         raise HTTPException(status_code=503, detail="Email service not configured")
-    link = f"{settings.APP_PUBLIC_URL}/auth/verify?token={token}"
+    link = f"{settings.APP_PUBLIC_URL}/api/auth/verify?token={token}"
     payload = {
         "from": "noreply@themcq.xyz",
         "to": [email],
@@ -195,7 +195,7 @@ def verify_magic_link(
         .first()
     )
 
-    error_redirect = f"{settings.APP_PUBLIC_URL}/auth/login?error=invalid_link"
+    error_redirect = f"{settings.APP_PUBLIC_URL}/auth?error=invalid_link"
 
     if not record:
         return RedirectResponse(url=error_redirect, status_code=302)
@@ -236,7 +236,7 @@ _GOOGLE_STATE_MAX_AGE = 600  # 10 minutes
 
 
 def _google_redirect_uri() -> str:
-    return f"{settings.BACKEND_URL}/auth/google/callback"
+    return f"{settings.APP_PUBLIC_URL}/api/auth/google/callback"
 
 
 def _create_google_state() -> str:
