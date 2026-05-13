@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from sqlalchemy.orm import Session
 from app.db.database import get_db, SessionLocal
 from datetime import datetime, timezone
-from app.models.models import Lecture, Result, QuizSession
+from app.models.models import Lecture, Result, QuizSession, ProcessingJob
 from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave, SolvedLectureOut, SolvedEssayOut, SolvedEssayQuestion, SolvedOut, SolvedMCQ
 from app.api.deps import get_current_user
 from app.models.models import User
