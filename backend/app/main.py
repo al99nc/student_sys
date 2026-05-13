@@ -82,6 +82,7 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN plan VARCHAR(20) NOT NULL DEFAULT 'free'",
         "ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(255)",
         "ALTER TABLE results ADD COLUMN essays TEXT",
+        "ALTER TABLE results ADD COLUMN mode VARCHAR",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN monthly_credit_limit INTEGER",
         "ALTER TABLE users ADD COLUMN monthly_credits_used INTEGER NOT NULL DEFAULT 0",
