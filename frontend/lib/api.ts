@@ -130,6 +130,9 @@ export const login = (email: string, password: string) =>
 export const requestMagicLink = (email: string) =>
   api.post<{ message: string; email: string }>("/auth/request-link", { email });
 
+export const verifyCode = (email: string, code: string) =>
+  api.post<TokenOut>("/auth/verify-code", { email, code });
+
 export const getMe = () => api.get<UserOut>("/auth/me");
 
 export interface BillingConfig {
@@ -202,6 +205,8 @@ export const extractImageText = (imageFile: File) => {
 };
 
 export const getLectures = () => api.get("/lectures");
+export const deleteLecture = (lectureId: number) =>
+  api.delete(`/lectures/${lectureId}`);
 export const getSolvedLectures = () => api.get("/lectures/solved");
 
 export const estimateProcessing = (lectureId: number, difficulty: Difficulty = "revision") =>

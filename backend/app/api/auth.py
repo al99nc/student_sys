@@ -1,6 +1,7 @@
 
 
 import hashlib
+import random
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -28,6 +29,7 @@ from app.schemas.auth import (
     UserCreate,
     UserLogin,
     UserOut,
+    VerifyCodeRequest,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -41,19 +43,40 @@ def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-async def _send_magic_link_email(email: str, token: str) -> None:
+async def _send_magic_link_email(email: str, token: str, code: str | None = None) -> None:
     if not settings.RESEND_API_KEY:
         raise HTTPException(status_code=503, detail="Email service not configured")
     link = f"{settings.APP_PUBLIC_URL}/api/auth/verify?token={token}"
+
+    otp_block = ""
+    if code:
+        otp_block = (
+            "<div style=\"margin-top:24px;padding:16px;background:#f5f5f5;border-radius:8px;text-align:center;\">"
+            "<p style=\"margin:0 0 8px;font-size:14px;color:#666;\">Or enter this code in the Telegram app:</p>"
+            f"<p style=\"margin:0;font-size:32px;font-weight:bold;letter-spacing:8px;color:#111;\">{code}</p>"
+            "<p style=\"margin:8px 0 0;font-size:12px;color:#999;\">Expires in 10 minutes</p>"
+            "</div>"
+        )
+
+    text = (
+        f"Click the link below to sign in. The link expires in 10 minutes.\n\n"
+        f"{link}\n\n"
+        f"If you didn't request this, you can safely ignore this email."
+    )
+    if code:
+        text += f"\n\nOr enter this code in the app: {code}\nThis code expires in 10 minutes."
+
     payload = {
         "from": "noreply@themcq.xyz",
         "to": [email],
         "subject": "Your themcq sign-in link",
+        "text": text,
         "html": (
             "<p>Click the button below to sign in. The link expires in 10 minutes.</p>"
             f'<p><a href="{link}" style="background:#6366f1;color:#fff;padding:12px 24px;'
             f'border-radius:6px;text-decoration:none;font-weight:bold;">Sign in to themcq</a></p>'
             f'<p>Or paste this URL into your browser:<br>{link}</p>'
+            f"{otp_block}"
             "<p>If you didn't request this, you can safely ignore this email.</p>"
         ),
     }
@@ -164,16 +187,18 @@ async def request_magic_link(
     raw_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(raw_token)
     expires_at = now + timedelta(minutes=_MAGIC_LINK_TTL_MINUTES)
+    otp_code = str(random.randint(100000, 999999))
 
     db.add(MagicLinkToken(
         email=email,
         token_hash=token_hash,
         expires_at=expires_at,
         used=0,
+        otp_code=otp_code,
     ))
     db.commit()
 
-    await _send_magic_link_email(email, raw_token)
+    await _send_magic_link_email(email, raw_token, code=otp_code)
 
     return MagicLinkResponse(
         message="Check your email — we sent a sign-in link.",
@@ -224,6 +249,56 @@ def verify_magic_link(
         url=f"{settings.APP_PUBLIC_URL}/auth/callback?token={jwt_token}",
         status_code=302,
     )
+
+
+@router.post("/verify-code", response_model=Token)
+@limiter.limit("15/15minute")
+def verify_code(
+    request: Request,
+    body: VerifyCodeRequest,
+    db: Session = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+    email = body.email.lower().strip()
+
+    record = (
+        db.query(MagicLinkToken)
+        .filter(
+            MagicLinkToken.email == email,
+            MagicLinkToken.otp_code == body.code,
+            MagicLinkToken.used == 0,
+        )
+        .order_by(MagicLinkToken.created_at.desc())
+        .first()
+    )
+
+    if not record:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired code",
+        )
+
+    expires = record.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < now:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired code",
+        )
+
+    record.used = 1
+    db.commit()
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        user = User(email=email, hashed_password="!")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    jwt_token = create_access_token({"sub": str(user.id), "email": user.email})
+    return {"access_token": jwt_token, "token_type": "bearer"}
 
 
 # ── Google OAuth 2.0 ──────────────────────────────────────────────────────────

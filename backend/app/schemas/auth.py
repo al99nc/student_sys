@@ -71,3 +71,8 @@ class MagicLinkRequest(BaseModel):
 class MagicLinkResponse(BaseModel):
     message: str
     email: str
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str

@@ -12,6 +12,7 @@ from collections import defaultdict
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from app.db.database import get_db, SessionLocal
 from datetime import datetime, timezone
@@ -219,7 +220,8 @@ def _cleanup_sessions(token: str):
         del _active_sessions[token][sid]
 
 def ensure_upload_dir():
-    Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    upload_path = os.path.abspath(settings.UPLOAD_DIR)
+    Path(upload_path).mkdir(parents=True, exist_ok=True)
 
 @router.post("/upload", response_model=LectureOut)
 async def upload_lecture(
@@ -252,20 +254,35 @@ async def upload_lecture(
     # Sanitize filename to prevent path traversal
     safe_basename = os.path.basename(file.filename or "upload.pdf")
     safe_name = f"{current_user.id}_{safe_basename}"
-    upload_dir = os.path.normpath(settings.UPLOAD_DIR)
-    file_path = os.path.normpath(os.path.join(upload_dir, safe_name))
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    file_path = os.path.abspath(os.path.join(upload_dir, safe_name))
     if not file_path.startswith(upload_dir):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
+    # Validate file size before writing
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="File is empty")
+
     with open(file_path, "wb") as f:
-        f.write(content)
+        bytes_written = f.write(content)
+    
+    # Verify file was written completely
+    if bytes_written != len(content):
+        try:
+            os.remove(file_path)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to write file completely")
 
     # Try to extract text to validate it's a real PDF
     try:
         extract_text_from_pdf(file_path)
     except Exception as e:
-        os.remove(file_path)
-        raise HTTPException(status_code=400, detail="Could not read PDF. Ensure the file is not corrupted or password-protected.")
+        try:
+            os.remove(file_path)
+        except:
+            pass
+        raise HTTPException(status_code=400, detail=f"Could not read PDF. Ensure the file is not corrupted or password-protected. Error: {str(e)[:100]}")
 
     # Save to DB — snapshot user profile onto the lecture at upload time
     lecture = Lecture(
@@ -307,8 +324,8 @@ async def upload_text(
     ensure_upload_dir()
     safe_title = "".join(c for c in body.title if c.isalnum() or c in " _-")[:60].strip() or "pasted"
     file_name = f"{current_user.id}_{safe_title}.txt"
-    upload_dir = os.path.normpath(settings.UPLOAD_DIR)
-    file_path = os.path.normpath(os.path.join(upload_dir, file_name))
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    file_path = os.path.abspath(os.path.join(upload_dir, file_name))
     if not file_path.startswith(upload_dir):
         raise HTTPException(status_code=400, detail="Invalid title")
 
@@ -395,6 +412,96 @@ async def extract_image_text(
         raise HTTPException(status_code=422, detail="Could not extract readable text from the image")
 
     return {"text": extracted}
+
+
+@router.get("/files/{lecture_id}")
+def get_lecture_file(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Serve the raw uploaded file (PDF or text) for in-browser viewing."""
+    lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+    if lecture.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your lecture")
+
+    file_path = lecture.file_path
+    
+    # Normalize path (handle both forward and backward slashes)
+    file_path = file_path.replace("\\", "/")
+    
+    # Convert to absolute path if stored as relative
+    if not os.path.isabs(file_path):
+        # Extract just the filename
+        basename = os.path.basename(file_path)
+        # Construct absolute path
+        file_path = os.path.abspath(os.path.join(settings.UPLOAD_DIR, basename))
+    else:
+        # Normalize absolute paths to use consistent separators
+        file_path = os.path.abspath(file_path)
+    
+    # Ensure file exists
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail=f"File not found")
+    
+    # Validate file is not empty
+    file_size = os.path.getsize(file_path)
+    if file_size == 0:
+        raise HTTPException(status_code=400, detail="File is empty (0 bytes)")
+
+    is_pdf = file_path.lower().endswith(".pdf")
+    media_type = "application/pdf" if is_pdf else "text/plain; charset=utf-8"
+    filename = os.path.basename(file_path)
+
+    # Use StreamingResponse to reliably serve file content
+    def file_iterator(file_path: str, chunk_size: int = 65536):
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    resp = StreamingResponse(
+        file_iterator(file_path),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(file_size),
+        }
+    )
+    return resp
+
+
+@router.delete("/lectures/{lecture_id}")
+def delete_lecture(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+    if lecture.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your lecture")
+
+    file_path = lecture.file_path
+
+    db.query(Result).filter(Result.lecture_id == lecture_id).delete()
+    db.query(ProcessingJob).filter(ProcessingJob.lecture_id == lecture_id).delete()
+    db.query(QuizSession).filter(QuizSession.lecture_id == lecture_id).delete()
+    db.delete(lecture)
+    db.commit()
+
+    if file_path and os.path.isfile(file_path):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+
+    return {"detail": "Lecture deleted"}
 
 
 @router.get("/lectures", response_model=List[LectureOut])

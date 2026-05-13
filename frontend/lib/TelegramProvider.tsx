@@ -239,20 +239,22 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
       setWebApp(tg);
 
-      loginWithTelegram(tg.initData)
-        .then(() => {
-          const path = window.location.pathname;
-          if (path === "/" || path === "/auth") {
-            const firstName = tg.initDataUnsafe?.user?.first_name;
-            const dest = firstName
-              ? `/welcome?from=telegram&name=${encodeURIComponent(firstName)}`
-              : "/welcome?from=telegram";
-            window.location.href = dest;
-          }
-        })
-        .catch((err) =>
-          console.error("[TelegramProvider] auth error:", err)
-        );
+      const path = window.location.pathname;
+      if (path !== "/auth") {
+        loginWithTelegram(tg.initData)
+          .then(() => {
+            if (path === "/" || path === "/auth") {
+              const firstName = tg.initDataUnsafe?.user?.first_name;
+              const dest = firstName
+                ? `/welcome?from=telegram&name=${encodeURIComponent(firstName)}`
+                : "/welcome?from=telegram";
+              window.location.href = dest;
+            }
+          })
+          .catch((err) =>
+            console.error("[TelegramProvider] auth error:", err)
+          );
+      }
     };
 
     // Try immediately (works on reload when script is already cached)

@@ -2,11 +2,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getMe } from "@/lib/api";
-import { Home, Upload, Bot, BarChart3, BookOpen, CreditCard, Layers } from "lucide-react";
+import { Home, Upload, Bot, BarChart3, BookOpen, CreditCard, Layers, Sparkles } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Upload", href: "/upload" },
+  { label: "Create", href: "/create" },
   { label: "Lectures", href: "/lectures" },
   { label: "Flashcards", href: "/flashcards" },
   { label: "Coach", href: "/coach" },
@@ -16,6 +17,7 @@ const NAV = [
 const MOBILE_NAV = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Upload", href: "/upload", icon: Upload },
+  { label: "Create", href: "/create", icon: Sparkles },
   { label: "Lectures", href: "/lectures", icon: BookOpen },
   { label: "Flashcards", href: "/flashcards", icon: Layers },
   { label: "Coach", href: "/coach", icon: Bot },

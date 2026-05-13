@@ -148,6 +148,7 @@ class MagicLinkToken(Base):
     token_hash = Column(String(64), nullable=False, unique=True, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Integer, default=0, server_default="0", nullable=False)
+    otp_code = Column(String(6), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
