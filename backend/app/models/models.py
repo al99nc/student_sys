@@ -45,6 +45,8 @@ class User(Base):
     is_admin = Column(Integer, default=0, server_default="0", nullable=False)
     # IP address at signup — used to prevent trial abuse
     signup_ip = Column(String(45), nullable=True, index=True)
+    # Telegram chat ID linked via bot OTP verification
+    telegram_chat_id = Column(String(32), nullable=True, index=True)
 
     lectures = relationship("Lecture", back_populates="owner")
 
@@ -150,6 +152,19 @@ class MagicLinkToken(Base):
     used = Column(Integer, default=0, server_default="0", nullable=False)
     otp_code = Column(String(6), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class BotSession(Base):
+    """Persistent bot session — survives restarts, 2-week expiry."""
+    __tablename__ = "bot_sessions"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id    = Column(String(32), unique=True, nullable=False, index=True)
+    email      = Column(String, nullable=False)
+    jwt        = Column(String, nullable=True)
+    state      = Column(String(20), nullable=False, default="waiting_email")
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class ProcessingJob(Base):

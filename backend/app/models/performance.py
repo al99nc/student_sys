@@ -255,6 +255,7 @@ class DailyTestCache(Base):
     date         = Column(Date, nullable=False)
     topic        = Column(String(255), nullable=False)
     question_ids = Column(JSON, nullable=False)   # list[str] UUIDs
+    answers      = Column(JSON, nullable=True)    # {"question_id": "selected_letter", ...}
     generated_at = Column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (

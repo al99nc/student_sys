@@ -1,10 +1,13 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Tuple
 from urllib.parse import unquote
 
@@ -14,10 +17,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import User
+from app.models.models import User, Lecture, BotSession
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.core.limiter import limiter
+from app.core.otp import generate_and_store, verify_code, send_otp_email
+from app.services.pdf_service import extract_text_from_pdf
+from sqlalchemy import func
 
 router = APIRouter(prefix="/auth", tags=["telegram"])
 
@@ -112,8 +118,19 @@ def telegram_auth(request: Request, body: TelegramInitDataRequest, db: Session =
     if not telegram_id:
         raise HTTPException(status_code=400, detail="No user object in initData")
 
-    # Synthetic email to identify this Telegram user in the DB.
-    # The password is random and can never be used to log in via /auth/login.
+    # If the user linked their Telegram account via the bot OTP flow,
+    # return a JWT for their real account (with their real email, lectures, etc.)
+    linked_user = db.query(User).filter(User.telegram_chat_id == str(telegram_id)).first()
+    if linked_user:
+        token = create_access_token({"sub": str(linked_user.id), "is_admin": bool(linked_user.is_admin)})
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "linked": True,
+            "email": linked_user.email,
+        }
+
+    # Fallback: synthetic email for Telegram-native users who haven't linked
     synthetic_email = f"tg_{telegram_id}@telegram.local"
     user = db.query(User).filter(User.email == synthetic_email).first()
     if not user:
@@ -135,7 +152,7 @@ def telegram_auth(request: Request, body: TelegramInitDataRequest, db: Session =
 # ── Bot endpoints ──────────────────────────────────────────────────────────
 
 def _check_bot_secret(x_bot_secret: str = Header(None)):
-    expected = os.environ.get("BOT_SECRET")
+    expected = settings.BOT_SECRET
     if not expected:
         raise HTTPException(status_code=503, detail="Bot secret not configured on server")
     if not x_bot_secret or not hmac.compare_digest(x_bot_secret, expected):
@@ -203,3 +220,234 @@ def bot_fetch_temp(token: str):
         media_type="application/pdf",
         headers={"X-File-Name": filename},
     )
+
+
+# ── Bot auth endpoints ─────────────────────────────────────────────────────
+
+class BotSendCodeRequest(BaseModel):
+    email: str
+
+class BotVerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+    chat_id: str
+
+
+@bot_router.post("/send-code")
+async def bot_send_code(
+    body: BotSendCodeRequest,
+    _: None = Depends(_check_bot_secret),
+    db: Session = Depends(get_db),
+):
+    """
+    Called by the bot when a user submits their email.
+    Checks the email exists in the DB, generates an OTP, sends it.
+    Returns 200 if sent, 404 if email not found.
+    """
+    email = body.email.lower().strip()
+
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if not user:
+        user = User(
+            email=email,
+            hashed_password="!",
+        )
+        db.add(user)
+        db.commit()
+
+    code = generate_and_store(email)
+
+    try:
+        await send_otp_email(email, code)
+    except Exception as exc:
+        logger.error("OTP email failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to send email. Please try again.")
+
+    return {"status": "sent"}
+
+
+@bot_router.post("/verify-code")
+async def bot_verify_code(
+    body: BotVerifyCodeRequest,
+    _: None = Depends(_check_bot_secret),
+    db: Session = Depends(get_db),
+):
+    """
+    Called by the bot when a user submits the 6-digit code.
+    Verifies the code, links telegram_chat_id to the user, returns a JWT.
+    """
+    email = body.email.lower().strip()
+
+    if not verify_code(email, body.code):
+        raise HTTPException(status_code=401, detail="Invalid or expired code")
+
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.telegram_chat_id = str(body.chat_id)
+    db.commit()
+
+    token = create_access_token({"sub": str(user.id), "is_admin": bool(user.is_admin)})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": str(user.id),
+    }
+
+
+# ── Bot authenticated PDF upload ───────────────────────────────────────────
+
+@bot_router.post("/upload-pdf")
+async def bot_upload_pdf(
+    file: UploadFile = File(...),
+    _: None = Depends(_check_bot_secret),
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Bot uploads a PDF on behalf of an authenticated user.
+    The bot passes the user's JWT in the Authorization header.
+    Returns the lecture_id so the bot can build the Mini App deep link.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing user token")
+
+    token = authorization.replace("Bearer ", "")
+    try:
+        from app.core.security import decode_access_token
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    filename = file.filename or "lecture.pdf"
+    if not filename.lower().endswith(".pdf") and file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+
+    content = await file.read()
+
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Not a valid PDF file")
+
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 50MB)")
+
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = f"{user.id}_{secrets.token_hex(6)}_{os.path.basename(filename)}"
+    file_path = os.path.join(upload_dir, safe_name)
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    try:
+        extract_text_from_pdf(file_path)
+    except Exception:
+        os.remove(file_path)
+        raise HTTPException(status_code=400, detail="Could not read PDF. It may be corrupted or password-protected.")
+
+    lecture = Lecture(
+        user_id=user.id,
+        title=filename.replace(".pdf", ""),
+        file_path=file_path,
+        university=user.university or "",
+        college=user.college or "",
+        year_of_study=user.year_of_study,
+        subject=user.subject or "",
+        topic_area=filename.replace(".pdf", ""),
+        level=user.level or "",
+    )
+    db.add(lecture)
+    db.commit()
+    db.refresh(lecture)
+
+    return {
+        "lecture_id": lecture.id,
+        "title": lecture.title,
+    }
+
+
+# ── Bot session persistence (DB-backed, survives restarts) ─────────────────
+
+class BotSessionSaveRequest(BaseModel):
+    chat_id: str
+    email: str = ""
+    jwt: str | None = None
+    state: str = "waiting_email"
+
+@bot_router.post("/session/save")
+async def bot_save_session(
+    body: BotSessionSaveRequest,
+    _: None = Depends(_check_bot_secret),
+    db: Session = Depends(get_db),
+):
+    """Upsert a bot session row (keyed by chat_id)."""
+    from datetime import datetime, timedelta, timezone
+    existing = db.query(BotSession).filter(BotSession.chat_id == body.chat_id).first()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    if existing:
+        existing.email = body.email
+        existing.jwt = body.jwt
+        existing.state = body.state
+        existing.expires_at = expires_at
+    else:
+        db.add(BotSession(
+            chat_id=body.chat_id,
+            email=body.email,
+            jwt=body.jwt,
+            state=body.state,
+            expires_at=expires_at,
+        ))
+    db.commit()
+    return {"status": "ok"}
+
+
+@bot_router.get("/session/{chat_id}")
+async def bot_get_session(
+    chat_id: str,
+    _: None = Depends(_check_bot_secret),
+    db: Session = Depends(get_db),
+):
+    """Return the session for this chat_id, or null if not found / expired."""
+    from datetime import datetime, timezone
+    session = db.query(BotSession).filter(BotSession.chat_id == chat_id).first()
+    if not session:
+        return {"session": None}
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) > expires_at:
+        db.delete(session)
+        db.commit()
+        return {"session": None}
+    return {
+        "session": {
+            "chat_id": session.chat_id,
+            "email": session.email,
+            "jwt": session.jwt,
+            "state": session.state,
+            "expires_at": session.expires_at.isoformat(),
+        }
+    }
+
+
+@bot_router.delete("/session/{chat_id}")
+async def bot_delete_session(
+    chat_id: str,
+    _: None = Depends(_check_bot_secret),
+    db: Session = Depends(get_db),
+):
+    """Delete a bot session."""
+    session = db.query(BotSession).filter(BotSession.chat_id == chat_id).first()
+    if session:
+        db.delete(session)
+        db.commit()
+    return {"status": "ok"}

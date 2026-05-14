@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./students.db"
     UPLOAD_DIR: str = "uploads"
     TELEGRAM_BOT_TOKEN: str = ""
+    BOT_SECRET: str = "themcq-bot-secret-2026"
 
     # Stripe Checkout (pay-as-you-go credits). Secret key from Dashboard → Developers → API keys.
     CHECKOUT_SECRET_KEY: str = ""
@@ -151,6 +152,13 @@ class Settings(BaseSettings):
     WAYL_WEBHOOK_SECRET: str = ""
     # Price per credit in IQD (minimum total per link is 1000 IQD).
     CREDIT_PRICE_IQD: int = 250
+
+    # ── SMTP (OTP email for Telegram bot) ──────────────────────────────────────
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@themcq.xyz"
 
     # Comma-separated list of allowed CORS origins.
     # Avoids hardcoding production IPs directly in source code.

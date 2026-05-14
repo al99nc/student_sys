@@ -90,6 +90,9 @@ with engine.connect() as _conn:
         "CREATE TABLE IF NOT EXISTS processing_jobs (id VARCHAR(16) PRIMARY KEY, user_id VARCHAR(36), lecture_id INTEGER, mode VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'pending', progress_pct INTEGER DEFAULT 0, progress_label VARCHAR(100), estimated_seconds_remaining INTEGER, created_at DATETIME, started_at DATETIME, completed_at DATETIME, error_message TEXT, custom_context TEXT, total_chunks INTEGER, completed_chunks INTEGER DEFAULT 0)",
         "CREATE TABLE IF NOT EXISTS magic_link_tokens (id VARCHAR(36) PRIMARY KEY, email VARCHAR NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, used INTEGER NOT NULL DEFAULT 0, created_at DATETIME)",
         "ALTER TABLE magic_link_tokens ADD COLUMN otp_code VARCHAR(6)",
+        "ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(32)",
+        "CREATE TABLE IF NOT EXISTS bot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id VARCHAR(32) UNIQUE, email VARCHAR NOT NULL, jwt VARCHAR, state VARCHAR(20) NOT NULL DEFAULT 'waiting_email', expires_at DATETIME NOT NULL, created_at DATETIME)",
+        "ALTER TABLE daily_test_cache ADD COLUMN answers TEXT",
     ]:
         try:
             _conn.execute(text(_stmt))

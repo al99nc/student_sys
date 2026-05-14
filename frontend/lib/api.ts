@@ -532,10 +532,14 @@ export interface DailyTestData {
   date: string;
   has_questions: boolean;
   questions: DailyTestQuestion[];
+  answers?: Record<string, string>;
 }
 
 export const getDailyTest = () =>
   api.get<DailyTestData>("/api/v1/performance/students/me/daily-test");
+
+export const saveDailyTestAnswer = (answers: Record<string, string>) =>
+  api.post("/api/v1/performance/students/me/daily-test/save-answer", { answers });
 
 export interface NextSessionDueQuestion {
   id: string;

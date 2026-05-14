@@ -74,8 +74,9 @@ REVISION_SYSTEM_PROMPT = (
     "=== OUTPUT FORMAT ===\n"
     "Return ONLY valid JSON — no markdown, no code fences, no text outside the object:\n"
     "  summary: 3-5 sentences | key_concepts: 8-12 phrases\n"
-    "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
-    "          distractors:{letter:\"1-sentence why this wrong option is wrong\" for each wrong option only}}]\n\n"
+    "  mcqs: [{topic, question, difficulty_type, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
+    "          distractors:{letter:\"1-sentence why this wrong option is wrong\" for each wrong option only}}]\n"
+    "  difficulty_type must be one of: 'recall', 'application', 'analysis'.\n\n"
 
     "=== DISTRACTOR AUTOPSY ===\n"
     "For every MCQ, include a 'distractors' object. Keys = every wrong option letter (NOT the correct answer).\n"
@@ -147,7 +148,7 @@ AUTOPSY RULE: Every MCQ must include "distractors": an object where each key is 
 and value is 1 sentence explaining WHY it is wrong. Omit the correct answer from distractors.
 
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","difficulty_type":"recall|application|analysis","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -215,6 +216,12 @@ EXAM_SYSTEM_PROMPT = (
     "For all other questions: each wrong option must be factually incorrect, not merely 'less specific' or 'less complete'.\n"
     "A wrong option that a knowledgeable student could defend as correct = invalid. Rewrite it as something false.\n\n"
 
+    "=== DIFFICULTY TYPE ===\n"
+    "Every MCQ must include 'difficulty_type': one of 'recall', 'application', 'analysis'.\n"
+    "  recall: Direct fact retrieval.\n"
+    "  application: Clinical vignette, diagnosis, or management decision.\n"
+    "  analysis: 'All EXCEPT', mechanism comparison, or pathology contrast.\n\n"
+
     "OUTPUT: Return ONLY valid JSON. No markdown. No trailing commas. No text outside the object."
 )
 
@@ -261,7 +268,7 @@ AUTOPSY RULE: Every MCQ must include "distractors": object with wrong option let
 1-sentence "why wrong" as values. Do NOT include the correct answer letter.
 
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","difficulty_type":"recall|application|analysis","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -299,8 +306,9 @@ QUICK_REVIEW_SYSTEM_PROMPT = (
     "=== OUTPUT FORMAT ===\n"
     "Return ONLY valid JSON:\n"
     "  summary: 2-3 sentences | key_concepts: 8-12 phrases\n"
-    "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
-    "          distractors:{letter:\"why wrong\" for each wrong option}}]\n\n"
+    "  mcqs: [{topic, difficulty_type, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
+    "          distractors:{letter:\"why wrong\" for each wrong option}}]\n"
+    "  difficulty_type must be 'recall', 'application', or 'analysis'.\n\n"
 
     "=== DISTRACTOR AUTOPSY ===\n"
     "Every MCQ must include 'distractors': keys = wrong option letters only, values = 1 sentence why wrong.\n\n"
@@ -340,7 +348,7 @@ VERIFY BEFORE OUTPUT:
 AUTOPSY: Every MCQ needs "distractors":{wrong_letter:"why wrong"} — keys are wrong option letters only.
 
 Return ONLY this JSON (mcqs FIRST so truncation never loses questions):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — brief reason","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","difficulty_type":"recall|application|analysis","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — brief reason","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -390,8 +398,9 @@ HARDER_SYSTEM_PROMPT = (
     "Value = 1 sentence: why that option is wrong or what trap it exploits.\n\n"
 
     "OUTPUT: Return ONLY valid JSON. No markdown. "
-    "mcqs: [{topic, question, options:[A./B./C./D. prefixed], answer, explanation, "
+    "mcqs: [{topic, difficulty_type, question, options:[A./B./C./D. prefixed], answer, explanation, "
     "distractors:{wrong_letter:\"why wrong\",...}}]. "
+    "difficulty_type must be 'recall', 'application', or 'analysis'. "
     "Explanation: letter + dash, why correct, why top wrong answer is wrong."
 )
 
@@ -423,7 +432,7 @@ A/B/C/D evenly distributed (15-35% each). Zero forbidden phrases.
 AUTOPSY: Every MCQ must have "distractors":{wrong_letter:"1 sentence why wrong"} — all 3 wrong options.
 
 Return ONLY this JSON (mcqs FIRST):
-{{"mcqs":[{{"topic":"string","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
+{{"mcqs":[{{"topic":"string","difficulty_type":"recall|application|analysis","question":"string","options":["A. text","B. text","C. text","D. text"],"answer":"A","explanation":"A — real explanation","distractors":{{"B":"why B is wrong","C":"why C is wrong","D":"why D is wrong"}}}}],"summary":"string","key_concepts":["string"]}}
 
 Lecture text:
 {text}"""
@@ -675,8 +684,9 @@ def build_contextual_prompt(
         "=== OUTPUT FORMAT ===\n"
         "Return ONLY valid JSON — no markdown, no code fences, no text outside the object:\n"
         "  summary: 3-5 sentences | key_concepts: 8-12 phrases\n"
-        "  mcqs: [{topic, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
-        "          distractors:{letter:\"1-sentence why wrong\" for each wrong option only}}]\n\n"
+        "  mcqs: [{topic, difficulty_type, question, options:[4 strings prefixed A./B./C./D.], answer, explanation,\n"
+        "          distractors:{letter:\"1-sentence why wrong\" for each wrong option only}}]\n"
+        "  difficulty_type must be 'recall', 'application', or 'analysis'.\n\n"
 
         "=== DISTRACTOR AUTOPSY ===\n"
         "Every MCQ must include 'distractors': keys = wrong option letters, values = 1 sentence why that option is wrong.\n"
@@ -692,6 +702,7 @@ def build_contextual_prompt(
         "6. Explanations consistent and non-contradictory.\n"
         "7. A/B/C/D each between 15%-35% of total answers. Fix distribution before output.\n"
         f"8. Difficulty matches {diff_label}: verify distribution is {diff_dist}\n"
+        f"9. Every MCQ has difficulty_type set correctly per the distribution above.\n"
         "9. Distractors are plausible and field-appropriate — not random.\n"
         "10. DISTRACTOR CHECK: for every question, confirm each wrong option is FACTUALLY INCORRECT\n"
         "    — not 'less specific', not 'also true but not best', not 'correct in another context'.\n"

@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getDailyTest, DailyTestQuestion } from "@/lib/api";
+import { getDailyTest, saveDailyTestAnswer, DailyTestQuestion } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { AppHeader } from "@/components/app-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,7 +36,6 @@ export default function DailyTestPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Quiz state
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [answerState, setAnswerState] = useState<AnswerState>("idle");
@@ -53,6 +52,22 @@ export default function DailyTestPage() {
         if (res?.data?.has_questions) {
           setQuestions(res.data.questions);
           setTopic(res.data.topic);
+          const saved = res.data.answers || {};
+          if (Object.keys(saved).length > 0) {
+            const restored: QuestionResult[] = [];
+            for (const q of res.data.questions) {
+              const letter = saved[q.id];
+              if (letter) {
+                restored.push({ question: q, selected: letter, correct: letter === q.correct_answer });
+              }
+            }
+            setResults(restored);
+            if (restored.length >= res.data.questions.length) {
+              setDone(true);
+            } else {
+              setCurrent(restored.length);
+            }
+          }
         } else {
           setError("No questions available for today. Upload and process a lecture first.");
         }
@@ -60,6 +75,14 @@ export default function DailyTestPage() {
       .catch(() => setError("Failed to load today's test. Please try again."))
       .finally(() => setLoading(false));
   }, [router]);
+
+  const persistAnswers = useCallback((updated: QuestionResult[]) => {
+    const map: Record<string, string> = {};
+    for (const r of updated) {
+      map[r.question.id] = r.selected;
+    }
+    saveDailyTestAnswer(map).catch(() => {});
+  }, []);
 
   const q = questions[current];
   const progress = questions.length > 0 ? ((current) / questions.length) * 100 : 0;
@@ -75,7 +98,9 @@ export default function DailyTestPage() {
   const handleNext = () => {
     if (!selected) return;
     const isCorrect = selected === q.correct_answer;
-    setResults((prev) => [...prev, { question: q, selected, correct: isCorrect }]);
+    const updated = [...results, { question: q, selected, correct: isCorrect }];
+    setResults(updated);
+    persistAnswers(updated);
 
     if (current + 1 >= questions.length) {
       setDone(true);
@@ -87,10 +112,12 @@ export default function DailyTestPage() {
   };
 
   const handleRestart = () => {
+    const empty: QuestionResult[] = [];
+    setResults(empty);
+    persistAnswers(empty);
     setCurrent(0);
     setSelected(null);
     setAnswerState("idle");
-    setResults([]);
     setDone(false);
   };
 
@@ -121,7 +148,6 @@ export default function DailyTestPage() {
     return `${base} border-border bg-card text-muted-foreground opacity-60`;
   };
 
-  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background text-foreground">
@@ -138,7 +164,6 @@ export default function DailyTestPage() {
     );
   }
 
-  // ── Error / no questions ───────────────────────────────────────────────────
   if (error || questions.length === 0) {
     return (
       <div className="min-h-screen bg-background text-foreground">
@@ -157,7 +182,6 @@ export default function DailyTestPage() {
     );
   }
 
-  // ── Results screen ─────────────────────────────────────────────────────────
   if (done) {
     const accuracy = Math.round((correctCount / questions.length) * 100);
     const isPassing = accuracy >= 70;
@@ -184,8 +208,6 @@ export default function DailyTestPage() {
           .streak-badge { animation: streak-glow 2.4s ease-in-out infinite; }
         `}</style>
         <main className="max-w-2xl mx-auto px-4 py-10">
-
-          {/* Fire streak header */}
           <div className="text-center mb-7">
             <div className="flex items-end justify-center gap-0.5 mb-3">
               <span className="flame-left text-4xl" style={{ animationDelay: "0.4s" }}>🔥</span>
@@ -195,8 +217,6 @@ export default function DailyTestPage() {
             <div className="streak-badge inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 rounded-full px-5 py-1.5 mb-5">
               <span className="text-orange-400 font-bold text-xs tracking-widest uppercase">Daily Streak</span>
             </div>
-
-            {/* Score ring */}
             <div className="relative inline-flex items-center justify-center mb-4">
               <svg className="w-28 h-28 -rotate-90" viewBox="0 0 112 112">
                 <circle cx="56" cy="56" r="46" fill="none" stroke="hsl(var(--border))" strokeWidth="8" />
@@ -215,7 +235,6 @@ export default function DailyTestPage() {
                 <span className="text-xs text-muted-foreground">accuracy</span>
               </div>
             </div>
-
             <h2 className="text-2xl font-bold text-foreground mb-1">
               {accuracy === 100 ? "Perfect!" : isPassing ? "Well done!" : "Keep going!"}
             </h2>
@@ -223,8 +242,6 @@ export default function DailyTestPage() {
               {correctCount} of {questions.length} correct · Topic: {topic}
             </p>
           </div>
-
-          {/* Stats row */}
           <div className="grid grid-cols-3 gap-3 mb-8">
             {[
               { label: "Correct", value: correctCount, color: "text-emerald-500" },
@@ -239,8 +256,6 @@ export default function DailyTestPage() {
               </Card>
             ))}
           </div>
-
-          {/* Review breakdown */}
           <Card className="mb-6">
             <CardContent className="p-5">
               <p className="text-sm font-semibold text-foreground mb-3">Question Review</p>
@@ -268,8 +283,6 @@ export default function DailyTestPage() {
               </div>
             </CardContent>
           </Card>
-
-          {/* Actions */}
           <div className="flex gap-3">
             <Button variant="outline" className="flex-1" onClick={handleRestart}>
               <RotateCcw className="h-4 w-4 mr-2" />
@@ -293,14 +306,11 @@ export default function DailyTestPage() {
     );
   }
 
-  // ── Quiz screen ────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background text-foreground pb-20">
       <AppHeader activePage="Daily Test" />
 
       <main className="max-w-2xl mx-auto px-4 py-6">
-
-        {/* Progress header */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
@@ -315,7 +325,6 @@ export default function DailyTestPage() {
           <Progress value={progress} className="h-1.5" />
         </div>
 
-        {/* Question card */}
         <Card className="mb-4">
           <CardContent className="p-6">
             <div className="flex items-center gap-2 mb-3">
@@ -333,7 +342,6 @@ export default function DailyTestPage() {
           </CardContent>
         </Card>
 
-        {/* Options */}
         <div className="space-y-2.5 mb-5">
           {(["A", "B", "C", "D"] as const).map((letter) => (
             <button
@@ -356,7 +364,6 @@ export default function DailyTestPage() {
           ))}
         </div>
 
-        {/* Explanation (shown after answering) */}
         {answerState !== "idle" && (
           <Card className={`mb-5 border ${answerState === "correct" ? "border-emerald-500/40 bg-emerald-500/5" : "border-destructive/40 bg-destructive/5"}`}>
             <CardContent className="p-4">
@@ -375,7 +382,6 @@ export default function DailyTestPage() {
           </Card>
         )}
 
-        {/* Next button */}
         {answerState !== "idle" && (
           <Button className="w-full" onClick={handleNext}>
             {current + 1 >= questions.length ? "See Results" : "Next Question"}

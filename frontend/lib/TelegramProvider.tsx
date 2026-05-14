@@ -129,6 +129,7 @@ const ROOT_PAGES = new Set(["/", "/auth", "/dashboard"]);
 
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [webApp, setWebApp] = useState<TelegramWebApp | null>(null);
+  const [ready, setReady] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const swipeStartX = useRef(0);
@@ -228,10 +229,18 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
       const tg = (window as unknown as { Telegram?: { WebApp?: TelegramWebApp } })
         .Telegram?.WebApp;
 
-      // initData is non-empty only when running inside the Telegram client
-      if (!tg?.initData) return;
+      // Script not loaded yet — wait for the tgWebAppReady event
+      if (!tg) return;
 
       initializedRef.current = true;
+
+      // Script loaded but not running inside Telegram (normal browser)
+      if (!tg.initData) {
+        setReady(true);
+        return;
+      }
+
+      // Running inside the Telegram Mini App
       tg.ready();
       tg.expand();
       tg.enableClosingConfirmation?.();
@@ -243,6 +252,7 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
       if (path !== "/auth") {
         loginWithTelegram(tg.initData)
           .then(() => {
+            setReady(true);
             if (path === "/" || path === "/auth") {
               const firstName = tg.initDataUnsafe?.user?.first_name;
               const dest = firstName
@@ -251,9 +261,12 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
               window.location.href = dest;
             }
           })
-          .catch((err) =>
-            console.error("[TelegramProvider] auth error:", err)
-          );
+          .catch((err) => {
+            console.error("[TelegramProvider] auth error:", err);
+            setReady(true);
+          });
+      } else {
+        setReady(true);
       }
     };
 
@@ -272,18 +285,20 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
         strategy="afterInteractive"
         onLoad={() => window.dispatchEvent(new Event("tgWebAppReady"))}
       />
-      <TelegramContext.Provider
-        value={{
-          webApp,
-          user: webApp?.initDataUnsafe?.user ?? null,
-          mainButton: webApp?.MainButton ?? null,
-          backButton: webApp?.BackButton ?? null,
-          isInTelegram: !!webApp?.initData,
-          startParam: webApp?.initDataUnsafe?.start_param ?? null,
-        }}
-      >
-        {children}
-      </TelegramContext.Provider>
+      {ready && (
+        <TelegramContext.Provider
+          value={{
+            webApp,
+            user: webApp?.initDataUnsafe?.user ?? null,
+            mainButton: webApp?.MainButton ?? null,
+            backButton: webApp?.BackButton ?? null,
+            isInTelegram: !!webApp?.initData,
+            startParam: webApp?.initDataUnsafe?.start_param ?? null,
+          }}
+        >
+          {children}
+        </TelegramContext.Provider>
+      )}
     </>
   );
 }

@@ -6,7 +6,10 @@ import secrets
 import string as _string
 import shutil
 import threading
+import logging
 import httpx
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from collections import defaultdict
 from typing import List, Optional
@@ -112,11 +115,22 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
                 ai_data = await generate_essay_content(
                     text, is_premium=use_premium, custom_context=context_dict,
                 )
+                essay_data = ai_data
+                mcq_data = {"mcqs": [], "summary": "", "key_concepts": []}
             else:
                 ai_data = await generate_study_content(
                     text, mode=job.mode, is_premium=use_premium, custom_context=context_dict,
                     focus_instruction=focus_instruction,
                 )
+                mcq_data = ai_data
+                # Also generate essay questions alongside MCQs
+                try:
+                    essay_data = await generate_essay_content(
+                        text, is_premium=use_premium, custom_context=context_dict,
+                    )
+                except Exception as ese:
+                    logger.warning("Essay generation failed (non-fatal): %s", ese)
+                    essay_data = {"questions": [], "summary": "", "key_concepts": []}
         except Exception as e:
             if spent and cost > 0:
                 user = db.query(User).filter(User.id == job.user_id).first()
@@ -139,29 +153,30 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
         saved_context = json.dumps(context_dict) if context_dict else None
         existing = db.query(Result).filter(Result.lecture_id == job.lecture_id).first()
         if existing:
-            existing.summary = ai_data.get("summary", "")
-            existing.key_concepts = json.dumps(ai_data.get("key_concepts", []))
+            existing.summary = mcq_data.get("summary", "")
+            existing.key_concepts = json.dumps(mcq_data.get("key_concepts", []))
             if is_essay_mode:
-                existing.essays = json.dumps(ai_data.get("questions", []))
+                existing.essays = json.dumps(essay_data.get("questions", []))
             else:
-                existing.mcqs = json.dumps(ai_data.get("mcqs", []))
+                existing.mcqs = json.dumps(mcq_data.get("mcqs", []))
+                existing.essays = json.dumps(essay_data.get("questions", []))
             existing.custom_context = saved_context
             existing.mode = job.mode
             db.commit()
         else:
             result = Result(
                 lecture_id=job.lecture_id,
-                summary=ai_data.get("summary", ""),
-                key_concepts=json.dumps(ai_data.get("key_concepts", [])),
-                mcqs=json.dumps(ai_data.get("mcqs", [])) if not is_essay_mode else "[]",
-                essays=json.dumps(ai_data.get("questions", [])) if is_essay_mode else None,
+                summary=mcq_data.get("summary", ""),
+                key_concepts=json.dumps(mcq_data.get("key_concepts", [])),
+                mcqs=json.dumps(mcq_data.get("mcqs", [])) if not is_essay_mode else "[]",
+                essays=json.dumps(essay_data.get("questions", [])) if essay_data.get("questions") else None,
                 custom_context=saved_context,
                 mode=job.mode,
             )
             db.add(result)
             db.commit()
 
-        ai_title = ai_data.get("_meta", {}).get("ai_title", "") if not is_essay_mode else ""
+        ai_title = mcq_data.get("_meta", {}).get("ai_title", "") if not is_essay_mode else ""
         if ai_title:
             lecture.title = ai_title
             db.commit()

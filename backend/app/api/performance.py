@@ -8,6 +8,7 @@ from typing import List
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -3086,6 +3087,7 @@ def get_daily_test(
         "generated_at": cache.generated_at.isoformat(),
         "date": str(cache.date),
         "has_questions": len(questions) > 0,
+        "answers": cache.answers or {},
         "questions": [
             {
                 "id": q.id,
@@ -3102,6 +3104,40 @@ def get_daily_test(
             for q in questions
         ],
     }
+
+
+# ─────────────────────────────────────────────────────────────────
+# DAILY TEST — save per-question answer & check progress
+# ─────────────────────────────────────────────────────────────────
+
+class DailyTestSaveProgressRequest(BaseModel):
+    answers: dict[str, str]   # question_id → selected_letter
+
+@router.post("/students/me/daily-test/save-answer")
+def save_daily_test_answer(
+    body: DailyTestSaveProgressRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Save daily test progress per question so users can resume later.
+    Overwrites the answers map entirely with the client's current state.
+    """
+    from datetime import date as _date
+    today = datetime.now(timezone.utc).date()
+
+    cache = db.query(DailyTestCache).filter(
+        DailyTestCache.student_id == current_user.id,
+        DailyTestCache.date == today,
+    ).first()
+
+    if not cache:
+        raise HTTPException(status_code=404, detail="No daily test found for today")
+
+    cache.answers = body.answers
+    db.commit()
+
+    return {"status": "ok"}
 
 
 # ─────────────────────────────────────────────────────────────────
