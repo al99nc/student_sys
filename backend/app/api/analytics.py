@@ -173,6 +173,7 @@ async def get_dashboard(
         college=user.college,
         year_of_study=user.year_of_study,
         credit_balance=user.credit_balance or 0,
+        profile_picture=user.profile_picture,
     )
 
     entitlements = EntitlementsSummary(

@@ -27,12 +27,14 @@ const MOBILE_NAV = [
 export function AppHeader({ activePage }: { activePage: string }) {
   const [credits, setCredits] = useState<number | null>(null);
   const [initial, setInitial] = useState("?");
+  const [profilePic, setProfilePic] = useState<string | null>(null);
 
   useEffect(() => {
     getMe()
       .then(({ data }) => {
         setCredits(data.credit_balance);
         if (data.name) setInitial(data.name.charAt(0).toUpperCase());
+        if (data.profile_picture) setProfilePic(data.profile_picture);
       })
       .catch(() => {});
   }, []);
@@ -74,9 +76,13 @@ export function AppHeader({ activePage }: { activePage: string }) {
             <Link
               href="/account"
               prefetch={false}
-              className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-sm hover:opacity-80 transition-opacity"
+              className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-sm hover:opacity-80 transition-opacity overflow-hidden"
             >
-              {initial}
+              {profilePic ? (
+                <img src={`/uploads/${profilePic}`} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                initial
+              )}
             </Link>
           </div>
         </div>

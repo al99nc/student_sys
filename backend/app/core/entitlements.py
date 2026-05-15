@@ -338,11 +338,18 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
     # Pre-check: would this spend exceed the monthly limit?
     limit = user.monthly_credit_limit
     if limit is not None and (user.monthly_credits_used or 0) + amount > limit:
-        # Auto-disable the toggle and downgrade
-        db.execute(
-            text("UPDATE users SET extra_usage_enabled = 0, plan = 'free' WHERE id = :id"),
-            {"id": user.id},
-        )
+        # Auto-disable the toggle but don't downgrade paid plans
+        current_plan = (user.plan or "free").lower()
+        if current_plan in ("pro", "enterprise"):
+            db.execute(
+                text("UPDATE users SET extra_usage_enabled = 0 WHERE id = :id"),
+                {"id": user.id},
+            )
+        else:
+            db.execute(
+                text("UPDATE users SET extra_usage_enabled = 0, plan = 'free' WHERE id = :id"),
+                {"id": user.id},
+            )
         db.commit()
         db.refresh(user)
         return False
@@ -364,17 +371,19 @@ def try_spend_credits(db: Session, user: User, amount: int, *, commit: bool = Tr
     ok = bool(getattr(res, "rowcount", 0))
     if ok:
         db.refresh(user)
-        if (user.credit_balance or 0) == 0 and (user.plan or "free") == "pro":
-            db.execute(text("UPDATE users SET plan = 'free' WHERE id = :id"), {"id": user.id})
-            if commit:
-                db.commit()
-            db.refresh(user)
         # Auto-disable toggle if the monthly limit is now exactly hit or exceeded
         if limit is not None and (user.monthly_credits_used or 0) >= limit:
-            db.execute(
-                text("UPDATE users SET extra_usage_enabled = 0, plan = 'free' WHERE id = :id"),
-                {"id": user.id},
-            )
+            current_plan = (user.plan or "free").lower()
+            if current_plan in ("pro", "enterprise"):
+                db.execute(
+                    text("UPDATE users SET extra_usage_enabled = 0 WHERE id = :id"),
+                    {"id": user.id},
+                )
+            else:
+                db.execute(
+                    text("UPDATE users SET extra_usage_enabled = 0, plan = 'free' WHERE id = :id"),
+                    {"id": user.id},
+                )
             if commit:
                 db.commit()
             db.refresh(user)

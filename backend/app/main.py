@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import exc as sa_exc, text
@@ -91,6 +92,7 @@ with engine.connect() as _conn:
         "CREATE TABLE IF NOT EXISTS magic_link_tokens (id VARCHAR(36) PRIMARY KEY, email VARCHAR NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, used INTEGER NOT NULL DEFAULT 0, created_at DATETIME)",
         "ALTER TABLE magic_link_tokens ADD COLUMN otp_code VARCHAR(6)",
         "ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(32)",
+        "ALTER TABLE users ADD COLUMN profile_picture VARCHAR(255)",
         "CREATE TABLE IF NOT EXISTS bot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id VARCHAR(32) UNIQUE, email VARCHAR NOT NULL, jwt VARCHAR, state VARCHAR(20) NOT NULL DEFAULT 'waiting_email', expires_at DATETIME NOT NULL, created_at DATETIME)",
         "ALTER TABLE daily_test_cache ADD COLUMN answers TEXT",
     ]:
@@ -174,6 +176,12 @@ app.include_router(analytics.router)
 app.include_router(billing.router)
 app.include_router(content_api.router)
 app.include_router(flashcards_api.router)
+
+# Serve uploaded files (profile pictures, etc.)
+import os as _os
+_uploads_dir = _os.path.abspath(settings.UPLOAD_DIR)
+_os.makedirs(_uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 
 
 @app.get("/")

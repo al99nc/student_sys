@@ -47,6 +47,8 @@ class User(Base):
     signup_ip = Column(String(45), nullable=True, index=True)
     # Telegram chat ID linked via bot OTP verification
     telegram_chat_id = Column(String(32), nullable=True, index=True)
+    # Profile picture — stores relative path to uploaded file under UPLOAD_DIR/profile_pics/
+    profile_picture = Column(String(255), nullable=True)
 
     lectures = relationship("Lecture", back_populates="owner")
 

@@ -150,6 +150,7 @@ class UserProfile(BaseModel):
     college: Optional[str] = None
     year_of_study: Optional[int] = None
     credit_balance: int = 0
+    profile_picture: Optional[str] = None
 
     @field_validator("id", mode="before")
     @classmethod

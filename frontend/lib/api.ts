@@ -67,6 +67,7 @@ export interface UserOut {
   plan: "free" | "pro" | "enterprise";
   is_admin: boolean;
   created_at: string;
+  profile_picture: string | null;
 }
 
 export interface TokenOut {
@@ -184,6 +185,21 @@ export const createCheckoutSession = (credits: number) =>
 export const saveOnboarding = (name: string, university: string, college: string, year_of_study: number) =>
   api.post("/auth/onboarding", { name, university, college, year_of_study });
 
+export const updateProfile = (data: {
+  name?: string;
+  university?: string;
+  college?: string;
+  year_of_study?: number;
+}) => api.put<UserOut>("/auth/profile", data);
+
+export const uploadProfilePicture = (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api.post<UserOut>("/auth/profile/picture", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
 // Lectures
 export const uploadLecture = (file: File) => {
   const form = new FormData();
@@ -244,6 +260,7 @@ export interface DashboardData {
     college: string | null;
     year_of_study: number | null;
     credit_balance: number;
+    profile_picture: string | null;
   };
   entitlements: {
     plan: string;

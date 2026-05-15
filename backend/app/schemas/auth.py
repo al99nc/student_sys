@@ -26,6 +26,7 @@ class UserOut(BaseModel):
     plan: str = "free"
     is_admin: bool = False
     created_at: datetime
+    profile_picture: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -58,6 +59,19 @@ class OnboardingUpdate(BaseModel):
     @classmethod
     def strip_whitespace(cls, v: str) -> str:
         return v.strip()
+
+
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    university: Optional[str] = Field(None, min_length=1, max_length=255)
+    college: Optional[str] = Field(None, min_length=1, max_length=120)
+    year_of_study: Optional[int] = Field(None, ge=1, le=10)
+
+    @field_validator("name", "university", "college")
+    @classmethod
+    def strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if v else v
+
 
 class Token(BaseModel):
     access_token: str

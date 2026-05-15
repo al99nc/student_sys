@@ -25,6 +25,8 @@ import {
   Zap,
 } from "lucide-react";
 
+
+
 interface Lecture {
   id: number;
   title: string;

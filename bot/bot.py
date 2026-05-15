@@ -268,13 +268,15 @@ async def handle_document(message: Message) -> None:
         await _del_session(chat_id)
         return
 
+    loading_msg = await message.reply("Processing your file, please wait...")
+
     try:
         tg_file    = await bot.get_file(doc.file_id)
         file_bytes = await bot.download_file(tg_file.file_path)
         pdf_data   = file_bytes.read()
     except Exception as exc:
         log.error("Telegram download failed: %s", exc)
-        await message.reply("Couldn't download the file from Telegram. Try again.")
+        await loading_msg.edit_text("Couldn't download the file from Telegram. Try again.")
         return
 
     lecture_id = None
@@ -296,38 +298,38 @@ async def handle_document(message: Message) -> None:
                 },
             ) as resp:
                 if resp.status == 401:
-                    await message.reply(
+                    await loading_msg.edit_text(
                         "Your session expired. Send /start to reconnect."
                     )
                     await _del_session(chat_id)
                     return
                 if resp.status == 413:
-                    await message.reply("That file is too large (max 50MB).")
+                    await loading_msg.edit_text("That file is too large (max 50MB).")
                     return
                 if resp.status == 400:
                     body = await resp.json()
-                    await message.reply(
+                    await loading_msg.edit_text(
                         f"Couldn't process the file: {body.get('detail', 'unknown error')}."
                     )
                     return
                 if resp.status != 200:
-                    await message.reply("Upload failed. Try again in a moment.")
+                    await loading_msg.edit_text("Upload failed. Try again in a moment.")
                     return
 
                 data       = await resp.json()
                 lecture_id = data.get("lecture_id")
     except Exception as exc:
         log.error("Bot upload-pdf failed: %s", exc)
-        await message.reply("Server error during upload. Try again.")
+        await loading_msg.edit_text("Server error during upload. Try again.")
         return
 
     if not lecture_id:
-        await message.reply("Upload failed -- no lecture ID returned. Try again.")
+        await loading_msg.edit_text("Upload failed -- no lecture ID returned. Try again.")
         return
 
     deep_link = f"{MINI_APP_URL}?lecture={lecture_id}"
 
-    await message.reply(
+    await loading_msg.edit_text(
         "Got it. Tap below to use your file",
         reply_markup=_open_app_button("Open in CortexQ", deep_link),
     )

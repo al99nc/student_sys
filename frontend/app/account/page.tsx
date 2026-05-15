@@ -3,14 +3,14 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isAuthenticated, logout } from "@/lib/auth";
-import { getMe, saveOnboarding, UserOut } from "@/lib/api";
+import { getMe, updateProfile, uploadProfilePicture, UserOut } from "@/lib/api";
 import { StepNav } from "@/components/step-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Home, Upload, Bot, BarChart3, Camera, LogOut, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, Home, Upload, Bot, BarChart3, Camera, LogOut, Pencil, Check, X, Loader2 } from "lucide-react";
 
-const AVATAR_KEY = "themcq_avatar";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -18,24 +18,36 @@ export default function AccountPage() {
 
   const [user, setUser] = useState<UserOut | null>(null);
   const [loading, setLoading] = useState(true);
-  const [avatar, setAvatar] = useState<string | null>(null);
+  const [uploadingPic, setUploadingPic] = useState(false);
+
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
-  const [savingName, setSavingName] = useState(false);
-  const [nameError, setNameError] = useState("");
+
+  const [editingUni, setEditingUni] = useState(false);
+  const [uniInput, setUniInput] = useState("");
+
+  const [editingCollege, setEditingCollege] = useState(false);
+  const [collegeInput, setCollegeInput] = useState("");
+
+  const [editingYear, setEditingYear] = useState(false);
+  const [yearInput, setYearInput] = useState(1);
+
+  const [savingField, setSavingField] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState("");
 
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push("/auth");
       return;
     }
-    const storedAvatar = localStorage.getItem(AVATAR_KEY);
-    if (storedAvatar) setAvatar(storedAvatar);
 
     getMe()
       .then((res) => {
         setUser(res.data);
         setNameInput(res.data.name ?? "");
+        setUniInput(res.data.university ?? "");
+        setCollegeInput(res.data.college ?? "");
+        setYearInput(res.data.year_of_study ?? 1);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -45,48 +57,59 @@ export default function AccountPage() {
     fileInputRef.current?.click();
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setAvatar(dataUrl);
-      localStorage.setItem(AVATAR_KEY, dataUrl);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  }
-
-  async function handleSaveName() {
-    if (!user) return;
-    const trimmed = nameInput.trim();
-    if (!trimmed) {
-      setNameError("Name cannot be empty");
-      return;
-    }
-    setSavingName(true);
-    setNameError("");
+    setUploadingPic(true);
     try {
-      await saveOnboarding(
-        trimmed,
-        user.university ?? "",
-        user.college ?? "",
-        user.year_of_study ?? 1,
-      );
-      setUser((prev) => prev ? { ...prev, name: trimmed } : prev);
-      setEditingName(false);
+      const res = await uploadProfilePicture(file);
+      setUser(res.data);
     } catch {
-      setNameError("Failed to save. Please try again.");
+      // fallback: keep local
     } finally {
-      setSavingName(false);
+      setUploadingPic(false);
+      e.target.value = "";
     }
   }
 
-  function handleCancelEdit() {
-    setNameInput(user?.name ?? "");
-    setNameError("");
-    setEditingName(false);
+  async function handleSaveField(field: string, value: string | number) {
+    if (!user) return;
+    setSavingField(field);
+    setFieldError("");
+    try {
+      const payload: Record<string, string | number> = {};
+      if (field === "name") {
+        if (typeof value === "string" && !value.trim()) {
+          setFieldError("Name cannot be empty");
+          setSavingField(null);
+          return;
+        }
+        payload.name = typeof value === "string" ? value.trim() : value;
+      }
+      if (field === "university") payload.university = typeof value === "string" ? value.trim() : value;
+      if (field === "college") payload.college = typeof value === "string" ? value.trim() : value;
+      if (field === "year_of_study") payload.year_of_study = value;
+
+      const res = await updateProfile(payload);
+      setUser(res.data);
+      setEditingName(false);
+      setEditingUni(false);
+      setEditingCollege(false);
+      setEditingYear(false);
+    } catch {
+      setFieldError("Failed to save. Please try again.");
+    } finally {
+      setSavingField(null);
+    }
+  }
+
+  function handleCancelEdit(field: string) {
+    if (!user) return;
+    if (field === "name") { setNameInput(user.name ?? ""); setEditingName(false); }
+    if (field === "university") { setUniInput(user.university ?? ""); setEditingUni(false); }
+    if (field === "college") { setCollegeInput(user.college ?? ""); setEditingCollege(false); }
+    if (field === "year_of_study") { setYearInput(user.year_of_study ?? 1); setEditingYear(false); }
+    setFieldError("");
   }
 
   if (loading) {
@@ -101,9 +124,12 @@ export default function AccountPage() {
     ? user.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
     : user?.email?.[0]?.toUpperCase() ?? "U";
 
+  const picSrc = user?.profile_picture
+    ? `${API_URL.replace("/api", "")}/uploads/${user.profile_picture}`
+    : null;
+
   return (
     <div className="min-h-screen bg-background text-foreground pb-20 md:pb-0">
-      {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
           <Link href="/dashboard" className="text-xl font-bold text-foreground">
@@ -141,23 +167,27 @@ export default function AccountPage() {
                 onClick={handleAvatarClick}
                 className="relative group focus:outline-none"
                 aria-label="Change profile picture"
+                disabled={uploadingPic}
               >
                 <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-primary/40 bg-muted flex items-center justify-center text-3xl font-bold text-primary">
-                  {avatar ? (
-                    <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+                  {uploadingPic ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                  ) : picSrc ? (
+                    <img src={picSrc} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
                     initials
                   )}
                 </div>
-                <span className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
                   <Camera className="w-5 h-5 text-white" />
                 </span>
               </button>
               <button
                 onClick={handleAvatarClick}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                disabled={uploadingPic}
               >
-                Change photo
+                {uploadingPic ? "Uploading..." : "Change photo"}
               </button>
               <input
                 ref={fileInputRef}
@@ -169,54 +199,90 @@ export default function AccountPage() {
             </div>
 
             {/* Name edit */}
+            <EditableField
+              label="Display name"
+              value={nameInput}
+              editing={editingName}
+              onStartEdit={() => setEditingName(true)}
+              onSave={() => handleSaveField("name", nameInput)}
+              onCancel={() => handleCancelEdit("name")}
+              onChange={setNameInput}
+              saving={savingField === "name"}
+              error={editingName ? fieldError : ""}
+            />
+
+            {/* University edit */}
+            <EditableField
+              label="University"
+              value={uniInput}
+              editing={editingUni}
+              onStartEdit={() => setEditingUni(true)}
+              onSave={() => handleSaveField("university", uniInput)}
+              onCancel={() => handleCancelEdit("university")}
+              onChange={setUniInput}
+              saving={savingField === "university"}
+              error={editingUni ? fieldError : ""}
+            />
+
+            {/* College edit */}
+            <EditableField
+              label="College"
+              value={collegeInput}
+              editing={editingCollege}
+              onStartEdit={() => setEditingCollege(true)}
+              onSave={() => handleSaveField("college", collegeInput)}
+              onCancel={() => handleCancelEdit("college")}
+              onChange={setCollegeInput}
+              saving={savingField === "college"}
+              error={editingCollege ? fieldError : ""}
+            />
+
+            {/* Year edit */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Display name</label>
-              {editingName ? (
+              <label className="text-sm font-medium text-muted-foreground">Year</label>
+              {editingYear ? (
                 <div className="flex items-center gap-2">
-                  <input
+                  <select
                     autoFocus
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleSaveName();
-                      if (e.key === "Escape") handleCancelEdit();
-                    }}
+                    value={yearInput}
+                    onChange={(e) => setYearInput(Number(e.target.value))}
                     className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                  <Button size="icon" variant="default" className="h-9 w-9" onClick={handleSaveName} disabled={savingName}>
-                    {savingName ? <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                  >
+                    {[1, 2, 3, 4, 5, 6].map((y) => (
+                      <option key={y} value={y}>Year {y}</option>
+                    ))}
+                  </select>
+                  <Button size="icon" variant="default" className="h-9 w-9" onClick={() => handleSaveField("year_of_study", yearInput)} disabled={savingField === "year_of_study"}>
+                    {savingField === "year_of_study" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-4 h-4" />}
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-9 w-9" onClick={handleCancelEdit}>
+                  <Button size="icon" variant="ghost" className="h-9 w-9" onClick={() => handleCancelEdit("year_of_study")}>
                     <X className="w-4 h-4" />
                   </Button>
                 </div>
               ) : (
                 <div className="flex items-center justify-between h-9 rounded-md border border-input bg-muted/30 px-3">
-                  <span className="text-sm">{user?.name || <span className="text-muted-foreground italic">No name set</span>}</span>
+                  <span className="text-sm">{user?.year_of_study != null ? `Year ${user.year_of_study}` : <span className="text-muted-foreground italic">Not set</span>}</span>
                   <button
-                    onClick={() => setEditingName(true)}
+                    onClick={() => setEditingYear(true)}
                     className="text-muted-foreground hover:text-foreground transition-colors ml-2"
-                    aria-label="Edit name"
+                    aria-label="Edit year"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
-              {nameError && <p className="text-xs text-destructive">{nameError}</p>}
+              {editingYear && fieldError && <p className="text-xs text-destructive">{fieldError}</p>}
             </div>
           </CardContent>
         </Card>
 
-        {/* Account info */}
+        {/* Account info (read-only) */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="text-base">Account Info</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <Row label="Email" value={user?.email ?? "—"} />
-            <Row label="University" value={user?.university ?? "—"} />
-            <Row label="College" value={user?.college ?? "—"} />
-            <Row label="Year" value={user?.year_of_study != null ? `Year ${user.year_of_study}` : "—"} />
             <div className="flex items-center justify-between py-1">
               <span className="text-muted-foreground">Plan</span>
               <Badge variant={user?.plan === "pro" ? "default" : "secondary"} className="capitalize">
@@ -242,7 +308,6 @@ export default function AccountPage() {
         </Card>
       </main>
 
-      {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-background z-40">
         <div className="flex items-center justify-around h-16 px-2">
           <Link href="/dashboard" className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
@@ -272,6 +337,66 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between py-1">
       <span className="text-muted-foreground">{label}</span>
       <span className="text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function EditableField({
+  label,
+  value,
+  editing,
+  onStartEdit,
+  onSave,
+  onCancel,
+  onChange,
+  saving,
+  error,
+}: {
+  label: string;
+  value: string;
+  editing: boolean;
+  onStartEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onChange: (v: string) => void;
+  saving: boolean;
+  error: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-muted-foreground">{label}</label>
+      {editing ? (
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSave();
+              if (e.key === "Escape") onCancel();
+            }}
+            className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          <Button size="icon" variant="default" className="h-9 w-9 shrink-0" onClick={onSave} disabled={saving}>
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-4 h-4" />}
+          </Button>
+          <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={onCancel}>
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between h-9 rounded-md border border-input bg-muted/30 px-3">
+          <span className="text-sm">{value || <span className="text-muted-foreground italic">Not set</span>}</span>
+          <button
+            onClick={onStartEdit}
+            className="text-muted-foreground hover:text-foreground transition-colors ml-2 shrink-0"
+            aria-label={`Edit ${label}`}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+      {editing && error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

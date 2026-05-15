@@ -1,13 +1,16 @@
 
 
 import hashlib
+import os
 import random
 import secrets
+import shutil
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -25,6 +28,7 @@ from app.schemas.auth import (
     MagicLinkRequest,
     MagicLinkResponse,
     OnboardingUpdate,
+    ProfileUpdate,
     Token,
     UserCreate,
     UserLogin,
@@ -144,6 +148,63 @@ def save_onboarding(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.put("/profile", response_model=UserOut)
+def update_profile(
+    data: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if data.name is not None:
+        current_user.name = data.name.strip()
+    if data.university is not None:
+        current_user.university = data.university.strip()
+    if data.college is not None:
+        current_user.college = data.college.strip()
+    if data.year_of_study is not None:
+        current_user.year_of_study = data.year_of_study
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.post("/profile/picture", response_model=UserOut)
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    profile_dir = Path(settings.UPLOAD_DIR) / "profile_pics"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = os.path.splitext(file.filename or ".jpg")[1] or ".jpg"
+    filename = f"{current_user.id}{ext}"
+    filepath = profile_dir / filename
+
+    with open(filepath, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    current_user.profile_picture = f"profile_pics/{filename}"
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.get("/profile/picture/{user_id}")
+def get_profile_picture(user_id: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.profile_picture:
+        raise HTTPException(status_code=404, detail="Profile picture not found")
+
+    filepath = Path(settings.UPLOAD_DIR) / user.profile_picture
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Profile picture not found")
+
+    return FileResponse(str(filepath))
 
 
 @router.post("/request-link", response_model=MagicLinkResponse)
