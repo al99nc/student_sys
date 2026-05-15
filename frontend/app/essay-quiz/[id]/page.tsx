@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   ArrowLeft, Brain, CheckCircle2, XCircle, Loader2,
-  ChevronRight, Home, BarChart3, BookOpen, Target, Share2, Check,
+  ChevronRight, Home, BookOpen, Target, Share2, Check,
 } from "lucide-react";
 
 interface GradedAnswer {
@@ -393,10 +393,6 @@ export default function EssayQuizPage() {
         <Link href="/lectures" className="flex flex-col items-center text-muted-foreground">
           <BookOpen className="w-6 h-6" />
           <span className="text-[10px] uppercase tracking-widest mt-1">Results</span>
-        </Link>
-        <Link href="/analytics" className="flex flex-col items-center text-muted-foreground">
-          <BarChart3 className="w-6 h-6" />
-          <span className="text-[10px] uppercase tracking-widest mt-1">Stats</span>
         </Link>
       </nav>
 

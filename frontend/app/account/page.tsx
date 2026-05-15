@@ -1,14 +1,13 @@
 ﻿"use client";
 import { useState, useEffect, useRef } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isAuthenticated, logout } from "@/lib/auth";
 import { getMe, updateProfile, uploadProfilePicture, UserOut } from "@/lib/api";
-import { StepNav } from "@/components/step-nav";
+import { AppHeader } from "@/components/app-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Home, Upload, Bot, BarChart3, Camera, LogOut, Pencil, Check, X, Loader2 } from "lucide-react";
+import { Camera, LogOut, Pencil, Check, X, Loader2 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -130,27 +129,7 @@ export default function AccountPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-20 md:pb-0">
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" className="text-xl font-bold text-foreground">
-            themcq
-          </Link>
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
-            <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>
-            <Link href="/upload" className="text-muted-foreground hover:text-foreground transition-colors">Upload</Link>
-            <Link href="/coach" className="text-muted-foreground hover:text-foreground transition-colors">Coach</Link>
-            <Link href="/analytics" className="text-muted-foreground hover:text-foreground transition-colors">Analytics</Link>
-          </nav>
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Dashboard</span>
-          </Link>
-        </div>
-        <StepNav steps={[{ label: "Dashboard", href: "/dashboard" }, { label: "Account" }]} />
-      </header>
+      <AppHeader activePage="Account" />
 
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         <h1 className="text-2xl font-bold mb-8">Account Settings</h1>
@@ -307,27 +286,6 @@ export default function AccountPage() {
           </CardContent>
         </Card>
       </main>
-
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-background z-40">
-        <div className="flex items-center justify-around h-16 px-2">
-          <Link href="/dashboard" className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
-            <Home className="w-5 h-5" />
-            <span className="text-[10px]">Home</span>
-          </Link>
-          <Link href="/upload" className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
-            <Upload className="w-5 h-5" />
-            <span className="text-[10px]">Upload</span>
-          </Link>
-          <Link href="/coach" className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
-            <Bot className="w-5 h-5" />
-            <span className="text-[10px]">Coach</span>
-          </Link>
-          <Link href="/analytics" className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
-            <BarChart3 className="w-5 h-5" />
-            <span className="text-[10px]">Analytics</span>
-          </Link>
-        </div>
-      </nav>
     </div>
   );
 }

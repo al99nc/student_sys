@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getMe } from "@/lib/api";
-import { Home, Upload, Bot, BarChart3, BookOpen, CreditCard, Layers, Sparkles } from "lucide-react";
+import { Home, Upload, Bot, BookOpen, CreditCard, Layers, Sparkles } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
@@ -11,7 +11,6 @@ const NAV = [
   { label: "Lectures", href: "/lectures" },
   { label: "Flashcards", href: "/flashcards" },
   { label: "Coach", href: "/coach" },
-  { label: "Analytics", href: "/analytics" },
 ];
 
 const MOBILE_NAV = [
@@ -21,7 +20,6 @@ const MOBILE_NAV = [
   { label: "Lectures", href: "/lectures", icon: BookOpen },
   { label: "Flashcards", href: "/flashcards", icon: Layers },
   { label: "Coach", href: "/coach", icon: Bot },
-  { label: "Analytics", href: "/analytics", icon: BarChart3 },
 ];
 
 export function AppHeader({ activePage }: { activePage: string }) {

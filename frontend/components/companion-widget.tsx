@@ -315,7 +315,6 @@ const PAGE_SUGGESTIONS: Record<string, string[]> = {
   "/lectures":  ["How do I open a lecture?", "Can I delete a lecture?"],
   "/dashboard": ["What is readiness score?", "How do I start a session?"],
   "/coach":     ["How do I start a conversation?", "What can the coach do?"],
-  "/analytics": ["What does accuracy trend mean?", "What is calibration gap?"],
   "/billing":   ["How do credits work?", "What's included in Pro?"],
 };
 

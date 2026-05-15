@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 if (typeof window !== "undefined") {
-  pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";

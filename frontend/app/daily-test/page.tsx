@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Brain,
   Zap,
-  BarChart3,
   BookOpen,
   RotateCcw,
   Home,
@@ -292,12 +291,6 @@ export default function DailyTestPage() {
               <Link href="/dashboard" prefetch={false}>
                 <Home className="h-4 w-4 mr-2" />
                 Dashboard
-              </Link>
-            </Button>
-            <Button variant="outline" className="flex-1" asChild>
-              <Link href="/analytics" prefetch={false}>
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Analytics
               </Link>
             </Button>
           </div>

@@ -63,10 +63,6 @@ export default function SolvedSharedPage() {
             <span className="material-symbols-outlined">folder_shared</span>
             <span className="hidden lg:inline font-medium">Solved Shared</span>
           </a>
-          <Link href="/analytics" className="flex items-center gap-4 text-slate-400 px-4 py-3 hover:bg-white/5 rounded-xl hover:text-[#00D2FD] transition-all duration-300">
-            <span className="material-symbols-outlined">analytics</span>
-            <span className="hidden lg:inline font-medium">Analytics</span>
-          </Link>
         </nav>
       </aside>
 
