@@ -17,9 +17,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import User, Lecture, BotSession
+from app.models.models import User, Lecture, BotSession, UserSession
 from app.core.config import settings
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token, create_session
 from app.core.limiter import limiter
 from app.core.otp import generate_and_store, verify_code, send_otp_email
 from app.services.pdf_service import extract_text_from_pdf
@@ -122,7 +122,11 @@ def telegram_auth(request: Request, body: TelegramInitDataRequest, db: Session =
     # return a JWT for their real account (with their real email, lectures, etc.)
     linked_user = db.query(User).filter(User.telegram_chat_id == str(telegram_id)).first()
     if linked_user:
-        token = create_access_token({"sub": str(linked_user.id), "is_admin": bool(linked_user.is_admin)})
+        db.query(UserSession).filter(UserSession.user_id == linked_user.id).delete()
+        db.commit()
+        sid, stk = create_session(db, linked_user.id)
+        db.commit()
+        token = create_access_token({"sub": str(linked_user.id), "sid": sid, "stk": stk})
         return {
             "access_token": token,
             "token_type": "bearer",
@@ -134,15 +138,16 @@ def telegram_auth(request: Request, body: TelegramInitDataRequest, db: Session =
     synthetic_email = f"tg_{telegram_id}@telegram.local"
     user = db.query(User).filter(User.email == synthetic_email).first()
     if not user:
-        user = User(
-            email=synthetic_email,
-            hashed_password=hash_password(secrets.token_hex(32)),
-        )
+        user = User(email=synthetic_email)
         db.add(user)
         db.commit()
         db.refresh(user)
 
-    token = create_access_token({"sub": str(user.id), "is_admin": bool(user.is_admin)})
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+    sid, stk = create_session(db, user.id)
+    db.commit()
+    token = create_access_token({"sub": str(user.id), "sid": sid, "stk": stk})
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -251,10 +256,7 @@ async def bot_send_code(
 
     user = db.query(User).filter(func.lower(User.email) == email).first()
     if not user:
-        user = User(
-            email=email,
-            hashed_password="!",
-        )
+        user = User(email=email)
         db.add(user)
         db.commit()
 
@@ -291,7 +293,11 @@ async def bot_verify_code(
     user.telegram_chat_id = str(body.chat_id)
     db.commit()
 
-    token = create_access_token({"sub": str(user.id), "is_admin": bool(user.is_admin)})
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+    sid, stk = create_session(db, user.id)
+    db.commit()
+    token = create_access_token({"sub": str(user.id), "sid": sid, "stk": stk})
     return {
         "access_token": token,
         "token_type": "bearer",

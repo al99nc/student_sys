@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getToken, logout, removeToken } from "./auth";
+import { getToken, removeToken, saveToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -20,12 +20,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// On every response, rotate the JWT if a new one was issued (session binding).
 // Redirect to /auth on any 401 (expired or invalid token).
-// Uses replace() instead of href assignment so the auth page doesn't stack in history.
-// Flag resets after redirect so re-authentication after token refresh works.
 let _redirectingTo401 = false;
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const newJwt = response.headers["x-new-jwt"];
+    if (newJwt && typeof newJwt === "string") {
+      saveToken(newJwt);
+    }
+    return response;
+  },
   (error) => {
     if (typeof window !== "undefined" && error?.response?.status === 401) {
       if (!_redirectingTo401) {
@@ -33,7 +38,6 @@ api.interceptors.response.use(
         console.warn("Received 401 — clearing token and redirecting to /auth");
         removeToken();
         window.location.replace("/auth");
-        // Reset after navigation completes so re-auth doesn't leave the flag stuck.
         setTimeout(() => { _redirectingTo401 = false; }, 5000);
       }
     }
@@ -73,6 +77,7 @@ export interface UserOut {
 export interface TokenOut {
   access_token: string;
   token_type: string;
+  is_new_user?: boolean;
 }
 
 export interface LectureOut {
@@ -81,6 +86,9 @@ export interface LectureOut {
   title: string;
   file_path: string;
   created_at: string;
+  is_processed?: boolean;
+  has_essays?: boolean;
+  pending_job_id?: string | null;
 }
 
 export interface McqItem {
@@ -121,13 +129,7 @@ export interface ViewersOut {
   share_token: string | null;
 }
 
-// Auth
-export const signup = (email: string, password: string) =>
-  api.post("/auth/signup", { email, password });
-
-export const login = (email: string, password: string) =>
-  api.post("/auth/login", { email, password });
-
+// Auth (passwordless)
 export const requestMagicLink = (email: string) =>
   api.post<{ message: string; email: string }>("/auth/request-link", { email });
 
@@ -192,6 +194,18 @@ export const updateProfile = (data: {
   year_of_study?: number;
 }) => api.put<UserOut>("/auth/profile", data);
 
+export interface SessionOut {
+  id: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string;
+}
+
+export const listSessions = () => api.get<SessionOut[]>("/auth/sessions");
+
+export const revokeSession = (sessionId: string) => api.delete(`/auth/sessions/${sessionId}`);
+
 export const uploadProfilePicture = (file: File) => {
   const form = new FormData();
   form.append("file", file);
@@ -204,13 +218,13 @@ export const uploadProfilePicture = (file: File) => {
 export const uploadLecture = (file: File) => {
   const form = new FormData();
   form.append("file", file);
-  return api.post("/upload", form, {
+  return api.post("/lap", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
 };
 
 export const uploadText = (text: string, title: string) =>
-  api.post("/upload-text", { text, title });
+  api.post("/lap-text", { text, title });
 
 export const extractImageText = (imageFile: File) => {
   const form = new FormData();

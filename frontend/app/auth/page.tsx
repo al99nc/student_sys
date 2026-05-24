@@ -29,6 +29,114 @@ const STEP_ICONS = ["person", "school", "domain", "military_tech"];
 
 type Screen = "form" | "otp" | "onboarding";
 
+const DOMAIN_SUGGESTIONS = [
+  "@gmail.com",
+  "@yahoo.com",
+  "@outlook.com",
+  "@hotmail.com",
+  "@icloud.com",
+  "@proton.me",
+  "@live.com",
+  "@uottawa.ca",
+];
+
+function EmailInputWithSuggestions({
+  value,
+  onChange,
+  ref: outerRef,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  ref: React.RefObject<HTMLInputElement | null>;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const atIndex = value.indexOf("@");
+  const localPart = atIndex === -1 ? value : value.slice(0, atIndex);
+  const typedDomain = atIndex === -1 ? "" : value.slice(atIndex).toLowerCase();
+
+  const matches = atIndex !== -1 && typedDomain.length >= 2 && focused
+    ? DOMAIN_SUGGESTIONS.filter((d) => d.startsWith(typedDomain) && d !== typedDomain)
+    : [];
+
+  const applySuggestion = (domain: string) => {
+    onChange(`${localPart}${domain}`);
+    setSelectedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (matches.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((i) => (i + 1) % matches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((i) => (i <= 0 ? matches.length - 1 : i - 1));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      if (selectedIndex >= 0 && selectedIndex < matches.length) {
+        e.preventDefault();
+        applySuggestion(matches[selectedIndex]);
+      }
+    } else if (e.key === "Escape") {
+      setFocused(false);
+    }
+  };
+
+  // Reset selection when matches change
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [matches.length]);
+
+  return (
+    <div className="relative">
+      <input
+        ref={outerRef}
+        type="email"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onKeyDown={handleKeyDown}
+        required
+        autoComplete="email"
+        placeholder="you@university.edu"
+        className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 placeholder:text-muted-foreground transition-colors"
+      />
+      {matches.length > 0 && (
+        <div
+          ref={listRef}
+          className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-card shadow-xl overflow-hidden"
+        >
+          {matches.map((domain, i) => {
+            const full = `${localPart}${domain}`;
+            const labelStart = localPart;
+            const labelEnd = domain;
+            return (
+              <button
+                key={domain}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); applySuggestion(domain); }}
+                onMouseEnter={() => setSelectedIndex(i)}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                  i === selectedIndex
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/50"
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5 shrink-0 text-muted-foreground/50" />
+                <span className="font-medium text-foreground">{labelStart}</span>
+                <span className="font-semibold text-primary">{labelEnd}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AuthPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -138,9 +246,14 @@ function AuthPageInner() {
     try {
       const res = await verifyCode(sentEmail, code);
       saveToken(res.data.access_token);
-      const userRes = await getMe();
-      if (!userRes.data.name) {
-        router.replace("/auth?onboarding=true");
+      const redirectToOnboarding = () => router.replace("/auth?onboarding=true");
+      if (res.data.is_new_user) {
+        redirectToOnboarding();
+        return;
+      }
+      const me = await getMe();
+      if (!me.data.name) {
+        redirectToOnboarding();
       } else {
         const redirectTo = sessionStorage.getItem("auth_redirect") || "/dashboard";
         sessionStorage.removeItem("auth_redirect");
@@ -601,18 +714,13 @@ function AuthPageInner() {
             </>
           )}
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
-            <div className="flex flex-col gap-1.5">
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+            <div className="flex flex-col gap-1.5 relative">
               <label className="text-xs font-semibold text-muted-foreground">Email address</label>
-              <input
+              <EmailInputWithSuggestions
                 ref={emailRef}
-                type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                placeholder="you@university.edu"
-                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 placeholder:text-muted-foreground transition-colors"
+                onChange={setEmail}
               />
             </div>
 

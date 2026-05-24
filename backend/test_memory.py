@@ -17,15 +17,16 @@ Usage:
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
+from pathlib import Path
 
 import requests
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 DEFAULT_BASE  = "http://localhost:8000"
 TEST_EMAIL    = "memtest@themcq.local"
-TEST_PASSWORD = "memtest_pass_1337"
 
 # ── ANSI colours ───────────────────────────────────────────────────────────────
 GREEN  = "\033[92m"
@@ -45,27 +46,64 @@ class MemoryTester:
         self.headers: dict = {}
         self.results: list[tuple[str, bool]] = []
 
-    # ── Auth ──────────────────────────────────────────────────────────────────
+    # ── Auth (passwordless: magic-link → OTP from local DB) ─────────────────
+
+    def _db_path(self) -> str:
+        """Resolve the SQLite DB path relative to the backend dir."""
+        base = Path(self.base.replace("http://", "").replace(":8000", "").replace("localhost", "."))
+        candidates = [
+            Path("../backend/students.db"),
+            Path("./students.db"),
+            Path.cwd() / "students.db",
+            Path.cwd().parent / "backend" / "students.db",
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c.resolve())
+        return str(candidates[0])
 
     def login(self):
-        r = requests.post(f"{self.base}/auth/login", json={
-            "email": TEST_EMAIL, "password": TEST_PASSWORD,
-        })
-        if r.status_code == 200:
-            self.token = r.json()["access_token"]
-        elif r.status_code == 401:
-            # Account doesn't exist yet — create it then login
-            s = requests.post(f"{self.base}/auth/signup", json={
-                "email": TEST_EMAIL, "password": TEST_PASSWORD,
-            })
-            if s.status_code not in (200, 201):
-                raise RuntimeError(f"Signup failed ({s.status_code}): {s.text}")
-            r2 = requests.post(f"{self.base}/auth/login", json={
-                "email": TEST_EMAIL, "password": TEST_PASSWORD,
-            })
-            r2.raise_for_status()
-            self.token = r2.json()["access_token"]
+        # 1. Request magic link (this creates the user if new)
+        r = requests.post(f"{self.base}/auth/request-link", json={"email": TEST_EMAIL})
+        if r.status_code not in (200, 429):
+            raise RuntimeError(f"request-link failed ({r.status_code}): {r.text}")
 
+        # 2. Read the OTP code directly from the local SQLite DB
+        db_path = self._db_path()
+        try:
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT otp_code FROM magic_link_tokens WHERE email = ? ORDER BY created_at DESC LIMIT 1",
+                (TEST_EMAIL,),
+            ).fetchone()
+            conn.close()
+        except Exception as exc:
+            raise RuntimeError(f"Failed to read OTP from DB ({db_path}): {exc}")
+
+        if not row or not row[0]:
+            raise RuntimeError("No OTP code found in magic_link_tokens — check DB path")
+
+        otp = row[0]
+
+        # 3. Verify the OTP to get a JWT
+        r = requests.post(f"{self.base}/auth/verify-code", json={"email": TEST_EMAIL, "code": otp})
+        if r.status_code not in (200, 400):
+            raise RuntimeError(f"verify-code failed ({r.status_code}): {r.text}")
+        if r.status_code == 400:
+            # Maybe the OTP expired; try requesting a fresh link
+            requests.post(f"{self.base}/auth/request-link", json={"email": TEST_EMAIL})
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT otp_code FROM magic_link_tokens WHERE email = ? ORDER BY created_at DESC LIMIT 1",
+                (TEST_EMAIL,),
+            ).fetchone()
+            conn.close()
+            if not row or not row[0]:
+                raise RuntimeError("No OTP after retry")
+            r = requests.post(f"{self.base}/auth/verify-code", json={"email": TEST_EMAIL, "code": row[0]})
+            r.raise_for_status()
+
+        self.token = r.json()["access_token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
         print(f"{CYAN}Authenticated as {TEST_EMAIL}{RESET}")
 

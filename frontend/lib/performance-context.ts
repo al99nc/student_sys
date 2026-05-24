@@ -23,15 +23,19 @@ export async function getPerformanceContext(): Promise<string> {
     ];
 
     if (overview.weakest_topic) {
+      const weakestAcc = Math.round((overview.weakest_topic.accuracy_rate ?? 0) * 100);
       lines.push(
-        `Weakest topic: ${overview.weakest_topic.topic} (${Math.round(overview.weakest_topic.accuracy_rate * 100)}% accuracy)`,
+        `Weakest topic: ${overview.weakest_topic.topic} (${weakestAcc}% accuracy)`,
       );
     }
 
     if (weak_topics.topics.length > 0) {
       const topFive = weak_topics.topics
         .slice(0, 5)
-        .map((t) => `  • ${t.subtopic}: ${Math.round(t.accuracy_rate * 100)}% acc, ${t.error_count} errors (${t.decay_severity})`)
+        .map((t) => {
+          const acc = Math.round((t.accuracy_rate ?? 0) * 100);
+          return `  • ${t.subtopic}: ${acc}% acc, ${t.error_count} errors (${t.decay_severity})`;
+        })
         .join("\n");
       lines.push(`Struggling topics:\n${topFive}`);
     }

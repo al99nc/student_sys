@@ -81,3 +81,4 @@ def set_credits(
     db.commit()
     db.refresh(user)
     return SetCreditsResponse(email=user.email, credit_balance=user.credit_balance)
+

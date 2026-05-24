@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
-import { CheckCircle2, RotateCcw, X } from "lucide-react";
+import { CheckCircle2, RotateCcw, X, AlertCircle } from "lucide-react";
 
 const RATING_CONFIG = [
   { rating: 1, label: "Again", emoji: "🔴", description: "Didn't know it",        key: "1", color: "bg-red-600 hover:bg-red-500 active:bg-red-700" },
@@ -36,18 +36,30 @@ function FlashcardReviewContent() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [sessionStats, setSessionStats] = useState({ reviewed: 0, time: 0, ratings: [] as number[] });
+  const [hasAnyCards, setHasAnyCards] = useState(false);
 
   const cardStartTime = useRef<number>(Date.now());
   const sessionStart = useRef<number>(Date.now());
 
   useEffect(() => {
     if (!isAuthenticated()) { router.replace("/auth"); return; }
+    setLoading(true);
+    setError("");
     getDueFlashcards(documentId, 50)
-      .then((res) => { setCards(res.data.cards); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then((res) => {
+        const fetchedCards = res.data.cards || [];
+        setCards(fetchedCards);
+        setHasAnyCards(fetchedCards.length > 0 || (res.data as any).total_cards > 0);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError("Could not load flashcards. Check your connection.");
+        setLoading(false);
+      });
   }, [documentId, router]);
 
   const currentCard = cards[currentIndex];
@@ -91,7 +103,24 @@ function FlashcardReviewContent() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">
-        Loading cards...
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-border border-t-foreground/60 animate-spin" />
+          <p className="text-sm">Loading cards...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background">
+        <AppHeader activePage="Flashcards" />
+        <div className="flex flex-col items-center justify-center gap-4 py-32 text-foreground">
+          <AlertCircle className="w-12 h-12 text-destructive" />
+          <h2 className="text-2xl font-bold">Something went wrong</h2>
+          <p className="text-muted-foreground text-sm max-w-md text-center">{error}</p>
+          <Button onClick={() => router.push("/flashcards")}>Back to Flashcards</Button>
+        </div>
       </div>
     );
   }
@@ -100,11 +129,24 @@ function FlashcardReviewContent() {
     return (
       <div className="min-h-screen bg-background">
         <AppHeader activePage="Flashcards" />
-        <div className="flex flex-col items-center justify-center gap-4 py-32 text-foreground">
+        <div className="flex flex-col items-center justify-center gap-4 py-32 text-foreground px-4">
           <CheckCircle2 className="w-12 h-12 text-emerald-500" />
-          <h2 className="text-2xl font-bold">All caught up!</h2>
-          <p className="text-muted-foreground">No cards due right now.</p>
-          <Button onClick={() => router.push("/flashcards")}>Back to Flashcards</Button>
+          <h2 className="text-2xl font-bold">
+            {hasAnyCards ? "All caught up!" : "No flashcards yet"}
+          </h2>
+          <p className="text-muted-foreground text-sm max-w-sm text-center">
+            {hasAnyCards
+              ? "All cards reviewed for today. Great work! Come back tomorrow."
+              : "Upload a lecture and generate flashcards first, then review them here."}
+          </p>
+          <div className="flex gap-3">
+            <Button onClick={() => router.push("/flashcards")}>Back to Hub</Button>
+            {!hasAnyCards && (
+              <Button variant="outline" onClick={() => router.push("/upload")}>
+                Upload a Lecture
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     );

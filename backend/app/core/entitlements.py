@@ -118,9 +118,14 @@ def daily_token_budget(user: User) -> int:
 
 # ── Usage counters ────────────────────────────────────────────────────────────
 
+def _current_month_start(db: Session):
+    if db.bind and db.bind.dialect.name == "sqlite":
+        return func.strftime("%Y-%m-01", "now")
+    return func.date_trunc("month", func.timezone("utc", func.now()))
+
+
 def count_uploads_this_month(db: Session, user_id: str) -> int:
-    # strftime is SQLite-compatible; gives first day of current month in UTC.
-    month_start = func.strftime("%Y-%m-01", "now")
+    month_start = _current_month_start(db)
     return (
         db.query(func.count(Lecture.id))
         .filter(Lecture.user_id == user_id, Lecture.created_at >= month_start)
@@ -131,7 +136,7 @@ def count_uploads_this_month(db: Session, user_id: str) -> int:
 
 def count_coach_messages_this_month(db: Session, user_id: str) -> int:
     """User-role coach messages + legacy performance /students/me/chat calls."""
-    month_start = func.strftime("%Y-%m-01", "now")
+    month_start = _current_month_start(db)
     cm = (
         db.query(func.count(CoachMessage.id))
         .filter(

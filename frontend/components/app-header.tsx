@@ -2,22 +2,18 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getMe } from "@/lib/api";
-import { Home, Upload, Bot, BookOpen, CreditCard, Layers, Sparkles } from "lucide-react";
+import { Home, Upload, Bot, BookOpen, CreditCard, Layers, Zap } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
-  { label: "Upload", href: "/upload" },
-  { label: "Create", href: "/create" },
-  { label: "Lectures", href: "/lectures" },
+  { label: "Lap", href: "/lap" },
   { label: "Flashcards", href: "/flashcards" },
   { label: "Coach", href: "/coach" },
 ];
 
 const MOBILE_NAV = [
   { label: "Home", href: "/dashboard", icon: Home },
-  { label: "Upload", href: "/upload", icon: Upload },
-  { label: "Create", href: "/create", icon: Sparkles },
-  { label: "Lectures", href: "/lectures", icon: BookOpen },
+  { label: "Lap", href: "/lap", icon: Zap },
   { label: "Flashcards", href: "/flashcards", icon: Layers },
   { label: "Coach", href: "/coach", icon: Bot },
 ];
@@ -41,17 +37,17 @@ export function AppHeader({ activePage }: { activePage: string }) {
     <>
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-7xl mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground">
+          <Link href="/dashboard" prefetch={false} className="text-xl font-bold text-foreground shrink-0">
             themcq
           </Link>
 
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center justify-center gap-6 mx-4">
             {NAV.map((item) => (
               <Link
                 key={item.label}
                 href={item.href}
                 prefetch={false}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                   activePage === item.label
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -62,7 +58,7 @@ export function AppHeader({ activePage }: { activePage: string }) {
             ))}
           </nav>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Link
               href="/billing"
               prefetch={false}
@@ -86,9 +82,9 @@ export function AppHeader({ activePage }: { activePage: string }) {
         </div>
       </header>
 
-      {/* Mobile bottom nav — scrollable so all items fit on small screens */}
+      {/* Mobile bottom nav — fills width with evenly spaced items */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex overflow-x-auto scrollbar-none py-2 px-2 gap-1">
+        <div className="flex justify-around py-2 px-2">
           {MOBILE_NAV.map((item) => {
             const active = activePage === item.label || (item.label === "Home" && activePage === "Dashboard");
             return (

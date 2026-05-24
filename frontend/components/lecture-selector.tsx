@@ -57,6 +57,7 @@ function UploadForm({ onUploaded }: { onUploaded: (lectureId: number) => void })
       const v = validatePDF(file);
       if (!v.valid) { setError(v.error!); return; }
     } else {
+      if (!pasteTitle.trim()) { setError("Please provide a title for your content"); return; }
       const v = validateText(pasteText);
       if (!v.valid) { setError(v.error!); return; }
     }
@@ -107,10 +108,10 @@ function UploadForm({ onUploaded }: { onUploaded: (lectureId: number) => void })
           { id: "paste" as InputMode, icon: ClipboardPaste, label: "Paste Text" },
         ]).map(({ id, icon: Icon, label }) => (
           <button key={id} onClick={() => { setInputMode(id); setError(""); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border-2 ${
               inputMode === id
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
+                ? "bg-primary text-primary-foreground border-white/40"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border-transparent"}`}>
             <Icon className="w-4 h-4" />{label}
           </button>
         ))}
@@ -118,8 +119,8 @@ function UploadForm({ onUploaded }: { onUploaded: (lectureId: number) => void })
 
       {inputMode === "file" && (
         <div
-          className={`flex flex-col items-center justify-center w-full min-h-[200px] border-2 border-dashed rounded-xl px-8 py-8 transition-all duration-300 cursor-pointer ${
-            dragging ? "border-primary/80 bg-primary/5" : file ? "border-emerald-500/50 bg-emerald-500/5" : "border-border/40 bg-muted/30 hover:border-primary/60 hover:-translate-y-1"}`}
+          className={`flex flex-col items-center justify-center w-full min-h-[200px] border-2 border-dashed rounded-xl px-8 py-8 transition-all duration-300 cursor-pointer -translate-y-1 ${
+            dragging ? "border-primary/80 bg-primary/5" : file ? "border-emerald-500/50 bg-emerald-500/5" : "border-white/40 bg-muted/30 hover:border-primary/60"}`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
@@ -152,7 +153,26 @@ function UploadForm({ onUploaded }: { onUploaded: (lectureId: number) => void })
 
       {inputMode === "paste" && (
         <div className="space-y-3">
-          <div className="relative rounded-xl border border-border/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-muted-foreground ml-1 flex items-center gap-1">
+              Title <span className="text-destructive">*</span>
+            </label>
+            <div className="relative rounded-xl border-2 border-dashed border-white/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors -translate-y-1 shadow-sm">
+              <input
+                type="text"
+                value={pasteTitle}
+                onChange={(e) => setPasteTitle(e.target.value)}
+                placeholder="Title for this content (e.g. &quot;Pharmacology Chapter 3&quot;)"
+                className="w-full px-4 py-3 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none pr-16"
+                maxLength={60}
+                required
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/40">
+                {pasteTitle.length}/60
+              </span>
+            </div>
+          </div>
+          <div className="relative rounded-xl border-2 border-dashed border-white/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors -translate-y-1 shadow-sm">
             <div className="absolute top-3 right-3 text-xs pointer-events-none">
               {pasteText.length > 0 ? (
                 pasteText.trim().length < 100
@@ -169,14 +189,6 @@ function UploadForm({ onUploaded }: { onUploaded: (lectureId: number) => void })
               className="w-full min-h-[160px] resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 p-4 pr-24 outline-none leading-relaxed"
             />
           </div>
-          <input
-            type="text"
-            value={pasteTitle}
-            onChange={(e) => setPasteTitle(e.target.value)}
-            placeholder="Title for this content (max 60 chars)"
-            className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/60 transition-colors"
-            maxLength={60}
-          />
         </div>
       )}
 
@@ -205,13 +217,22 @@ function UploadForm({ onUploaded }: { onUploaded: (lectureId: number) => void })
 interface LectureSelectorProps {
   preselectedId?: number;
   onLectureSelected: (lecture: LectureOut) => void;
+  onUploadRequested?: () => void;
 }
 
-export function LectureSelector({ preselectedId, onLectureSelected }: LectureSelectorProps) {
+export function LectureSelector({ preselectedId, onLectureSelected, onUploadRequested }: LectureSelectorProps) {
   const [lectures, setLectures] = useState<LectureOut[]>([]);
   const [loadingLectures, setLoadingLectures] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+
+  const handleUploadClick = () => {
+    if (onUploadRequested) {
+      onUploadRequested();
+    } else {
+      setShowUpload(true);
+    }
+  };
 
   const loadLectures = () => {
     setLoadingLectures(true);
@@ -268,23 +289,25 @@ export function LectureSelector({ preselectedId, onLectureSelected }: LectureSel
     <div className="space-y-6">
       {!showUpload && lectures.length > 0 && (
         <>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4">
             <h2 className="text-lg font-bold text-foreground">Select a file</h2>
-            <div className="flex items-center gap-3">
-              <div className="relative">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search…"
-                  className="pl-9 pr-4 py-2 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors w-40"
+                  placeholder="Search lectures…"
+                  className="w-full pl-9 pr-4 py-2 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowUpload(true)} className="flex items-center gap-1.5">
-                <CloudUpload className="w-4 h-4" />
-                Upload new
-              </Button>
+              {filteredLectures.length === 0 && (
+                <Button variant="outline" size="sm" onClick={handleUploadClick} className="flex items-center justify-center gap-1.5 h-10 px-4 animate-in fade-in zoom-in duration-300">
+                  <CloudUpload className="w-4 h-4" />
+                  Upload new
+                </Button>
+              )}
             </div>
           </div>
 

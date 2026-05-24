@@ -16,6 +16,8 @@ import {
   Play,
   TrendingUp,
   Layers,
+  Sparkles,
+  CloudUpload,
 } from "lucide-react";
 import {
   getFlashcardStats,
@@ -160,14 +162,38 @@ export default function FlashcardsPage() {
           </Card>
         )}
 
+        {/* How it works - quick guide */}
+        {!loading && lectures.length > 0 && (
+          <div className="bg-muted/20 rounded-xl border border-border/40 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 text-sm">
+            <Sparkles className="w-5 h-5 text-primary shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium text-foreground">
+                <strong>How it works:</strong> Review cards due today, then browse all cards by lecture below.
+              </p>
+              <p className="text-muted-foreground text-xs mt-0.5">
+                Cards use spaced repetition — you see the right card at the right time.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => router.push("/flashcards/review")}
+              disabled={dueToday === 0}
+            >
+              <Play className="w-3.5 h-3.5 mr-1.5" />
+              Start Review
+            </Button>
+          </div>
+        )}
+
         {/* By Lecture */}
         {!loading && lectures.length > 0 && (
           <Card>
-            <CardHeader className="pb-4 border-b">
+            <CardHeader className="pb-4 border-b flex flex-row items-center justify-between">
               <CardTitle className="text-base font-bold flex items-center gap-2">
                 <Layers className="h-4 w-4 text-primary" />
                 By Lecture
               </CardTitle>
+              <span className="text-xs text-muted-foreground">{lectures.length} lecture{lectures.length !== 1 ? "s" : ""}</span>
             </CardHeader>
             <CardContent className="p-6 space-y-2">
               {lectures.map((lec) => (
@@ -188,8 +214,12 @@ export default function FlashcardsPage() {
                     >
                       Review
                     </Button>
-                    <Button variant="outline" size="sm" className="text-xs" asChild>
-                      <Link href={`/flashcards/browse/${lec.id}`}>Browse</Link>
+                    <Button variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => router.push(`/upload?section=create&lecture_id=${lec.id}`)}
+                    >
+                      Generate Flashcards
                     </Button>
                   </div>
                 </div>
@@ -203,12 +233,20 @@ export default function FlashcardsPage() {
           <Card>
             <CardContent className="p-10 flex flex-col items-center justify-center text-center">
               <BookOpen className="h-10 w-10 text-muted-foreground mb-4" />
-              <p className="font-semibold text-foreground mb-2">No flashcards yet</p>
-              <p className="text-sm text-muted-foreground mb-5">
-                Upload and process a lecture to generate flashcards automatically.
+              <p className="font-semibold text-foreground mb-1">No flashcards yet</p>
+              <p className="text-sm text-muted-foreground mb-2 max-w-sm">
+                Flashcards are generated after you upload and process a lecture. Here&apos;s how:
               </p>
-              <Button variant="outline" asChild>
-                <Link href="/upload">+ Upload Lecture</Link>
+              <ol className="text-sm text-left text-muted-foreground mb-5 space-y-1.5">
+                <li>1. Upload a PDF or paste your notes</li>
+                <li>2. Choose what to generate (MCQs, flashcards, etc.)</li>
+                <li>3. Come back here to review with spaced repetition</li>
+              </ol>
+              <Button asChild>
+                <Link href="/upload">
+                  <CloudUpload className="w-4 h-4 mr-2" />
+                  Upload a Lecture
+                </Link>
               </Button>
             </CardContent>
           </Card>

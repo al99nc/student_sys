@@ -26,18 +26,32 @@ function CallbackInner() {
 
     saveToken(token);
 
+    const redirectToOnboarding = () => {
+      router.replace("/auth?onboarding=true");
+    };
+
+    const redirectToDashboard = () => {
+      const redirectTo = sessionStorage.getItem("auth_redirect") || "/dashboard";
+      sessionStorage.removeItem("auth_redirect");
+      router.replace(redirectTo);
+    };
+
+    const isNewUser = searchParams.get("is_new_user") === "true";
+    if (isNewUser) {
+      redirectToOnboarding();
+      return;
+    }
+
     getMe()
-      .then(res => {
+      .then((res) => {
         if (!res.data.name) {
-          router.replace("/auth?onboarding=true");
+          redirectToOnboarding();
         } else {
-          const redirectTo = sessionStorage.getItem("auth_redirect") || "/dashboard";
-          sessionStorage.removeItem("auth_redirect");
-          router.replace(redirectTo);
+          redirectToDashboard();
         }
       })
       .catch(() => {
-        router.replace("/auth?error=invalid_link");
+        redirectToDashboard();
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

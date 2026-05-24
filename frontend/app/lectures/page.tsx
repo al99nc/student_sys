@@ -194,56 +194,13 @@ export default function LecturesPage() {
           </div>
         </section>
 
-        {/* Continue studying — all uploads with status */}
-        {!loading && allUploads.length > 0 && (
-          <div className="mb-8">
-            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground mb-1">Your uploads</p>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">Continue studying</h2>
-            <div className={`grid gap-3 ${allUploads.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
-              {allUploads.map((upload) => {
-                const isReady = upload.is_processed;
-                const href = isReady
-                  ? `/results/${upload.id}`
-                  : upload.pending_job_id
-                  ? `/upload/${upload.pending_job_id}`
-                  : `/upload`;
-                return (
-                  <Link key={upload.id} href={href} prefetch={false}>
-                    <div className="flex items-center gap-3 p-4 rounded-xl border hover:border-primary/40 hover:bg-muted/20 transition-all duration-150">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isReady ? "bg-emerald-500/10" : "bg-amber-500/10"}`}>
-                        {isReady ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        ) : (
-                          <Clock className="w-4 h-4 text-amber-500" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-foreground truncate">{upload.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {new Date(upload.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className={`flex-shrink-0 ${isReady ? "text-emerald-500 border-emerald-500/30 bg-emerald-500/10" : "text-amber-500 border-amber-500/30"}`}
-                      >
-                        {isReady ? "Ready" : "Processing"}
-                      </Badge>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-6">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground">Study overview</p>
             <h2 className="text-2xl font-semibold text-foreground">Discover your lectures</h2>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href="/upload" prefetch={false}>
+            <Link href="/lap" prefetch={false}>
               <Button size="sm">Upload lecture</Button>
             </Link>
             <Link href="/quiz/solved" prefetch={false}>
@@ -301,7 +258,7 @@ export default function LecturesPage() {
                   <p className="text-sm text-muted-foreground mb-5">
                     Take a quiz first — only solved questions appear here.
                   </p>
-                  <Link href="/upload" prefetch={false}>
+                  <Link href="/lap" prefetch={false}>
                     <Button size="sm">
                       <Sparkles className="w-4 h-4 mr-2" />
                       Create MCQs
@@ -380,7 +337,7 @@ export default function LecturesPage() {
                   <p className="text-sm text-muted-foreground mb-5">
                     Upload a lecture and generate study materials to see it here.
                   </p>
-                  <Link href="/upload" prefetch={false}>
+                  <Link href="/lap" prefetch={false}>
                     <Button size="sm">
                       <Sparkles className="w-4 h-4 mr-2" />
                       Upload Lecture

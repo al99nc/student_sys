@@ -3,16 +3,6 @@ from typing import Optional
 from datetime import datetime
 
 
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
-
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class UserOut(BaseModel):
     id: str
     email: str
@@ -76,6 +66,15 @@ class ProfileUpdate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    is_new_user: bool = False
+
+
+class SessionOut(BaseModel):
+    id: str
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    created_at: datetime
+    last_seen_at: datetime
 
 
 class MagicLinkRequest(BaseModel):

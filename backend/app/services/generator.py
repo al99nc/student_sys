@@ -254,6 +254,36 @@ def _parse_groq_retry_after(error_msg: str) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────
+# MCQ REFINEMENT / SELF-CRITIQUE (raises quality ceiling)
+# ─────────────────────────────────────────────────────────────────
+REFINEMENT_SYSTEM = "You are a professor-level MCQ editor. Improve the MCQs below. Return only valid JSON, no markdown."
+
+REFINEMENT_USER = """\
+Review and improve these MCQs. For each MCQ:
+
+1. **Distractor quality**: Verify each wrong option is FACTUALLY INCORRECT for THIS specific question.
+   - If any wrong option "could also be argued as correct" → rewrite it as something clearly false.
+   - If a wrong option is "correct but less specific" → rewrite it as false.
+   - If a wrong option is "correct in a different context" → rewrite it to stay within this question's context.
+
+2. **Stem clarity**: The question should be unambiguous. A knowledgeable student should immediately know what is being asked.
+
+3. **Option parallelism**: All 4 options must be at the same conceptual level and same grammatical form.
+
+4. **Explanation quality**: The explanation should explain WHY the correct answer is right AND WHY the top wrong answer is wrong.
+
+5. **Remove trick questions**: No "gotcha" questions that test reading comprehension rather than subject knowledge.
+
+Return the COMPLETE improved MCQs array — same structure, same length (do NOT remove any MCQs unless duplicate).
+
+OUTPUT: {{"mcqs": [improved MCQs]}}
+
+MCQs to improve:
+{mcqs_json}
+"""
+
+
+# ─────────────────────────────────────────────────────────────────
 # SUBJECT DETECTION + DYNAMIC FACTS + VALIDATOR
 # ─────────────────────────────────────────────────────────────────
 
@@ -377,6 +407,51 @@ async def validate_and_clean(
     except Exception as e:
         logger.warning(f"MCQ validation failed: {e} — returning original MCQs")
         return mcqs
+
+
+async def _refine_mcqs(
+    mcqs: list[dict],
+    api_key: str,
+) -> list[dict] | None:
+    """Self-critique pass: ask the model to review and improve its own MCQs."""
+    if len(mcqs) < 3 or len(mcqs) > 25:
+        return None
+    try:
+        mcqs_json = json.dumps(mcqs, ensure_ascii=False)
+        user_msg = REFINEMENT_USER.replace("{mcqs_json}", mcqs_json)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": settings.FREE_AI_MODEL,
+            "messages": [
+                {"role": "system", "content": REFINEMENT_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0.15,
+            "max_tokens": 4_000,
+        }
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(GROQ_URL, headers=headers, json=payload)
+            resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"].get("content") or ""
+        cleaned = _THINKING_TAG_PATTERN.sub("", raw).strip()
+        cleaned = re.sub(r"```(?:json)?", "", cleaned).strip().rstrip("```").strip()
+        result = json.loads(cleaned)
+        improved = result.get("mcqs", [])
+        if not improved or not isinstance(improved, list):
+            return None
+        # Validate improved MCQs have required fields
+        required = {"question", "options", "answer"}
+        valid = [m for m in improved if required.issubset(m.keys())]
+        if len(valid) < len(mcqs) * 0.6:
+            logger.warning(f"[refinement] Too many MCQs lost validation ({len(valid)}/{len(mcqs)}) — keeping originals")
+            return None
+        return valid
+    except Exception as e:
+        logger.warning(f"[refinement] Failed: {e}")
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -884,6 +959,18 @@ async def generate_study_content(
 
         valid_mcqs = _fix_explanation_prefix(valid_mcqs)
         valid_mcqs = await validate_and_clean(valid_mcqs)
+
+        # Refinement pass: self-critique to raise quality ceiling
+        # Skip for very short outputs or custom contexts to keep latency low
+        if 5 <= len(valid_mcqs) <= 25 and not custom_context:
+            try:
+                refined = await _refine_mcqs(valid_mcqs, available_keys[0])
+                if refined and len(refined) >= len(valid_mcqs) * 0.8:
+                    valid_mcqs = refined
+                    logger.info(f"[{mode}] Refinement improved {len(valid_mcqs)} MCQs")
+            except Exception as e:
+                logger.warning(f"[{mode}] Refinement skipped: {e}")
+
         _warn_answer_distribution(valid_mcqs, mode)
         if mode in ("exam", "harder"):
             _warn_exam_format_distribution(valid_mcqs)

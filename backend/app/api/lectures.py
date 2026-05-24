@@ -238,7 +238,7 @@ def ensure_upload_dir():
     upload_path = os.path.abspath(settings.UPLOAD_DIR)
     Path(upload_path).mkdir(parents=True, exist_ok=True)
 
-@router.post("/upload", response_model=LectureOut)
+@router.post("/lap", response_model=LectureOut)
 async def upload_lecture(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -315,7 +315,7 @@ async def upload_lecture(
     db.refresh(lecture)
     return lecture
 
-@router.post("/upload-text", response_model=LectureOut)
+@router.post("/lap-text", response_model=LectureOut)
 async def upload_text(
     body: UploadTextRequest,
     db: Session = Depends(get_db),
@@ -618,7 +618,7 @@ async def process_lecture(
 ):
     """
     Creates a processing job and starts generation in the background.
-    Returns immediately with job_id. Client redirects to /upload/{job_id}.
+    Returns immediately with job_id. Client redirects to /lap/{job_id}.
     """
     from app.models.models import ProcessingJob
     import json
@@ -716,7 +716,7 @@ def get_my_active_job(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Called when the user lands on /upload to check if they have a running job.
+    Called when the user lands on /lap to check if they have a running job.
     Returns null if none.
     """
     from app.models.models import ProcessingJob
@@ -747,7 +747,7 @@ def get_job_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Poll every 2s from /upload/{jobId} page."""
+    """Poll every 2s from /lap/{jobId} page."""
     from app.models.models import ProcessingJob
     from datetime import datetime, timezone
 

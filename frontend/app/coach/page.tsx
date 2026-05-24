@@ -1,5 +1,6 @@
 ﻿"use client";
 import { useEffect, useRef, useState, useCallback, Suspense } from "react";
+import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { isAuthenticated } from "@/lib/auth";
@@ -23,7 +24,7 @@ import {
 import { AppHeader } from "@/components/app-header";
 import {
   Plus, Search, X, MessageSquare, Trash2, ArrowLeft,
-  Menu, Bot, ArrowUp, Paperclip, Lock, CheckCircle, XCircle,
+  Menu, Bot, ArrowUp, Paperclip, Lock, CheckCircle, XCircle,  
   Clock, Lightbulb, History, ArrowRight, Dumbbell,
   FileText, AlertCircle, ChevronRight, BookOpen, Sparkles, ChevronDown,
   Eye, Trophy,
@@ -473,50 +474,56 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
     };
     setMessages(prev => [...prev, optimisticUser, thinkingMsg]);
 
-    try {
-      // Prepend performance context once per conversation so the coach is
-      // aware of the student's right/wrong history from the first message.
-      let messageToSend = text;
-      if (!sentContextForConv.current.has(convId!)) {
-        const perfCtx = await getPerformanceContext();
-        if (perfCtx) {
-          messageToSend = `${perfCtx}\n\n${text}`;
-          sentContextForConv.current.add(convId!);
+      try {
+        // Prepend performance context once per conversation so the coach is
+        // aware of the student's right/wrong history from the first message.
+        let messageToSend = text;
+        if (!sentContextForConv.current.has(convId!)) {
+          const perfCtx = await getPerformanceContext();
+          if (perfCtx) {
+            messageToSend = `${perfCtx}\n\n${text}`;
+            sentContextForConv.current.add(convId!);
+          }
         }
-      }
-      const res = await coachSendMessage(convId!, messageToSend, imgData ?? undefined, imgMime ?? undefined, quizResult, selectedModel);
-      const { user_message, assistant_message } = res.data;
-      setMessages(prev =>
-        prev.filter(m => m.id !== optimisticUser.id && m.id !== thinkingId)
-            .concat([user_message, assistant_message])
-      );
-      if (assistant_message) {
-        setConversations(prev =>
-          prev.map(c => c.id === convId
-            ? { ...c, updated_at: new Date().toISOString(), title: text.slice(0, 60) || c.title, message_count: (c.message_count || 0) + 2 }
-            : c
-          )
+        const res = await coachSendMessage(convId!, messageToSend, imgData ?? undefined, imgMime ?? undefined, quizResult, selectedModel);
+        const { user_message, assistant_message } = res.data;
+        setMessages(prev =>
+          prev.filter(m => m.id !== optimisticUser.id && m.id !== thinkingId)
+              .concat([user_message, assistant_message])
         );
-        setConvTitle(text.slice(0, 60) || convTitle);
+        if (assistant_message) {
+          setConversations(prev =>
+            prev.map(c => c.id === convId
+              ? { ...c, updated_at: new Date().toISOString(), title: text.slice(0, 60) || c.title, message_count: (c.message_count || 0) + 2 }
+              : c
+            )
+          );
+          setConvTitle(text.slice(0, 60) || convTitle);
+        }
+      } catch (err: unknown) {
+        setMessages(prev => prev.filter(m => m.id !== thinkingId));
+        const errResp = (err as { response?: { status?: number; data?: { detail?: { message?: string; hint?: string; payg_limit?: boolean } | string } } })?.response;
+        const is403 = errResp?.status === 403;
+        const detail = errResp?.data?.detail;
+        const isPayg = typeof detail === "object" && detail?.payg_limit === true;
+        const isTimeout = (err as { code?: string })?.code === "ECONNABORTED";
+        if (is403) setLockedDueToLimit(true);
+        let errContent: string;
+        if (isTimeout) {
+          errContent = "The coach is taking longer than expected. This can happen when the AI model is busy. Please try again in a moment.";
+        } else if (is403) {
+          errContent = typeof detail === "object" ? `${detail.message ?? ""} ${detail.hint ?? ""}`.trim() : (detail ?? "You've reached your message limit.");
+        } else {
+          errContent = "I couldn't process that. This might be a temporary network issue. Try again or start a new conversation.";
+        }
+        const errMsg: Message = {
+          id: `err-${Date.now()}`, role: "assistant", content: errContent,
+          created_at: new Date().toISOString(), payg_limit: isPayg,
+        };
+        setMessages(prev => [...prev.filter(m => m.id !== optimisticUser.id), optimisticUser, errMsg]);
+      } finally {
+        setSending(false);
       }
-    } catch (err: unknown) {
-      setMessages(prev => prev.filter(m => m.id !== thinkingId));
-      const errResp = (err as { response?: { status?: number; data?: { detail?: { message?: string; hint?: string; payg_limit?: boolean } | string } } })?.response;
-      const is403 = errResp?.status === 403;
-      const detail = errResp?.data?.detail;
-      const isPayg = typeof detail === "object" && detail?.payg_limit === true;
-      if (is403) setLockedDueToLimit(true);
-      const errContent = is403
-        ? (typeof detail === "object" ? `${detail.message ?? ""} ${detail.hint ?? ""}`.trim() : (detail ?? "You've reached your message limit."))
-        : "I'm temporarily offline. Check your connection and try again.";
-      const errMsg: Message = {
-        id: `err-${Date.now()}`, role: "assistant", content: errContent,
-        created_at: new Date().toISOString(), payg_limit: isPayg,
-      };
-      setMessages(prev => [...prev.filter(m => m.id !== optimisticUser.id), optimisticUser, errMsg]);
-    } finally {
-      setSending(false);
-    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -800,19 +807,24 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
           <div className="max-w-[700px] mx-auto px-4 py-5 flex flex-col gap-1">
 
             {!activeId && messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 gap-6">
+              <div className="flex flex-col items-center justify-center py-12 gap-6">
                 <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
                   <Bot className="w-8 h-8 text-foreground/50" />
                 </div>
-                <div className="text-center">
-                  <h2 className="text-xl font-bold text-foreground mb-1.5">What would you like to study?</h2>
-                  <p className="text-sm text-muted-foreground">I have full visibility into your performance data.</p>
+                <div className="text-center max-w-md">
+                  <h2 className="text-xl font-bold text-foreground mb-1.5">Your AI Study Coach</h2>
+                  <p className="text-sm text-muted-foreground mb-1">
+                    I can see your performance data, weak spots, and what you&apos;ve studied.
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">
+                    Ask me anything about your progress — or tap a suggestion below to start.
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5 w-full max-w-[420px]">
                   {[
                     { icon: <BookOpen className="w-4 h-4" />, text: "What are my weakest topics right now?" },
                     { icon: <Sparkles className="w-4 h-4" />, text: "Give me a 10-minute study plan" },
-                    { icon: <Bot className="w-4 h-4" />, text: "How can I fix my overconfidence?" },
+                    { icon: <Bot className="w-4 h-4" />, text: "Explain something I keep getting wrong" },
                     { icon: <ArrowRight className="w-4 h-4" />, text: "Which topic should I practice first?" },
                   ].map(({ icon, text }) => (
                     <button
@@ -1583,9 +1595,29 @@ function InlinePracticeCard({
   );
 }
 
+// ── Helper: strip performance context from message display ─────────────────────
+
+function stripPerformanceContext(content: string): string {
+  // Remove the performance context block that starts with "[Student Performance Context..."
+  // The context is followed by double newline before the actual user message
+  const contextMarker = "[Student Performance Context — use this to personalise your advice]";
+  if (!content.includes(contextMarker)) return content;
+  
+  // Find where the context starts
+  const idx = content.indexOf(contextMarker);
+  if (idx === -1) return content;
+  
+  // Look for double newline after the context (which separates context from user message)
+  const doubleNewlineIdx = content.indexOf("\n\n", idx);
+  if (doubleNewlineIdx === -1) return content;
+  
+  // Return everything after the double newline, trimmed
+  return content.substring(doubleNewlineIdx + 2).trim();
+}
+
 // ── MessageBubble ──────────────────────────────────────────────────────────────
 
-function MessageBubble({
+const MessageBubble = React.memo(function MessageBubble({
   msg,
   onQuickReply,
   onStartPractice,
@@ -1599,6 +1631,7 @@ function MessageBubble({
   const isUser = msg.role === "user";
   const isThinking = msg.content === "…";
   const meta = msg.ai_metadata;
+  const displayContent = stripPerformanceContext(msg.content);
 
   if (isUser) {
     return (
@@ -1610,7 +1643,7 @@ function MessageBubble({
           )}
           {msg.content && (
             <div className="bg-muted border border-border/50 rounded-[18px_18px_4px_18px] px-3.5 py-2.5 text-foreground text-sm leading-relaxed break-words">
-              {msg.content}
+              {displayContent}
             </div>
           )}
         </div>
@@ -1634,7 +1667,7 @@ function MessageBubble({
         ) : (
           <>
             <div className="bg-card border border-border/50 rounded-[4px_16px_16px_16px] px-3.5 py-2.5 text-foreground/80 text-sm leading-relaxed whitespace-pre-wrap break-words">
-              {msg.content}
+              {displayContent}
             </div>
 
             {msg.payg_limit && (
@@ -1647,9 +1680,6 @@ function MessageBubble({
               <CheckInBanner text={meta.check_in!} daysAway={meta.days_since_last} />
             )}
 
-            {meta && isValid(meta.why_this_matters) && (
-              <WhyThisMatters text={meta.why_this_matters!} urgency={meta.urgency} isRelapse={meta.is_relapse} />
-            )}
 
             {meta?.mastery_progress && (
               <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-xl bg-card border border-border/50">
@@ -1688,7 +1718,7 @@ function MessageBubble({
       </div>
     </div>
   );
-}
+});
 
 // ── MasteryBar ────────────────────────────────────────────────────────────────
 
@@ -1720,32 +1750,6 @@ function TopicChain({ chain }: { chain: string[] }) {
   );
 }
 
-// ── WhyThisMatters ────────────────────────────────────────────────────────────
-
-function WhyThisMatters({ text, urgency, isRelapse }: { text: string; urgency?: string; isRelapse?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const accentColor = urgencyColor(urgency);
-
-  return (
-    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${accentColor}20`, background: `${accentColor}08` }}>
-      <button onClick={() => setOpen(p => !p)} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 bg-transparent border-none cursor-pointer text-left">
-        {isRelapse
-          ? <History className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
-          : <Lightbulb className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
-        }
-        <p className="flex-1 text-[10px] font-bold uppercase tracking-widest m-0" style={{ color: `${accentColor}cc` }}>
-          {isRelapse ? "You had this — why it slipped" : "Why this topic right now"}
-        </p>
-        <ChevronDown className="w-4 h-4 flex-shrink-0 transition-transform" style={{ color: `${accentColor}80`, transform: open ? "rotate(180deg)" : "none" }} />
-      </button>
-      {open && (
-        <div className="px-3.5 pb-3.5" style={{ borderTop: `1px solid ${accentColor}12` }}>
-          <p className="text-sm leading-relaxed text-muted-foreground pt-2.5 m-0">{text}</p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── CalibrationPulse ──────────────────────────────────────────────────────────
 

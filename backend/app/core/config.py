@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     FREE_PDF_UPLOADS_PER_MONTH: int = 10
     FREE_COACH_MESSAGES_PER_MONTH: int = 300
     DATABASE_URL: str = "sqlite:///./students.db"
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return "postgresql://" + v[len("postgres://"):]
+        return v
+
     UPLOAD_DIR: str = "uploads"
     TELEGRAM_BOT_TOKEN: str = ""
     BOT_SECRET: str = "themcq-bot-secret-2026"

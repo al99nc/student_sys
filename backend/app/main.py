@@ -62,7 +62,30 @@ Base.metadata.create_all(bind=engine)
 
 # Migrate: add new columns to existing tables if they don't exist yet
 with engine.connect() as _conn:
-    for _stmt in [
+    if engine.dialect.name == "sqlite":
+        bot_sessions_sql = (
+            "CREATE TABLE IF NOT EXISTS bot_sessions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "chat_id VARCHAR(32) UNIQUE, "
+            "email VARCHAR NOT NULL, "
+            "jwt VARCHAR, "
+            "state VARCHAR(20) NOT NULL DEFAULT 'waiting_email', "
+            "expires_at DATETIME NOT NULL, "
+            "created_at DATETIME)"
+        )
+    else:
+        bot_sessions_sql = (
+            "CREATE TABLE IF NOT EXISTS bot_sessions ("
+            "id SERIAL PRIMARY KEY, "
+            "chat_id VARCHAR(32) UNIQUE, "
+            "email VARCHAR NOT NULL, "
+            "jwt VARCHAR, "
+            "state VARCHAR(20) NOT NULL DEFAULT 'waiting_email', "
+            "expires_at TIMESTAMP WITH TIME ZONE NOT NULL, "
+            "created_at TIMESTAMP WITH TIME ZONE)"
+        )
+
+    migrations = [
         "ALTER TABLE results ADD COLUMN share_token VARCHAR",
         "ALTER TABLE results ADD COLUMN view_count INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN uuid VARCHAR(36)",
@@ -93,9 +116,20 @@ with engine.connect() as _conn:
         "ALTER TABLE magic_link_tokens ADD COLUMN otp_code VARCHAR(6)",
         "ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(32)",
         "ALTER TABLE users ADD COLUMN profile_picture VARCHAR(255)",
-        "CREATE TABLE IF NOT EXISTS bot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id VARCHAR(32) UNIQUE, email VARCHAR NOT NULL, jwt VARCHAR, state VARCHAR(20) NOT NULL DEFAULT 'waiting_email', expires_at DATETIME NOT NULL, created_at DATETIME)",
+        "CREATE TABLE IF NOT EXISTS user_sessions (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL, token_hash VARCHAR(64) NOT NULL, ip_address VARCHAR(45), user_agent VARCHAR(500), created_at DATETIME, last_seen_at DATETIME, expires_at DATETIME NOT NULL)",
+        "ALTER TABLE user_sessions ALTER COLUMN expires_at TYPE TIMESTAMP WITH TIME ZONE USING expires_at AT TIME ZONE 'UTC'",
+        "ALTER TABLE user_sessions ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'UTC'",
+        "ALTER TABLE user_sessions ALTER COLUMN last_seen_at TYPE TIMESTAMP WITH TIME ZONE USING last_seen_at AT TIME ZONE 'UTC'",
+        bot_sessions_sql,
         "ALTER TABLE daily_test_cache ADD COLUMN answers TEXT",
-    ]:
+    ]
+    if engine.dialect.name == "postgresql":
+        migrations.insert(
+            migrations.index("CREATE TABLE IF NOT EXISTS magic_link_tokens (id VARCHAR(36) PRIMARY KEY, email VARCHAR NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, used INTEGER NOT NULL DEFAULT 0, created_at DATETIME)") + 3,
+            "ALTER TABLE users DROP COLUMN IF EXISTS hashed_password",
+        )
+
+    for _stmt in migrations:
         try:
             _conn.execute(text(_stmt))
             _conn.commit()
@@ -104,7 +138,7 @@ with engine.connect() as _conn:
             # for "column already exists" — both are safe to ignore.
             _conn.rollback()
             _msg = str(_e).lower()
-            if "already exists" in _msg or "duplicate column" in _msg:
+            if "already exists" in _msg or "duplicate column" in _msg or "does not exist" in _msg:
                 pass
             else:
                 logger.warning("Unexpected migration error: %s", _e)
@@ -162,7 +196,21 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
+    expose_headers=["X-New-JWT"],
 )
+
+# ── Session rotation middleware ────────────────────────────────────────────────
+# On every request, if a new JWT was issued (session token rotated), attach it to
+# the response so the frontend can update its stored token and prevent replay.
+
+@app.middleware("http")
+async def rotate_session_middleware(request: Request, call_next):
+    response = await call_next(request)
+    new_jwt = getattr(request.state, "_new_jwt", None)
+    if new_jwt:
+        response.headers["X-New-JWT"] = new_jwt
+    return response
+
 
 app.include_router(admin_api.router)
 app.include_router(auth.router)

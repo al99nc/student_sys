@@ -18,7 +18,6 @@ class User(Base):
 
     id = Column(String(36), primary_key=True, index=True, nullable=False, default=_uuid)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
     name = Column(String(120), nullable=True)
     university = Column(String(255), nullable=True)
     college = Column(String(120), nullable=True)
@@ -154,6 +153,21 @@ class MagicLinkToken(Base):
     used = Column(Integer, default=0, server_default="0", nullable=False)
     otp_code = Column(String(6), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class UserSession(Base):
+    """Auth session — binds JWT to a specific device, rotated on every request to prevent theft."""
+    __tablename__ = "user_sessions"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False)
+    previous_token_hash = Column(String(64), nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at = Column(DateTime(timezone=True), default=_utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class BotSession(Base):

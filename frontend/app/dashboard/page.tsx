@@ -23,6 +23,7 @@ import {
   Flame,
   Brain,
   Zap,
+  CloudUpload,
 } from "lucide-react";
 
 
@@ -97,6 +98,9 @@ export default function DashboardPage() {
       .catch(() => {});
   };
 
+  // Determine user onboarding status
+  const isNewUser = !loadingLectures && lectures.length === 0 && !loadingDash && stats.total_lectures === 0;
+
   return (
     <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
       <AppHeader activePage="Dashboard" />
@@ -124,6 +128,59 @@ export default function DashboardPage() {
         {error && (
           <div className="mb-6 bg-destructive/10 border border-destructive/20 text-destructive rounded-xl px-4 py-3 text-sm">
             {error}
+          </div>
+        )}
+
+        {/* ── Welcome banner for new users ── */}
+        {isNewUser && (
+          <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 p-5 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
+                <Sparkles className="w-6 h-6 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-bold text-foreground mb-1">Welcome to themcq!</h2>
+                <p className="text-sm text-muted-foreground">Get started in 3 simple steps:</p>
+                <ol className="text-sm text-muted-foreground mt-2 space-y-1">
+                  <li>1. <strong>Upload</strong> a PDF or paste your notes</li>
+                  <li>2. <strong>Generate</strong> MCQs or flashcards with AI</li>
+                  <li>3. <strong>Practice</strong> and track your progress</li>
+                </ol>
+              </div>
+              <Button asChild size="default" className="shrink-0">
+                <Link href="/lap" prefetch={false}>
+                  <CloudUpload className="w-4 h-4 mr-2" />
+                  Upload Your First File
+                </Link>
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Overview ── */}
+        {!isNewUser && (
+          <div className="mb-6 sm:mb-8">
+            <Card>
+              <CardContent className="p-6">
+                <p className="text-sm font-medium text-muted-foreground mb-4">Overview</p>
+                <div className="space-y-4">
+                  {[
+                    { label: "Total Uploads", icon: FileText, value: loadingDash ? "—" : String(stats.total_lectures) },
+                    { label: "Processed", icon: CheckCircle2, value: loadingDash ? "—" : String(stats.processed_lectures) },
+                    { label: "MCQs Answered", icon: Target, value: loadingDash ? "—" : String(stats.total_mcqs_answered) },
+                    { label: "Avg. Score", icon: BarChart3, value: loadingDash ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—%" },
+                  ].map((s) => (
+                    <div key={s.label} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <s.icon className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">{s.label}</span>
+                      </div>
+                      <span className="text-sm font-semibold text-foreground">{s.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
@@ -175,7 +232,7 @@ export default function DashboardPage() {
                     <p className="text-base font-bold text-foreground">No test yet</p>
                     <p className="text-sm text-muted-foreground max-w-xs">Upload and process a lecture to get your daily test.</p>
                     <Button variant="default" size="default" className="mt-2" asChild>
-                      <Link href="/upload" prefetch={false}>Upload Lecture</Link>
+                      <Link href="/lap" prefetch={false}>Upload Lecture</Link>
                     </Button>
                   </div>
 
@@ -244,29 +301,6 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left column */}
           <div className="lg:col-span-4 space-y-6">
-            {/* Stats */}
-            <Card>
-              <CardContent className="p-6">
-                <p className="text-sm font-medium text-muted-foreground mb-4">Overview</p>
-                <div className="space-y-4">
-                  {[
-                    { label: "Total Uploads", icon: FileText, value: loadingDash ? "—" : String(stats.total_lectures) },
-                    { label: "Processed", icon: CheckCircle2, value: loadingDash ? "—" : String(stats.processed_lectures) },
-                    { label: "MCQs Answered", icon: Target, value: loadingDash ? "—" : String(stats.total_mcqs_answered) },
-                    { label: "Avg. Score", icon: BarChart3, value: loadingDash ? "—" : stats.total_mcqs_answered > 0 ? `${stats.avg_score}%` : "—%" },
-                  ].map((s) => (
-                    <div key={s.label} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <s.icon className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">{s.label}</span>
-                      </div>
-                      <span className="text-sm font-semibold text-foreground">{s.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
             {/* ── Flashcard of the Day ── */}
             <Card className="overflow-hidden">
               <div className="h-1 bg-gradient-to-r from-white/80 via-gray-300 to-gray-900 dark:from-white/20 dark:via-gray-600 dark:to-gray-950" />
@@ -378,7 +412,7 @@ export default function DashboardPage() {
                       Upload your first PDF and themcq will generate questions within seconds.
                     </p>
                     <Button variant="outline" asChild>
-                      <Link href="/upload" prefetch={false}>+ Upload New Lecture</Link>
+                      <Link href="/lap" prefetch={false}>+ Upload New Lecture</Link>
                     </Button>
                   </div>
                 ) : (

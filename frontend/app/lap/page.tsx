@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useState, useRef, useEffect, Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -6,14 +6,15 @@ import { uploadLecture, uploadText, processLecture, getLectures, deleteLecture, 
 import { isAuthenticated, getToken } from "@/lib/auth";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { LectureSelector } from "@/components/lecture-selector";
 import {
   CloudUpload, FileText, Loader2, CheckCircle2,
   ClipboardPaste, XCircle, ArrowLeft, BookOpen,
-  Bot, MessageSquareText, ChevronRight, Search,
+  Bot, MessageSquareText, ChevronRight, ChevronLeft, Search,
   Trash2, Settings2, Sparkles, Brain, ArrowRight,
-  Target,
+  Target, Clock, X,
 } from "lucide-react";
 
 const PdfViewer = dynamic(() => import("@/components/pdf-viewer").then((m) => ({ default: m.PdfViewer })), {
@@ -175,7 +176,7 @@ function TelegramUploadCard() {
   );
 }
 
-function UploadContent() {
+function LapContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -184,7 +185,7 @@ function UploadContent() {
   const [currentSection, setCurrentSection] = useState<SectionId>("upload");
   const [isScrolling, setIsScrolling] = useState(false);
 
-  // Upload section state
+  // Lap section state
   const [inputMode, setInputMode] = useState<InputMode>("file");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -194,13 +195,8 @@ function UploadContent() {
   const [pasteText, setPasteText] = useState("");
   const [pasteTitle, setPasteTitle] = useState("");
 
-  // Inline generation after upload
-  const [uploadedLectureId, setUploadedLectureId] = useState<number | null>(null);
-  const [showGenOptions, setShowGenOptions] = useState(false);
-  const [inlineGenMode, setInlineGenMode] = useState<GenMode>("mcq");
-  const [inlineGenerating, setInlineGenerating] = useState(false);
-
   // Create section state
+  const [highlightCreate, setHighlightCreate] = useState(false);
   const [genLecture, setGenLecture] = useState<LectureOut | null>(null);
   const [genMode, setGenMode] = useState<GenMode>("mcq");
   const [examType, setExamType] = useState<ExamType>("revision");
@@ -218,6 +214,12 @@ function UploadContent() {
   const [lectures, setLectures] = useState<LectureOut[]>([]);
   const [loadingLectures, setLoadingLectures] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [studySubTab, setStudySubTab] = useState<"mcq" | "pdf">("mcq");
+  const [mcqPage, setMcqPage] = useState(1);
+  const [pdfPage, setPdfPage] = useState(1);
+  const [expandedPdfId, setExpandedPdfId] = useState<number | null>(null);
+  const ITEMS_PER_PAGE = 15;
+
   const [studyLecture, setStudyLecture] = useState<LectureOut | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -225,14 +227,29 @@ function UploadContent() {
   const [showCoachBtn, setShowCoachBtn] = useState(false);
   const [coachBtnPos, setCoachBtnPos] = useState({ x: 0, y: 0 });
 
-  const scrollToSection = (section: SectionId) => {
+  const scrollToSection = (section: SectionId, immediate = false) => {
     const el = scrollRef.current;
     if (!el) return;
     const idx = SECTION_IDS.indexOf(section);
     if (idx === -1) return;
+    
+    setIsScrolling(true);
     setCurrentSection(section);
-    el.scrollTo({ left: idx * el.clientWidth, behavior: "smooth" });
+    sessionStorage.setItem("lap_current_section", section);
+    
+    el.scrollTo({ 
+      left: idx * el.clientWidth, 
+      behavior: immediate ? "auto" : "smooth" 
+    });
+    
+    // Reset scrolling flag after animation
+    setTimeout(() => setIsScrolling(false), 600);
   };
+
+  useEffect(() => {
+    setMcqPage(1);
+    setPdfPage(1);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (!isAuthenticated()) { router.push("/auth"); return; }
@@ -254,6 +271,7 @@ function UploadContent() {
 
     const lectureIdParam = searchParams.get("lecture_id");
     const sectionParam = searchParams.get("section");
+    const savedSection = sessionStorage.getItem("lap_current_section") as SectionId | null;
 
     if (lectureIdParam) {
       getLectures().then((res) => {
@@ -264,6 +282,8 @@ function UploadContent() {
           setTimeout(() => scrollToSection("create"), 100);
         }
       }).catch(() => {});
+    } else if (savedSection && SECTION_IDS.includes(savedSection)) {
+      setTimeout(() => scrollToSection(savedSection, true), 100);
     } else if (sectionParam === "create") {
       setTimeout(() => scrollToSection("create"), 100);
     } else if (sectionParam === "study") {
@@ -280,6 +300,7 @@ function UploadContent() {
     const section = SECTION_IDS[Math.min(idx, SECTION_IDS.length - 1)];
     if (section && section !== currentSection) {
       setCurrentSection(section);
+      sessionStorage.setItem("lap_current_section", section);
     }
   }, [currentSection, isScrolling]);
 
@@ -291,9 +312,9 @@ function UploadContent() {
       .finally(() => setLoadingLectures(false));
   };
 
-  // ── Upload handlers ──
+  // ── Lap handlers ──
 
-  const handleUpload = async () => {
+  const handleLap = async () => {
     setError("");
 
     if (inputMode === "file") {
@@ -301,6 +322,7 @@ function UploadContent() {
       const v = validatePDF(file);
       if (!v.valid) { setError(v.error!); return; }
     } else {
+      if (!pasteTitle.trim()) { setError("Please provide a title for your content"); return; }
       const v = validateText(pasteText);
       if (!v.valid) { setError(v.error!); return; }
     }
@@ -317,30 +339,26 @@ function UploadContent() {
         lectureId = res.data.id;
       }
 
-      setUploadedLectureId(lectureId);
-      setShowGenOptions(true);
-      loadLectures();
+      // Refresh lectures list and pre-select for Create section
+      getLectures().then((res) => {
+        const data = res.data || [];
+        setLectures(data);
+        const match = data.find((l: LectureOut) => l.id === lectureId);
+        if (match) {
+          setGenLecture(match);
+          setGenError("");
+          setHighlightCreate(true);
+          setTimeout(() => setHighlightCreate(false), 5000); // Reset animation
+          scrollToSection("create");
+        }
+      }).catch(() => {});
+
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
       const d = axiosErr.response?.data?.detail;
       setError(typeof d === "string" ? d : (d && typeof d === "object" && "message" in d ? `${(d as {message: string}).message}`.trim() : "Upload failed"));
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleInlineGenerateNow = async () => {
-    if (!uploadedLectureId) return;
-    setInlineGenerating(true);
-    setError("");
-    try {
-      const res = await processLecture(uploadedLectureId, inlineGenMode === "essay" ? "essay" : "revision");
-      router.push(`/lap/${res.data.job_id}`);
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: unknown } } };
-      const d = axiosErr.response?.data?.detail;
-      setError(typeof d === "string" ? d : (d && typeof d === "object" && "message" in d ? `${(d as {message: string}).message}`.trim() : "Generation failed"));
-      setInlineGenerating(false);
     }
   };
 
@@ -478,10 +496,11 @@ function UploadContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <AppHeader activePage="Upload" />
-      <main className="flex-grow flex flex-col w-full overflow-hidden">
-        {/* Navigation dots */}
-        <div className="flex items-center justify-center gap-1.5 pt-4 pb-2 shrink-0">
+      <AppHeader activePage="Lap" />
+
+      {/* Navigation bar - Sticky & Pill style */}
+      <div className="sticky top-16 md:top-20 z-30 flex items-center justify-center pt-4 pb-2 shrink-0 pointer-events-none bg-background/50 backdrop-blur-sm">
+        <div className="flex items-center p-1.5 gap-1.5 bg-background border border-border/40 rounded-full shadow-lg pointer-events-auto">
           {SECTION_NAMES.map((name, i) => {
             const id = SECTION_IDS[i];
             const isActive = currentSection === id;
@@ -489,10 +508,10 @@ function UploadContent() {
               <button
                 key={id}
                 onClick={() => scrollToSection(id)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${
                   isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted"
+                    ? "bg-primary text-primary-foreground shadow-sm scale-110"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 }`}
               >
                 {name}
@@ -500,7 +519,9 @@ function UploadContent() {
             );
           })}
         </div>
+      </div>
 
+      <main className="flex-grow flex flex-col w-full overflow-hidden">
         {/* Horizontal scroll container */}
         <div
           ref={scrollRef}
@@ -508,13 +529,13 @@ function UploadContent() {
           className="flex flex-1 overflow-x-auto snap-x snap-mandatory scrollbar-hide overscroll-x-contain"
           style={{ scrollBehavior: "smooth" }}
         >
-          {/* ═══════════════════ SECTION 1: UPLOAD ═══════════════════ */}
+          {/* ═══════════════════ SECTION 1: LAP ═══════════════════ */}
           <section className="min-w-[100vw] snap-start overflow-y-auto">
             <div className="px-4 sm:px-6 max-w-3xl mx-auto w-full pb-32">
               <div className="space-y-8">
                 <div className="text-center space-y-3 pt-6">
                   <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">
-                    Upload Your Content
+                    Lap Scan: Upload Your Content
                   </h1>
                   <p className="text-muted-foreground max-w-xl mx-auto text-base">
                     Upload a PDF or paste your notes. You'll configure generation options next.
@@ -527,10 +548,10 @@ function UploadContent() {
                     { id: "paste", icon: ClipboardPaste, label: "Paste Text" },
                   ] as { id: InputMode; icon: React.ElementType; label: string }[]).map(({ id, icon: Icon, label }) => (
                     <button key={id} onClick={() => { setInputMode(id); setError(""); }}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border-2 ${
                         inputMode === id
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"}`}>
+                          ? "bg-primary text-primary-foreground border-white/40"
+                          : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border-transparent"}`}>
                       <Icon className="w-4 h-4" />{label}
                     </button>
                   ))}
@@ -538,8 +559,8 @@ function UploadContent() {
 
                 {inputMode === "file" && (
                   <div
-                    className={`flex flex-col items-center justify-center w-full min-h-[240px] border-2 border-dashed rounded-xl px-8 py-10 transition-all duration-300 cursor-pointer ${
-                      dragging ? "border-primary/80 bg-primary/5" : file ? "border-emerald-500/50 bg-emerald-500/5" : "border-border/40 bg-muted/30 hover:border-primary/60 hover:-translate-y-1"}`}
+                    className={`flex flex-col items-center justify-center w-full min-h-[240px] border-2 border-dashed rounded-xl px-8 py-10 transition-all duration-300 cursor-pointer -translate-y-1 ${
+                      dragging ? "border-primary/80 bg-primary/5" : file ? "border-emerald-500/50 bg-emerald-500/5" : "border-white/40 bg-muted/30 hover:border-primary/60"}`}
                     onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                     onDragLeave={() => setDragging(false)}
                     onDrop={handleDrop}
@@ -573,7 +594,7 @@ function UploadContent() {
 
                 {inputMode === "paste" && (
                   <div className="space-y-4">
-                    <div className="relative rounded-xl border border-border/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors">
+                    <div className="relative rounded-xl border-2 border-dashed border-white/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors -translate-y-1 shadow-sm">
                       <div className="absolute top-3 right-3 text-xs z-10">
                         {pasteText.length > 0 ? (
                           pasteText.trim().length < 100 ? (
@@ -600,7 +621,7 @@ function UploadContent() {
                         </div>
                       )}
                       <div
-                        className="absolute bottom-0 left-0 h-0.5 bg-gradient-to-r from-primary to-primary/50 transition-all duration-300"
+                        className="absolute bottom-0 left-0 h-0.5 bg-gradient-to-r from-primary to-primary/50 transition-all duration-500"
                         style={{
                           width: `${Math.min(100, (pasteText.length / 500_000) * 100)}%`,
                           opacity: pasteText.length > 0 ? 1 : 0,
@@ -624,18 +645,24 @@ function UploadContent() {
                       </div>
                     )}
 
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={pasteTitle}
-                        onChange={(e) => setPasteTitle(e.target.value)}
-                        placeholder="Title for this content (e.g. &quot;Pharmacology Chapter 3&quot;)"
-                        className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors pr-16"
-                        maxLength={60}
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/40">
-                        {pasteTitle.length}/60
-                      </span>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-muted-foreground ml-1 flex items-center gap-1">
+                        Title <span className="text-destructive">*</span>
+                      </label>
+                      <div className="relative rounded-xl border-2 border-dashed border-white/40 bg-muted/30 overflow-hidden focus-within:border-primary/60 transition-colors -translate-y-1 shadow-sm">
+                        <input
+                          type="text"
+                          value={pasteTitle}
+                          onChange={(e) => setPasteTitle(e.target.value)}
+                          placeholder="Title for this content (e.g. &quot;Pharmacology Chapter 3&quot;)"
+                          className="w-full px-4 py-3 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none pr-16"
+                          maxLength={60}
+                          required
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/40">
+                          {pasteTitle.length}/60
+                        </span>
+                      </div>
                     </div>
 
                     {pasteText.trim().length >= 100 && (
@@ -656,120 +683,22 @@ function UploadContent() {
                   </div>
                 )}
 
-                {!showGenOptions && (
-                  <Button
-                    onClick={handleUpload}
-                    disabled={uploading || !isReady}
-                    className="w-full synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
-                  >
-                    {uploading ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />Uploading…
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <CloudUpload className="w-5 h-5" />
-                        Upload
-                      </span>
-                    )}
-                  </Button>
-                )}
-
-                {showGenOptions && uploadedLectureId && (
-                  <div className="rounded-2xl border border-primary/30 bg-primary/5 p-6 space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-foreground text-sm">Upload complete!</h3>
-                        <p className="text-xs text-muted-foreground">What would you like to generate?</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => setInlineGenMode("mcq")}
-                        className={`p-4 rounded-xl border-2 text-left transition-all ${
-                          inlineGenMode === "mcq"
-                            ? "border-primary bg-primary/10"
-                            : "border-border bg-card hover:border-primary/40"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${inlineGenMode === "mcq" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                            <Brain className="w-4 h-4" />
-                          </div>
-                          <span className={`font-bold text-sm ${inlineGenMode === "mcq" ? "text-foreground" : "text-muted-foreground"}`}>MCQs</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Multiple choice questions with explanations</p>
-                      </button>
-                      <button
-                        onClick={() => setInlineGenMode("essay")}
-                        className={`p-4 rounded-xl border-2 text-left transition-all ${
-                          inlineGenMode === "essay"
-                            ? "border-primary bg-primary/10"
-                            : "border-border bg-card hover:border-primary/40"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${inlineGenMode === "essay" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                            <FileText className="w-4 h-4" />
-                          </div>
-                          <span className={`font-bold text-sm ${inlineGenMode === "essay" ? "text-foreground" : "text-muted-foreground"}`}>Essays</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Open-ended questions with AI grading</p>
-                      </button>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={handleInlineGenerateNow}
-                        disabled={inlineGenerating}
-                        className="flex-1 bg-foreground text-background font-bold py-3 rounded-xl hover:opacity-85 transition-all"
-                      >
-                        {inlineGenerating ? (
-                          <span className="flex items-center gap-2">
-                            <Loader2 className="w-4 h-4 animate-spin" />Starting…
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-2">
-                            <Sparkles className="w-4 h-4" />
-                            Generate {inlineGenMode === "mcq" ? "MCQs" : "Essays"}
-                            <ArrowRight className="w-4 h-4" />
-                          </span>
-                        )}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => openAdvancedOptions(uploadedLectureId)}
-                        disabled={inlineGenerating}
-                        className="shrink-0"
-                        title="Advanced options"
-                      >
-                        <Settings2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                      <p className="text-xs text-muted-foreground/60">
-                        Need custom exam type, difficulty, or focus areas?{" "}
-                        <button
-                          onClick={() => openAdvancedOptions(uploadedLectureId)}
-                          className="text-primary underline underline-offset-2 hover:no-underline"
-                        >
-                          Advanced options →
-                        </button>
-                      </p>
-                      <button
-                        onClick={() => { setShowGenOptions(false); setUploadedLectureId(null); }}
-                        className="text-xs text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <Button
+                  onClick={handleLap}
+                  disabled={uploading || !isReady}
+                  className="w-full synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
+                >
+                  {uploading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />Uploading…
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <CloudUpload className="w-5 h-5" />
+                      Upload
+                    </span>
+                  )}
+                </Button>
 
                 <TelegramUploadCard />
               </div>
@@ -795,12 +724,13 @@ function UploadContent() {
                       <LectureSelector
                         preselectedId={searchParams.get("lecture_id") ? parseInt(searchParams.get("lecture_id")!) : undefined}
                         onLectureSelected={handleLectureSelected}
+                        onUploadRequested={() => scrollToSection("upload")}
                       />
                     </CardContent>
                   </Card>
                 ) : (
                   <>
-                    <div>
+                    <div className={`transition-all duration-500 rounded-2xl ${highlightCreate ? "ring-4 ring-primary ring-offset-4 ring-offset-background scale-[1.02] bg-primary/5 p-4" : ""}`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <h2 className="text-xl font-extrabold text-foreground">
@@ -809,6 +739,11 @@ function UploadContent() {
                           <div className="flex items-center gap-2 text-muted-foreground mt-1">
                             <FileText className="w-4 h-4" />
                             <span className="text-sm font-medium">{genLecture.title}</span>
+                            {highlightCreate && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary text-primary-foreground animate-pulse">
+                                NEWLY UPLOADED
+                              </span>
+                            )}
                           </div>
                         </div>
                         <Button
@@ -920,310 +855,411 @@ function UploadContent() {
                               <div>
                                 <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                                   Prior knowledge
-                                </label>
-                                <select
-                                  value={priorKnowledge}
-                                  onChange={(e) => setPriorKnowledge(e.target.value)}
-                                  className="w-full px-3 py-2.5 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground outline-none focus:border-primary/60 transition-colors"
-                                >
-                                  {PRIOR_KNOWLEDGE_OPTIONS.map(({ value, label }) => (
-                                    <option key={value} value={value}>{label}</option>
-                                  ))}
-                                </select>
-                              </div>
+                              </label>
+                              <select
+                                value={priorKnowledge}
+                                onChange={(e) => setPriorKnowledge(e.target.value)}
+                                className="w-full px-3 py-2.5 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground outline-none focus:border-primary/60 transition-colors"
+                              >
+                                {PRIOR_KNOWLEDGE_OPTIONS.map(({ value, label }) => (
+                                  <option key={value} value={value}>{label}</option>
+                                ))}
+                              </select>
+                            </div>
 
-                              <div>
-                                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
-                                  Difficulty
-                                </label>
-                                <div className="flex gap-2">
-                                  {DIFFICULTY_OPTIONS.map(({ value, label }) => (
-                                    <button
-                                      key={value}
-                                      onClick={() => setDifficulty(value)}
-                                      className={`flex-1 px-2 py-2 rounded-lg text-xs font-bold transition-all ${
-                                        difficulty === value
-                                          ? "bg-primary text-primary-foreground"
-                                          : "bg-muted/50 text-muted-foreground border border-border hover:border-primary/40"
-                                      }`}
-                                    >
-                                      {label}
-                                    </button>
-                                  ))}
+                            <div>
+                              <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                                Difficulty
+                              </label>
+                              <div className="flex gap-2">
+                                {DIFFICULTY_OPTIONS.map(({ value, label }) => (
+                                  <button
+                                    key={value}
+                                    onClick={() => setDifficulty(value)}
+                                    className={`flex-1 px-2 py-2 rounded-lg text-xs font-bold transition-all ${
+                                      difficulty === value
+                                        ? "bg-primary text-primary-foreground"
+                                        : "bg-muted/50 text-muted-foreground border border-border hover:border-primary/40"
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                              Number of MCQs: {mcqCount}
+                            </label>
+                            <input
+                              type="range"
+                              min={10}
+                              max={40}
+                              step={5}
+                              value={mcqCount}
+                              onChange={(e) => setMcqCount(parseInt(e.target.value))}
+                              className="w-full accent-primary"
+                            />
+                            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                              <span>10</span>
+                              <span>40</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                              Weak topics{" "}
+                              <span className="font-normal text-muted-foreground/60">(optional)</span>
+                            </label>
+                            <textarea
+                              value={weakTopics}
+                              onChange={(e) => setWeakTopics(e.target.value)}
+                              placeholder="List topics you struggle with, one per line"
+                              maxLength={300}
+                              className="w-full min-h-[80px] resize-none px-3 py-2.5 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="border-t border-border pt-5">
+                        <label className="text-sm font-bold text-foreground mb-3 block">
+                          Focus on specific topics?{" "}
+                          <span className="font-normal text-muted-foreground/60">(optional)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={focusInstruction}
+                          onChange={(e) => setFocusInstruction(e.target.value)}
+                          placeholder="e.g., 'Focus on cardiovascular pharmacology' or 'Emphasize drug interactions'"
+                          maxLength={300}
+                          className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors"
+                        />
+                        <p className="text-xs text-muted-foreground/60 mt-2">
+                          The AI will prioritize these topics when generating questions.
+                        </p>
+                      </div>
+
+                      {genError && (
+                        <div className="bg-destructive/10 border border-destructive/20 text-destructive rounded-xl px-4 py-3 text-sm flex items-start gap-2">
+                          <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                          {genError}
+                        </div>
+                      )}
+
+                      <Button
+                        onClick={handleGenerate}
+                        disabled={isGenerating || !canGenerate}
+                        className="w-full synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
+                      >
+                        {isGenerating ? (
+                          <span className="flex items-center gap-2">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Starting generation…
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <Sparkles className="w-5 h-5" />
+                            Generate {genMode === "mcq" ? "MCQs" : "Essay Questions"}
+                          </span>
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+
+              {lectures.length === 0 && (
+                <div className="text-center py-12 space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
+                    <BookOpen className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground mb-1">No lectures yet</h3>
+                    <p className="text-sm text-muted-foreground max-sm mx-auto">
+                      Upload a PDF or paste your notes to get started.
+                    </p>
+                  </div>
+                  <Button variant="default" onClick={() => scrollToSection("upload")}>
+                    <CloudUpload className="w-4 h-4 mr-2" />Upload a File
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ═══════════════════ SECTION 3: STUDY ═══════════════════ */}
+        <section className="min-w-[100vw] snap-start overflow-y-auto">
+          <div className="px-4 sm:px-6 max-w-6xl mx-auto w-full pb-32">
+            <div className="space-y-6 pt-6">
+              {/* Header & Search */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <h2 className="text-lg font-bold text-foreground">Study</h2>
+                <div className="relative w-full sm:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search lectures..."
+                    className="w-full pl-10 pr-4 py-2 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground outline-none focus:border-primary/60 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Sub-tabs */}
+              <div className="flex gap-2 p-1 bg-muted/30 rounded-xl w-fit">
+                {[
+                  { id: "mcq", label: "MCQ Sets", count: lectures.filter(l => l.is_processed || !!l.pending_job_id).length },
+                  { id: "pdf", label: "Study PDFs", count: lectures.length },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setStudySubTab(tab.id as "mcq" | "pdf")}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      studySubTab === tab.id
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {tab.label} <span className="ml-1 opacity-50">{tab.count}</span>
+                  </button>
+                ))}
+              </div>
+
+              {loadingLectures ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {studySubTab === "mcq" ? (
+                    <>
+                      <div className="space-y-2">
+                        {(() => {
+                          const mcqLectures = filteredLectures.filter(l => l.is_processed || !!l.pending_job_id);
+                          const paginated = mcqLectures.slice((mcqPage - 1) * ITEMS_PER_PAGE, mcqPage * ITEMS_PER_PAGE);
+                          
+                          if (paginated.length === 0) return (
+                            <div className="text-center py-12 text-muted-foreground text-sm">
+                              No MCQ sets found.
+                            </div>
+                          );
+
+                          return paginated.map((upload) => {
+                            const isReady = upload.is_processed;
+                            const hasJob = !!upload.pending_job_id;
+                            let href: string;
+                            let statusLabel: string;
+                            let statusColor: string;
+
+                            if (isReady) {
+                              href = `/results/${upload.id}`;
+                              statusLabel = "Ready";
+                              statusColor = "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
+                            } else if (hasJob) {
+                              href = `/lap/${upload.pending_job_id}`;
+                              statusLabel = "Processing";
+                              statusColor = "text-amber-500 bg-amber-500/10 border-amber-500/20";
+                            } else {
+                              href = `/lap?section=create&lecture_id=${upload.id}`;
+                              statusLabel = "Generate";
+                              statusColor = "text-primary bg-primary/10 border-primary/20";
+                            }
+
+                            return (
+                              <button
+                                key={upload.id}
+                                onClick={(e) => {
+                                  const btn = e.currentTarget;
+                                  btn.style.transform = "scale(0.95)";
+                                  btn.style.opacity = "0";
+                                  setTimeout(() => router.push(href), 100);
+                                }}
+                                className="w-full h-[56px] flex items-center gap-3 px-4 rounded-xl border border-border/40 bg-card hover:bg-muted/30 transition-all duration-150 text-left group"
+                              >
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isReady ? "bg-emerald-500/10" : hasJob ? "bg-amber-500/10" : "bg-primary/10"}`}>
+                                  {isReady ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : hasJob ? <Clock className="w-4 h-4 text-amber-500" /> : <Sparkles className="w-4 h-4 text-primary" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-foreground truncate">{upload.title}</p>
+                                  <p className="text-[10px] text-muted-foreground">{new Date(upload.created_at).toLocaleDateString()}</p>
+                                </div>
+                                <Badge variant="outline" className={`flex-shrink-0 px-2 h-5 text-[9px] font-bold ${statusColor}`}>
+                                  {statusLabel}
+                                </Badge>
+                                <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-colors" />
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+                      
+                      {/* Pagination for MCQ */}
+                      {(() => {
+                        const mcqLectures = filteredLectures.filter(l => l.is_processed || !!l.pending_job_id);
+                        const totalPages = Math.ceil(mcqLectures.length / ITEMS_PER_PAGE);
+                        if (totalPages <= 1) return null;
+                        return (
+                          <div className="flex items-center justify-center gap-4 pt-4">
+                            <Button variant="ghost" size="sm" onClick={() => setMcqPage(p => Math.max(1, p - 1))} disabled={mcqPage === 1}>
+                              <ChevronLeft className="w-4 h-4 mr-1" /> Prev
+                            </Button>
+                            <span className="text-xs font-bold text-muted-foreground">Page {mcqPage} of {totalPages}</span>
+                            <Button variant="ghost" size="sm" onClick={() => setMcqPage(p => Math.min(totalPages, p + 1))} disabled={mcqPage === totalPages}>
+                              Next <ChevronRight className="w-4 h-4 ml-1" />
+                            </Button>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        {(() => {
+                          const paginated = filteredLectures.slice((pdfPage - 1) * ITEMS_PER_PAGE, pdfPage * ITEMS_PER_PAGE);
+                          if (paginated.length === 0) return (
+                            <div className="text-center py-12 text-muted-foreground text-sm">
+                              No PDFs found.
+                            </div>
+                          );
+
+                          return paginated.map((lecture) => (
+                            <div key={lecture.id} className="space-y-2">
+                              <div
+                                onClick={() => setExpandedPdfId(expandedPdfId === lecture.id ? null : lecture.id)}
+                                className="w-full h-[56px] flex items-center gap-3 px-4 rounded-xl border border-border/40 bg-card hover:bg-muted/30 transition-all duration-150 text-left cursor-pointer group"
+                              >
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                  <FileText className="w-4 h-4 text-primary" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-foreground truncate">{lecture.title}</p>
+                                  <p className="text-[10px] text-muted-foreground">{new Date(lecture.created_at).toLocaleDateString()}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={(e) => handleDelete(e, lecture)}
+                                    disabled={deletingId === lecture.id}
+                                    className="w-8 h-8 rounded-lg flex items-center justify-center text-destructive hover:bg-destructive/10 transition-colors"
+                                  >
+                                    {deletingId === lecture.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <ChevronRight className={`w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-transform ${expandedPdfId === lecture.id ? "rotate-90" : ""}`} />
                                 </div>
                               </div>
+                              
+                              {/* Inline PDF Viewer Expansion */}
+                              {expandedPdfId === lecture.id && (
+                                <div className="animate-in fade-in slide-in-from-top-2 duration-300 overflow-hidden rounded-xl border border-primary/20">
+                                  <div className="bg-muted/30 p-2 flex justify-between items-center border-b border-border/20">
+                                    <span className="text-[10px] font-bold text-muted-foreground px-2">PDF VIEWER</span>
+                                    <button onClick={() => setExpandedPdfId(null)} className="p-1 hover:bg-muted rounded-md transition-colors">
+                                      <X className="w-3.5 h-3.5 text-muted-foreground" />
+                                    </button>
+                                  </div>
+                                  <div className="bg-background min-h-[500px]">
+                                    {lecture.file_path?.toLowerCase().endsWith(".pdf") ? (
+                                      <div onMouseUp={handleTextSelection}>
+                                        <PdfViewer
+                                          lectureId={lecture.id}
+                                          onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="p-12 text-center space-y-3">
+                                        <div className="w-12 h-12 rounded-xl bg-muted/50 flex items-center justify-center mx-auto">
+                                          <FileText className="w-6 h-6 text-muted-foreground" />
+                                        </div>
+                                        <p className="text-sm text-muted-foreground">Text-based content viewing coming soon.</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
+                          ));
+                        })()}
+                      </div>
 
-                            <div>
-                              <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
-                                Number of MCQs: {mcqCount}
-                              </label>
-                              <input
-                                type="range"
-                                min={10}
-                                max={40}
-                                step={5}
-                                value={mcqCount}
-                                onChange={(e) => setMcqCount(parseInt(e.target.value))}
-                                className="w-full accent-primary"
-                              />
-                              <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                                <span>10</span>
-                                <span>40</span>
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
-                                Weak topics{" "}
-                                <span className="font-normal text-muted-foreground/60">(optional)</span>
-                              </label>
-                              <textarea
-                                value={weakTopics}
-                                onChange={(e) => setWeakTopics(e.target.value)}
-                                placeholder="List topics you struggle with, one per line"
-                                maxLength={300}
-                                className="w-full min-h-[80px] resize-none px-3 py-2.5 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors"
-                              />
-                            </div>
+                      {/* Pagination for PDF */}
+                      {(() => {
+                        const totalPages = Math.ceil(filteredLectures.length / ITEMS_PER_PAGE);
+                        if (totalPages <= 1) return null;
+                        return (
+                          <div className="flex items-center justify-center gap-4 pt-4">
+                            <Button variant="ghost" size="sm" onClick={() => setPdfPage(p => Math.max(1, p - 1))} disabled={pdfPage === 1}>
+                              <ChevronLeft className="w-4 h-4 mr-1" /> Prev
+                            </Button>
+                            <span className="text-xs font-bold text-muted-foreground">Page {pdfPage} of {totalPages}</span>
+                            <Button variant="ghost" size="sm" onClick={() => setPdfPage(p => Math.min(totalPages, p + 1))} disabled={pdfPage === totalPages}>
+                              Next <ChevronRight className="w-4 h-4 ml-1" />
+                            </Button>
                           </div>
-                        )}
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+              )}
 
-                        <div className="border-t border-border pt-5">
-                          <label className="text-sm font-bold text-foreground mb-3 block">
-                            Focus on specific topics?{" "}
-                            <span className="font-normal text-muted-foreground/60">(optional)</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={focusInstruction}
-                            onChange={(e) => setFocusInstruction(e.target.value)}
-                            placeholder="e.g., 'Focus on cardiovascular pharmacology' or 'Emphasize drug interactions'"
-                            maxLength={300}
-                            className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors"
-                          />
-                          <p className="text-xs text-muted-foreground/60 mt-2">
-                            The AI will prioritize these topics when generating questions.
-                          </p>
-                        </div>
-
-                        {genError && (
-                          <div className="bg-destructive/10 border border-destructive/20 text-destructive rounded-xl px-4 py-3 text-sm flex items-start gap-2">
-                            <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                            {genError}
-                          </div>
-                        )}
-
-                        <Button
-                          onClick={handleGenerate}
-                          disabled={isGenerating || !canGenerate}
-                          className="w-full synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
-                        >
-                          {isGenerating ? (
-                            <span className="flex items-center gap-2">
-                              <Loader2 className="w-5 h-5 animate-spin" />
-                              Starting generation…
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-2">
-                              <Sparkles className="w-5 h-5" />
-                              Generate {genMode === "mcq" ? "MCQs" : "Essay Questions"}
-                            </span>
-                          )}
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  </>
-                )}
-
-                {lectures.length === 0 && (
-                  <div className="text-center py-12 space-y-4">
-                    <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
-                      <BookOpen className="w-8 h-8 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-foreground mb-1">No lectures yet</h3>
-                      <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                        Upload a PDF or paste your notes to get started.
-                      </p>
-                    </div>
+              {filteredLectures.length === 0 && !loadingLectures && (
+                <div className="text-center py-12 space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
+                    <BookOpen className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground mb-1">
+                      {searchQuery ? "No matches found" : "No lectures yet"}
+                    </h3>
+                    <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                      {searchQuery ? "Try a different search term" : "Upload a PDF or paste your notes to get started."}
+                    </p>
+                  </div>
+                  {!searchQuery && (
                     <Button variant="default" onClick={() => scrollToSection("upload")}>
                       <CloudUpload className="w-4 h-4 mr-2" />Upload a File
                     </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-
-          {/* ═══════════════════ SECTION 3: STUDY ═══════════════════ */}
-          <section className="min-w-[100vw] snap-start overflow-y-auto">
-            <div className="px-4 sm:px-6 max-w-6xl mx-auto w-full pb-32">
-              <div className="space-y-6 pt-6">
-                <div className="text-center space-y-3">
-                  <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
-                    Study Your Lectures
-                  </h1>
-                  <p className="text-muted-foreground max-w-xl mx-auto text-sm">
-                    Review your uploaded PDFs and notes. Select text to discuss with the AI coach.
-                  </p>
+                  )}
                 </div>
-
-                {!studyLecture ? (
-                  <>
-                    <div className="relative max-w-md mx-auto">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search lectures..."
-                        className="w-full pl-10 pr-4 py-3 rounded-xl bg-muted/30 border border-border/40 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/60 transition-colors"
-                      />
-                    </div>
-
-                    {loadingLectures ? (
-                      <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                      </div>
-                    ) : filteredLectures.length === 0 ? (
-                      <div className="text-center py-12 space-y-4">
-                        <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto">
-                          <BookOpen className="w-8 h-8 text-muted-foreground" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-foreground mb-1">
-                            {searchQuery ? "No matches found" : "No lectures yet"}
-                          </h3>
-                          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                            {searchQuery
-                              ? "Try a different search term"
-                              : "Upload a PDF or paste your notes to get started."}
-                          </p>
-                        </div>
-                        {!searchQuery && (
-                          <Button variant="default" onClick={() => scrollToSection("upload")}>
-                            <CloudUpload className="w-4 h-4 mr-2" />Upload a File
-                          </Button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {filteredLectures.map((lecture) => (
-                          <button
-                            key={lecture.id}
-                            onClick={() => handleLectureClick(lecture)}
-                            className="group relative p-5 rounded-xl border border-border/40 bg-card hover:border-primary/40 hover:bg-muted/20 transition-all text-left"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                                <FileText className="w-5 h-5 text-primary" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-sm text-foreground truncate group-hover:text-primary transition-colors">
-                                  {lecture.title}
-                                </h3>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  {new Date(lecture.created_at).toLocaleDateString()}
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              onClick={(e) => handleDelete(e, lecture)}
-                              disabled={deletingId === lecture.id}
-                              className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-destructive/10 hover:bg-destructive/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="Delete lecture"
-                            >
-                              {deletingId === lecture.id ? (
-                                <Loader2 className="w-3.5 h-3.5 text-destructive animate-spin" />
-                              ) : (
-                                <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                              )}
-                            </button>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setStudyLecture(null)}
-                        className="text-sm"
-                      >
-                        <ArrowLeft className="w-4 h-4 mr-2" />
-                        Back to list
-                      </Button>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <FileText className="w-4 h-4" />
-                        <span className="font-medium">{studyLecture.title}</span>
-                        {numPages && <span className="text-xs">({numPages} pages)</span>}
-                      </div>
-                    </div>
-
-                    <Card>
-                      <CardContent className="p-0">
-                        {isPdf ? (
-                          <div onMouseUp={handleTextSelection}>
-                            <PdfViewer
-                              lectureId={studyLecture.id}
-                              onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
-                            />
-                          </div>
-                        ) : (
-                          <div className="p-6 text-center space-y-3">
-                            <div className="w-12 h-12 rounded-xl bg-muted/50 flex items-center justify-center mx-auto">
-                              <FileText className="w-6 h-6 text-muted-foreground" />
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              This is a text-based lecture. PDF viewer is only available for PDF files.
-                            </p>
-                            <p className="text-xs text-muted-foreground/60 mt-2">
-                              Full text viewing coming soon for non-PDF uploads.
-                            </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {showCoachBtn && (
-                      <button
-                        onClick={handleDiscussWithCoach}
-                        style={{
-                          position: "fixed",
-                          left: `${coachBtnPos.x}px`,
-                          top: `${coachBtnPos.y}px`,
-                          transform: "translate(-50%, -100%)",
-                          zIndex: 1000,
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold shadow-lg hover:opacity-90 transition-opacity flex items-center gap-1.5"
-                      >
-                        <MessageSquareText className="w-3 h-3" />
-                        Discuss with Coach
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
-          </section>
+          </div>
+        </section>
         </div>
       </main>
+
+      {showCoachBtn && (
+        <button
+          onClick={handleDiscussWithCoach}
+          style={{
+            position: "fixed",
+            left: `${coachBtnPos.x}px`,
+            top: `${coachBtnPos.y}px`,
+            transform: "translate(-50%, -100%)",
+            zIndex: 1000,
+          }}
+          className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold shadow-lg hover:opacity-90 transition-opacity flex items-center gap-1.5"
+        >
+          <MessageSquareText className="w-3 h-3" />
+          Discuss with Coach
+        </button>
+      )}
     </div>
   );
 }
 
-export default function UploadPage() {
+export default function LapPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     }>
-      <UploadContent />
+      <LapContent />
     </Suspense>
   );
 }

@@ -14,24 +14,18 @@ from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.schemas.auth import SessionOut
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.core.security import (
-    create_access_token,
-    hash_password,
-    needs_rehash,
-    verify_password,
-)
+from app.core.security import create_access_token, create_session
 from app.db.database import get_db
-from app.models.models import MagicLinkToken, User
+from app.models.models import MagicLinkToken, User, UserSession
 from app.schemas.auth import (
     MagicLinkRequest,
     MagicLinkResponse,
     OnboardingUpdate,
     ProfileUpdate,
     Token,
-    UserCreate,
-    UserLogin,
     UserOut,
     VerifyCodeRequest,
 )
@@ -93,43 +87,6 @@ async def _send_magic_link_email(email: str, token: str, code: str | None = None
     if resp.status_code >= 400:
         raise HTTPException(status_code=502, detail="Failed to send email")
 
-
-@router.post("/signup", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-@limiter.limit("10/minute")
-def signup(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == user_data.email).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
-    existing_ip = db.query(User).filter(User.signup_ip == ip).first()
-
-    local_part = user_data.email.split("@")[0]
-    bro_bonus = local_part.lower().endswith("-fromali")
-
-    user = User(
-        email=user_data.email,
-        hashed_password=hash_password(user_data.password),
-        credit_balance=0 if existing_ip else (100 if bro_bonus else 0),
-        signup_ip=ip,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-@router.post("/login", response_model=Token)
-@limiter.limit("10/minute")
-def login(request: Request, user_data: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_data.email).first()
-    if not user or not verify_password(user_data.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if needs_rehash(user.hashed_password):
-        user.hashed_password = hash_password(user_data.password)
-        db.commit()
-    token = create_access_token({"sub": str(user.id), "is_admin": bool(user.is_admin)})
-    return {"access_token": token, "token_type": "bearer"}
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: User = Depends(get_current_user)):
@@ -231,10 +188,9 @@ async def request_magic_link(
             detail=f"Too many requests. Try again in {_MAGIC_LINK_RATE_WINDOW} minutes.",
         )
 
-    # Ensure user exists; create if new (passwordless — "!" can never bcrypt-verify).
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        user = User(email=email, hashed_password="!")
+        user = User(email=email)
         db.add(user)
         db.flush()
 
@@ -269,6 +225,7 @@ async def request_magic_link(
 
 @router.get("/verify")
 def verify_magic_link(
+    request: Request,
     token: str = Query(..., description="Raw magic-link token from email"),
     db: Session = Depends(get_db),
 ):
@@ -301,11 +258,19 @@ def verify_magic_link(
     if not user:
         return RedirectResponse(url=error_redirect, status_code=302)
 
-    jwt_token = create_access_token({"sub": str(user.id), "email": user.email})
+    # Invalidate old sessions
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+
+    # Create new session
+    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    ua = request.headers.get("User-Agent", "")[:500]
+    sid, stk = create_session(db, user.id, ip, ua)
+    db.commit()
+
+    jwt_token = create_access_token({"sub": str(user.id), "sid": sid, "stk": stk})
 
     # Redirect to the frontend callback page which saves the JWT to localStorage.
-    # Fragment (#) would be cleaner but is not accessible server-side; query param is
-    # immediately consumed by the callback page and the URL is replaced in history.
     return RedirectResponse(
         url=f"{settings.APP_PUBLIC_URL}/auth/callback?token={jwt_token}",
         status_code=302,
@@ -352,14 +317,64 @@ def verify_code(
     db.commit()
 
     user = db.query(User).filter(User.email == email).first()
+    is_new = False
     if not user:
-        user = User(email=email, hashed_password="!")
+        user = User(email=email)
         db.add(user)
         db.commit()
         db.refresh(user)
+        is_new = True
 
-    jwt_token = create_access_token({"sub": str(user.id), "email": user.email})
-    return {"access_token": jwt_token, "token_type": "bearer"}
+    # Invalidate old sessions
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+
+    # Create new session
+    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    ua = request.headers.get("User-Agent", "")[:500]
+    sid, stk = create_session(db, user.id, ip, ua)
+    db.commit()
+
+    jwt_token = create_access_token({"sub": str(user.id), "sid": sid, "stk": stk})
+    return {"access_token": jwt_token, "token_type": "bearer", "is_new_user": is_new}
+
+
+# ── Session management ─────────────────────────────────────────────────────────
+
+@router.get("/sessions", response_model=list[SessionOut])
+def list_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    sessions = (
+        db.query(UserSession)
+        .filter(UserSession.user_id == current_user.id)
+        .order_by(UserSession.created_at.desc())
+        .all()
+    )
+    return [
+        SessionOut(
+            id=s.id,
+            ip_address=s.ip_address,
+            user_agent=s.user_agent,
+            created_at=s.created_at,
+            last_seen_at=s.last_seen_at,
+        )
+        for s in sessions
+    ]
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = db.query(UserSession).filter(UserSession.id == session_id).first()
+    if not session or session.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    db.delete(session)
+    db.commit()
 
 
 # ── Google OAuth 2.0 ──────────────────────────────────────────────────────────
@@ -445,20 +460,27 @@ async def google_callback(
         return RedirectResponse(error_redirect, status_code=302)
 
     user = db.query(User).filter(User.email == email).first()
+    is_new = False
     if not user:
-        user = User(email=email, hashed_password="!", name=name)
+        user = User(email=email, name=name)
         db.add(user)
         db.commit()
         db.refresh(user)
+        is_new = True
     elif not user.name and name:
         user.name = name
         db.commit()
 
-    jwt_token = create_access_token(
-        {"sub": str(user.id), "email": user.email},
-        expires_delta=timedelta(days=7),
-    )
+    # Invalidate old sessions
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+
+    # Create new session
+    sid, stk = create_session(db, user.id)
+    db.commit()
+
+    jwt_token = create_access_token({"sub": str(user.id), "sid": sid, "stk": stk})
     return RedirectResponse(
-        url=f"{settings.APP_PUBLIC_URL}/auth/callback?token={jwt_token}",
+        url=f"{settings.APP_PUBLIC_URL}/auth/callback?token={jwt_token}&is_new_user={'true' if is_new else 'false'}",
         status_code=302,
     )
