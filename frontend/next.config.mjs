@@ -38,11 +38,14 @@ const nextConfig = {
       },
     ];
   },
-  webpack: (config) => {
-    config.resolve.alias.canvas = false;
-    config.resolve.alias.encoding = false;
-    return config;
-  },
+webpack: (config) => {
+  config.resolve.alias.canvas = false;
+  config.module.rules.push({
+    test: /node_modules\/pdfjs-dist/,
+    type: "javascript/auto",
+  });
+  return config;
+},
 }
 
 export default nextConfig
