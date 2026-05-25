@@ -1,12 +1,14 @@
 ﻿"use client";
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   getResults, processLecture, createShareLink, getActiveViewers,
   getQuizSession, saveQuizSession, retakeQuizSession,
   getPerformanceQuestions, savePerformanceQuestions,
   startPerformanceSession, submitPerformanceAnswer, completePerformanceSession,
+  generateFlashcards,
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { invalidatePerformanceContext } from "@/lib/performance-context";
@@ -127,6 +129,26 @@ export default function ResultsPage() {
   const params = useParams();
   const router = useRouter();
   const lectureId = parseInt(params.id as string);
+
+  const searchParams = useSearchParams();
+const [showFlashcardPrompt, setShowFlashcardPrompt] = useState(false);
+
+useEffect(() => {
+  if (searchParams.get("processed") === "true") {
+    const hasSeen = localStorage.getItem(`fc_prompt_seen_${lectureId}`);
+    if (!hasSeen) {
+      setShowFlashcardPrompt(true);
+    }
+  }
+}, [searchParams, lectureId]);
+
+const handleFlashcardPromptAction = (action: "try" | "later") => {
+  localStorage.setItem(`fc_prompt_seen_${lectureId}`, "true");
+  setShowFlashcardPrompt(false);
+  if (action === "try") {
+    router.push(`/flashcards/${lectureId}`);
+  }
+};
 
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -1138,6 +1160,68 @@ export default function ResultsPage() {
           </div>
         </div>
       </main>
+
+      <AnimatePresence>
+        {showFlashcardPrompt && (
+          <FlashcardDiscoveryPopup onAction={handleFlashcardPromptAction} />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function FlashcardDiscoveryPopup({ onAction }: { onAction: (action: "try" | "later") => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 50, scale: 0.9 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 20, scale: 0.95 }}
+      className="fixed bottom-8 right-8 z-[100] w-[400px] max-w-[calc(100vw-64px)]"
+    >
+      <div className="bg-[#0f172a] border border-white/10 rounded-[2rem] p-8 shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden relative group">
+        {/* Glow effect */}
+        <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary/20 blur-[80px] group-hover:bg-primary/30 transition-colors duration-500" />
+        
+        <div className="relative space-y-6">
+          <div className="flex items-start justify-between">
+            <div className="p-3.5 bg-primary/10 rounded-2xl border border-primary/20">
+              <Sparkles className="w-7 h-7 text-primary animate-pulse" />
+            </div>
+            <button 
+              onClick={() => onAction("later")}
+              className="text-white/20 hover:text-white/40 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-2xl font-bold text-white tracking-tight">
+              Try our new AI Flashcards
+            </h3>
+            <p className="text-white/60 leading-relaxed">
+              Turn this lecture into a personalized spaced-repetition deck in seconds.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 pt-2">
+            <Button
+              onClick={() => onAction("try")}
+              className="w-full h-12 rounded-xl bg-primary text-primary-foreground hover:scale-[1.02] active:scale-[0.98] transition-all font-bold text-base shadow-lg shadow-primary/20"
+            >
+              Try Flashcards
+              <ChevronRight className="w-4 h-4 ml-2" />
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => onAction("later")}
+              className="w-full h-12 rounded-xl text-white/40 hover:text-white/60 hover:bg-white/5 transition-all font-semibold"
+            >
+              Maybe Later
+            </Button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }

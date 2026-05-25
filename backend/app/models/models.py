@@ -99,6 +99,7 @@ class Lecture(Base):
     subject = Column(String(255), nullable=True)
     topic_area = Column(String(255), nullable=True)
     level = Column(String(50), nullable=True)
+    study_time_seconds = Column(Integer, default=0, server_default="0")
 
     owner = relationship("User", back_populates="lectures")
     result = relationship("Result", back_populates="lecture", uselist=False)

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, DateTime, Float, ForeignKey,
+    Boolean, Column, DateTime, Float, ForeignKey,
     Integer, String, Text, UniqueConstraint,
 )
 
@@ -35,6 +35,7 @@ class Flashcard(Base):
     memory_tip          = Column(Text, nullable=True)
     card_type           = Column(String(20), nullable=False, default="concept")   # concept|definition|mechanism|comparison|clinical
     difficulty          = Column(String(10), nullable=False, default="medium")    # easy|medium|hard
+    is_starred          = Column(Boolean, default=False, server_default="0")
     source_text         = Column(Text, nullable=True)
     created_at          = Column(DateTime, default=_utcnow)
     global_avg_rating   = Column(Float, nullable=True)

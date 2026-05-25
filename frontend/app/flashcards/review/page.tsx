@@ -2,7 +2,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
-import { getDueFlashcards, reviewFlashcard, FlashcardOut } from "@/lib/api";
+import { getDueFlashcards, reviewFlashcard, FlashcardOut, getLectures, LectureOut } from "@/lib/api";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,11 +18,11 @@ const RATING_CONFIG = [
 ];
 
 const CARD_TYPE_COLORS: Record<string, string> = {
-  concept:    "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  definition: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  mechanism:  "bg-orange-500/20 text-orange-300 border-orange-500/30",
-  comparison: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
-  clinical:   "bg-red-500/20 text-red-300 border-red-500/30",
+  concept: "bg-purple-500/10 text-purple-500 border-purple-500/20",
+  definition: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+  mechanism: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  comparison: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
+  clinical: "bg-red-500/10 text-red-500 border-red-500/20",
 };
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -63,6 +63,7 @@ function FlashcardReviewContent() {
     : undefined;
 
   const [cards, setCards] = useState<FlashcardOut[]>([]);
+  const [lectureTitle, setLectureTitle] = useState<string>("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -79,11 +80,23 @@ function FlashcardReviewContent() {
     if (!isAuthenticated()) { router.replace("/auth"); return; }
     setLoading(true);
     setError("");
-    getDueFlashcards(documentId, 50)
-      .then((res) => {
+
+    const dataPromises: [Promise<any>, Promise<any>?] = [
+      getDueFlashcards(documentId, 50),
+      documentId ? getLectures() : Promise.resolve(null)
+    ];
+
+    Promise.all(dataPromises)
+      .then(([res, lecRes]) => {
         const fetchedCards = res.data.cards || [];
         setCards(fetchedCards);
         setHasAnyCards(fetchedCards.length > 0 || (res.data as any).total_cards > 0);
+        
+        if (lecRes && documentId) {
+          const lec = (lecRes.data as LectureOut[]).find(l => l.id === documentId);
+          if (lec) setLectureTitle(lec.title);
+        }
+        
         setLoading(false);
       })
       .catch((err) => {
@@ -232,7 +245,7 @@ function FlashcardReviewContent() {
       <AppHeader activePage="Flashcards" />
 
       {/* Progress bar */}
-      <div className="px-4 py-3 flex items-center gap-4 border-b border-border">
+      <div className="px-4 py-3 flex items-center gap-4 border-b border-border bg-card/50 backdrop-blur-sm sticky top-14 z-40">
         <Button
           variant="ghost"
           size="sm"
@@ -241,94 +254,115 @@ function FlashcardReviewContent() {
         >
           <X className="w-5 h-5" />
         </Button>
-        <div className="flex-1">
-          <Progress value={progress} className="h-2" />
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-end mb-1">
+            <span className="text-[10px] font-bold text-primary uppercase tracking-widest truncate">
+              {lectureTitle || "Review Session"}
+            </span>
+            <span className="text-muted-foreground text-[10px] font-mono shrink-0">
+              {currentIndex + 1} / {cards.length}
+            </span>
+          </div>
+          <Progress value={progress} className="h-1" />
         </div>
-        <span className="text-muted-foreground text-sm shrink-0">
-          {currentIndex + 1} / {cards.length}
-        </span>
       </div>
 
       {/* Card area */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6">
-        <div className="w-full max-w-2xl" style={{ perspective: "1200px" }}>
+      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full">
+        <div className="w-full" style={{ perspective: "1200px" }}>
           <div
-            className="relative w-full"
+            className="relative w-full transition-all duration-500 ease-in-out"
             style={{
               transformStyle: "preserve-3d",
-              transition: "transform 0.4s ease",
               transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
-              minHeight: "340px",
+              minHeight: "400px",
             }}
           >
-            {/* Front */}
+            {/* Front Side */}
             <Card
-              className="absolute inset-0 flex flex-col"
+              className="absolute inset-0 flex flex-col shadow-xl border-border/50"
               style={{ backfaceVisibility: "hidden" }}
             >
-              <CardContent className="flex-1 flex flex-col p-6 sm:p-8">
-                <div className="flex items-center justify-between mb-6">
+              <CardContent className="flex-1 flex flex-col p-6 sm:p-10">
+                <div className="flex items-center justify-between mb-8">
                   <Badge
                     variant="outline"
-                    className={`text-xs capitalize ${CARD_TYPE_COLORS[currentCard.card_type] ?? "border-border text-muted-foreground"}`}
+                    className={`text-[10px] uppercase font-bold tracking-wider ${CARD_TYPE_COLORS[currentCard.card_type] ?? "border-border text-muted-foreground"}`}
                   >
                     {currentCard.card_type}
                   </Badge>
-                  <span className="text-muted-foreground text-xs">{currentCard.topic}</span>
+                  <span className="text-muted-foreground text-[10px] font-bold uppercase tracking-widest">{currentCard.topic}</span>
                 </div>
-                <div className="flex-1 flex items-center justify-center">
-                  <p className="text-foreground text-xl text-center leading-relaxed font-medium">
+                <div className="flex-1 flex items-center justify-center py-10">
+                  <p className="text-foreground text-2xl sm:text-3xl text-center leading-tight font-bold tracking-tight">
                     {currentCard.front}
                   </p>
                 </div>
-                <div className="mt-6 text-center">
-                  <Button onClick={handleShowAnswer} className="px-10 py-3 text-base">
+                <div className="mt-8 text-center">
+                  <Button onClick={handleShowAnswer} className="h-14 px-12 text-lg font-bold rounded-2xl shadow-lg shadow-primary/20">
                     Show Answer
                   </Button>
-                  <p className="text-muted-foreground text-xs mt-2">or press Space / Enter</p>
+                  <p className="text-muted-foreground text-[10px] font-bold uppercase tracking-widest mt-4">or press Space / Enter</p>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Back */}
+            {/* Back Side */}
             <Card
-              className="absolute inset-0 flex flex-col border-primary/30"
+              className="absolute inset-0 flex flex-col border-primary/20 shadow-2xl bg-card"
               style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
             >
-              <CardContent className="flex-1 flex flex-col p-6 sm:p-8">
-                <div className="flex items-center justify-between mb-4">
+              <CardContent className="flex-1 flex flex-col p-6 sm:p-10 overflow-hidden">
+                <div className="flex items-center justify-between mb-6 shrink-0">
                   <Badge
                     variant="outline"
-                    className={`text-xs capitalize ${CARD_TYPE_COLORS[currentCard.card_type] ?? "border-border text-muted-foreground"}`}
+                    className={`text-[10px] uppercase font-bold tracking-wider ${CARD_TYPE_COLORS[currentCard.card_type] ?? "border-border text-muted-foreground"}`}
                   >
                     {currentCard.card_type}
                   </Badge>
-                  <span className="text-muted-foreground text-xs">{currentCard.topic}</span>
+                  <span className="text-muted-foreground text-[10px] font-bold uppercase tracking-widest">{currentCard.topic}</span>
                 </div>
-                <div className="flex-1 overflow-y-auto">
-                  <p className="text-foreground text-base leading-relaxed">{currentCard.back}</p>
+
+                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-8">
+                  {/* Question Reference */}
+                  <div className="space-y-2 opacity-50">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Question</span>
+                    <p className="text-foreground text-sm font-semibold leading-snug">{currentCard.front}</p>
+                  </div>
+
+                  {/* The Answer */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-bold text-primary uppercase tracking-widest">Answer</span>
+                    <p className="text-foreground text-xl sm:text-2xl leading-relaxed font-bold tracking-tight">
+                      {currentCard.back}
+                    </p>
+                  </div>
+
                   {currentCard.memory_tip && (
-                    <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                      <p className="text-yellow-300 text-sm">
-                        <span className="font-semibold">💡 Memory tip:</span> {currentCard.memory_tip}
+                    <div className="p-5 rounded-2xl bg-yellow-500/5 border border-yellow-500/10 shadow-inner">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Zap className="w-4 h-4 text-yellow-500" />
+                        <span className="text-[10px] font-bold text-yellow-600 dark:text-yellow-500 uppercase tracking-widest">Memory Engine</span>
+                      </div>
+                      <p className="text-yellow-700/90 dark:text-yellow-500/80 text-sm font-medium leading-relaxed italic">
+                        "{currentCard.memory_tip}"
                       </p>
                     </div>
                   )}
                 </div>
 
                 {/* Rating buttons: 2×2 on mobile, 4-col on sm+ */}
-                <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
                   {RATING_CONFIG.map(({ rating, label, emoji, description, key, color }) => (
                     <button
                       key={rating}
                       onClick={() => handleRate(rating)}
                       disabled={submitting}
-                      className={`${color} rounded-xl flex flex-col items-center justify-center gap-1.5 py-5 sm:py-3 transition-all disabled:opacity-50 text-white touch-manipulation`}
+                      className={`${color} rounded-2xl flex flex-col items-center justify-center gap-1 py-4 sm:py-3 transition-all disabled:opacity-50 text-white shadow-md active:scale-95 touch-manipulation`}
                     >
                       <span className="text-2xl sm:text-xl leading-none">{emoji}</span>
-                      <span className="font-semibold text-base sm:text-sm">{label}</span>
-                      <span className="text-xs opacity-70">{description}</span>
-                      <span className="text-xs opacity-40 font-mono hidden sm:block">[{key}]</span>
+                      <span className="font-bold text-sm">{label}</span>
+                      <span className="text-[10px] opacity-70 font-medium">{description}</span>
                     </button>
                   ))}
                 </div>
@@ -337,8 +371,8 @@ function FlashcardReviewContent() {
           </div>
         </div>
 
-        <p className="text-muted-foreground text-xs mt-6">
-          {flipped ? "Press 1–4 to rate" : "Press Space to reveal"}
+        <p className="text-muted-foreground text-[10px] font-bold uppercase tracking-widest mt-8">
+          {flipped ? "Select difficulty to continue" : "Press Space to reveal"}
         </p>
       </div>
     </div>

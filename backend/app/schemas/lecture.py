@@ -17,6 +17,7 @@ class LectureOut(BaseModel):
     pending_job_id: Optional[str] = None
     progress_pct: Optional[int] = None
     progress_label: Optional[str] = None
+    study_time_seconds: int = 0
 
     class Config:
         from_attributes = True
@@ -106,3 +107,6 @@ class QuizSessionOut(BaseModel):
 
 class QuizSessionSave(BaseModel):
     answers: dict
+
+class StudyTimeUpdate(BaseModel):
+    seconds: int

@@ -29,6 +29,7 @@ from app.models.performance import WeakPoint
 from app.schemas.flashcards import (
     FlashcardOut,
     FlashcardStats,
+    FlashcardUpdate,
     GenerateRequest,
     GenerateResponse,
     ReviewRequest,
@@ -85,10 +86,114 @@ def _card_to_out(
         "memory_tip": card.memory_tip,
         "card_type": card.card_type,
         "difficulty": card.difficulty,
+        "is_starred": bool(card.is_starred),
         "fsrs_state": fsrs.state if fsrs else None,
         "days_overdue": days_overdue,
         "lapses": fsrs.lapses if fsrs else None,
     }
+
+
+@router.post("/", response_model=FlashcardOut)
+def create_manual_flashcard(
+    body: FlashcardUpdate,  # Reuse Update schema but require front/back/doc_id
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    document_id: int = Query(...),
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == document_id,
+        Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    front = (body.front or "").strip()
+    back = (body.back or "").strip()
+    if not front or not back:
+        raise HTTPException(status_code=400, detail="Front and back are required")
+
+    card = Flashcard(
+        id=str(uuid4()),
+        document_id=document_id,
+        topic=lecture.topic_area or lecture.title or "General",
+        front=front,
+        back=back,
+        memory_tip=body.memory_tip,
+        card_type=body.card_type or "concept",
+        difficulty=body.difficulty or "medium",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+
+    now = datetime.now(timezone.utc)
+    return _card_to_out(card, None, now)
+
+
+# ── PATCH /{flashcard_id} ─────────────────────────────────────────────────────
+
+@router.patch("/{flashcard_id}", response_model=FlashcardOut)
+def update_flashcard(
+    flashcard_id: str,
+    body: FlashcardUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify the card exists and belongs to the user via document_id
+    card = db.query(Flashcard).filter(Flashcard.id == flashcard_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+
+    lecture = db.query(Lecture).filter(
+        Lecture.id == card.document_id,
+        Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this card")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(card, key, value)
+
+    db.commit()
+    db.refresh(card)
+
+    now = datetime.now(timezone.utc)
+    fsrs = db.query(FlashcardFsrsCard).filter(
+        FlashcardFsrsCard.student_id == current_user.id,
+        FlashcardFsrsCard.flashcard_id == flashcard_id
+    ).first()
+
+    return _card_to_out(card, fsrs, now)
+
+
+# ── DELETE /{flashcard_id} ────────────────────────────────────────────────────
+
+@router.delete("/{flashcard_id}")
+def delete_flashcard(
+    flashcard_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    card = db.query(Flashcard).filter(Flashcard.id == flashcard_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+
+    lecture = db.query(Lecture).filter(
+        Lecture.id == card.document_id,
+        Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this card")
+
+    # Clean up associated FSRS and review data
+    db.query(FlashcardFsrsCard).filter(FlashcardFsrsCard.flashcard_id == flashcard_id).delete()
+    db.query(FlashcardReview).filter(FlashcardReview.flashcard_id == flashcard_id).delete()
+    db.delete(card)
+    db.commit()
+
+    return {"message": "Flashcard deleted successfully"}
 
 
 # ── POST /generate/{document_id} ──────────────────────────────────────────────
@@ -200,12 +305,16 @@ def get_due_cards(
     due_fsrs = fsrs_q.all()
 
     # IDs the student has already seen
-    seen_ids = {f.flashcard_id for f in db.query(FlashcardFsrsCard).filter(
+    seen_ids_rows = db.query(FlashcardFsrsCard.flashcard_id).filter(
         FlashcardFsrsCard.student_id == current_user.id
-    ).all()}
+    ).all()
+    seen_ids = [row[0] for row in seen_ids_rows]
 
     # New cards (never reviewed) — fill up to limit
-    new_q = db.query(Flashcard).filter(~Flashcard.id.in_(seen_ids))
+    new_q = db.query(Flashcard)
+    if seen_ids:
+        new_q = new_q.filter(~Flashcard.id.in_(seen_ids))
+    
     if document_id is not None:
         new_q = new_q.filter(Flashcard.document_id == document_id)
 
@@ -419,11 +528,13 @@ def get_document_cards(
 
     now = datetime.now(timezone.utc)
     fsrs_map: dict[str, FlashcardFsrsCard] = {}
-    for f in db.query(FlashcardFsrsCard).filter(
-        FlashcardFsrsCard.student_id == current_user.id,
-        FlashcardFsrsCard.flashcard_id.in_([c.id for c in cards]),
-    ).all():
-        fsrs_map[f.flashcard_id] = f
+    card_ids = [c.id for c in cards]
+    if card_ids:
+        for f in db.query(FlashcardFsrsCard).filter(
+            FlashcardFsrsCard.student_id == current_user.id,
+            FlashcardFsrsCard.flashcard_id.in_(card_ids),
+        ).all():
+            fsrs_map[f.flashcard_id] = f
 
     return [_card_to_out(card, fsrs_map.get(card.id), now) for card in cards]
 
@@ -470,10 +581,22 @@ def get_flashcard_stats(
     all_fsrs = db.query(FlashcardFsrsCard).filter(
         FlashcardFsrsCard.student_id == current_user.id
     ).all()
+    if not all_fsrs:
+        return FlashcardStats(
+            total_cards_seen=0,
+            total_reviews=total_reviews,
+            cards_due_today=cards_due_today,
+            cards_mastered=0,
+            avg_rating=avg_rating,
+            topic_breakdown=[],
+            streak_days=streak_days,
+        )
+
     fc_ids = [f.flashcard_id for f in all_fsrs]
     fc_topic_map: dict[str, str] = {}
-    for fc in db.query(Flashcard).filter(Flashcard.id.in_(fc_ids)).all():
-        fc_topic_map[fc.id] = fc.topic
+    if fc_ids:
+        for fc in db.query(Flashcard).filter(Flashcard.id.in_(fc_ids)).all():
+            fc_topic_map[fc.id] = fc.topic
 
     topic_stats: dict[str, dict] = {}
     for f in all_fsrs:
@@ -528,11 +651,14 @@ def get_flashcard_schedule(
     all_fsrs = db.query(FlashcardFsrsCard).filter(
         FlashcardFsrsCard.student_id == current_user.id
     ).all()
+    if not all_fsrs:
+        return {"topics": []}
 
     fc_ids = [f.flashcard_id for f in all_fsrs]
     fc_topic_map: dict[str, str] = {}
-    for fc in db.query(Flashcard).filter(Flashcard.id.in_(fc_ids)).all():
-        fc_topic_map[fc.id] = fc.topic
+    if fc_ids:
+        for fc in db.query(Flashcard).filter(Flashcard.id.in_(fc_ids)).all():
+            fc_topic_map[fc.id] = fc.topic
 
     topic_data: dict[str, dict] = {}
     for f in all_fsrs:

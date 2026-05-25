@@ -1,23 +1,24 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 import { isAuthenticated } from "@/lib/auth";
 import { AppHeader } from "@/components/app-header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import {
   BookOpen,
-  Brain,
+  Search,
+  Plus,
+  ArrowRight,
+  Clock,
   CheckCircle2,
-  Flame,
-  Play,
-  TrendingUp,
-  Layers,
   Sparkles,
-  CloudUpload,
+  Layers,
 } from "lucide-react";
 import {
   getFlashcardStats,
@@ -36,6 +37,7 @@ export default function FlashcardsPage() {
   const [schedule, setSchedule] = useState<FlashcardScheduleTopic[]>([]);
   const [lectures, setLectures] = useState<LectureOut[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -45,229 +47,211 @@ export default function FlashcardsPage() {
     Promise.all([getFlashcardStats(), getFlashcardSchedule(), getLectures()])
       .then(([statsRes, schedRes, lecRes]) => {
         setStats(statsRes.data);
-        setSchedule(schedRes.data.topics.slice(0, 5));
+        setSchedule(schedRes.data.topics);
         const all = lecRes.data as LectureOut[];
-        setLectures(all.filter((l) => l.is_processed));
+        setLectures(all);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [router]);
 
+  const filteredLectures = useMemo(() => {
+    return lectures.filter((lec) =>
+      lec.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [lectures, searchQuery]);
+
   if (loading) {
     return <FlashcardsSkeleton />;
   }
 
-  const dueToday = stats?.cards_due_today ?? 0;
-
   return (
-    <div className="min-h-screen bg-background text-foreground pb-32 md:pb-0">
+    <div className="min-h-screen bg-background text-foreground pb-20">
       <AppHeader activePage="Flashcards" />
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 md:py-12 space-y-10">
+        {/* Header Section */}
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
+            Flashcards
+          </h1>
+          <p className="text-muted-foreground text-lg">
+            Review and generate flashcards from your lectures.
+          </p>
+        </div>
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight mb-2">
-              Flashcards
-            </h1>
-            <div className="flex flex-wrap gap-2">
-              {stats && (
-                <>
-                  <Badge variant="secondary">
-                    <Brain className="h-3 w-3 mr-1" />
-                    {stats.total_cards_seen} seen
-                  </Badge>
-                  <Badge variant="outline">
-                    <Flame className="h-3 w-3 mr-1" />
-                    {stats.streak_days}d streak
-                  </Badge>
-                </>
-              )}
-            </div>
+        {/* Search & Actions */}
+        <div className="flex flex-col sm:flex-row gap-4 items-center">
+          <div className="relative flex-1 w-full group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground transition-colors group-focus-within:text-primary" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search lectures or flashcards..."
+              className="pl-12 bg-card border-border h-12 rounded-xl text-foreground placeholder:text-muted-foreground focus:ring-primary/20 focus:border-primary/50 transition-all text-lg shadow-sm"
+            />
           </div>
           <Button
-            onClick={() => router.push("/flashcards/review")}
-            disabled={dueToday === 0 || loading}
-            className="sm:self-end"
+            onClick={() => router.push("/upload")}
+            className="h-12 px-6 rounded-xl bg-primary text-primary-foreground hover:opacity-90 font-medium gap-2 w-full sm:w-auto shadow-md"
           >
-            <Play className="w-4 h-4 mr-2" />
-            {dueToday > 0
-              ? `Review ${dueToday} card${dueToday !== 1 ? "s" : ""}`
-              : "All caught up"}
+            <Plus className="w-5 h-5" />
+            Upload Lecture
           </Button>
         </div>
 
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatCard
-              icon={<Flame className="h-4 w-4 text-orange-500" />}
-              label="Streak"
-              value={`${stats.streak_days}d`}
-            />
-            <StatCard
-              icon={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-              label="Mastered"
-              value={stats.cards_mastered}
-            />
-            <StatCard
-              icon={<Brain className="h-4 w-4 text-primary" />}
-              label="Seen"
-              value={stats.total_cards_seen}
-            />
-            <StatCard
-              icon={<TrendingUp className="h-4 w-4 text-blue-500" />}
-              label="Reviews"
-              value={stats.total_reviews}
-            />
-          </div>
+        {/* Review Banner */}
+        {stats && stats.cards_due_today > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-primary/10 border border-primary/20 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-4 bg-primary text-primary-foreground rounded-xl shadow-lg shadow-primary/20">
+                <Sparkles className="w-8 h-8 animate-pulse" />
+              </div>
+              <div className="text-center md:text-left">
+                <h2 className="text-2xl font-bold text-foreground">
+                  {stats.cards_due_today} Cards Due Today
+                </h2>
+                <p className="text-muted-foreground">
+                  Keep your memory sharp and maintain your streak!
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => router.push("/flashcards/review")}
+              size="lg"
+              className="w-full md:w-auto h-14 px-10 rounded-xl bg-primary text-primary-foreground hover:scale-105 active:scale-95 transition-all shadow-xl shadow-primary/20 text-lg font-bold gap-2 group"
+            >
+              Start Review
+              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </Button>
+          </motion.div>
         )}
 
-        {/* Retention by Topic */}
-        {schedule.length > 0 && (
-          <Card>
-            <CardHeader className="pb-4 border-b">
-              <CardTitle className="text-base font-bold flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                Retention by Topic
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              {schedule.map((t) => (
-                <div key={t.topic}>
-                  <div className="flex justify-between text-sm mb-1.5">
-                    <span className="text-foreground truncate max-w-[65%]">{t.topic}</span>
-                    <span
-                      className={`font-mono text-xs font-semibold ${
-                        t.retention_pct < 60
-                          ? "text-destructive"
-                          : t.retention_pct < 80
-                          ? "text-yellow-500"
-                          : "text-emerald-500"
-                      }`}
-                    >
-                      {t.retention_pct.toFixed(0)}%
-                    </span>
-                  </div>
-                  <Progress value={t.retention_pct} className="h-1.5" />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+        {/* Lecture Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <AnimatePresence mode="popLayout">
+            {filteredLectures.map((lec) => {
+              // Find matching stats in schedule or stats
+              const lecStats = schedule.find(s => s.topic === lec.title) || 
+                               stats?.topic_breakdown.find(b => b.topic === lec.title);
+              
+              const totalCards = lecStats?.total_cards ?? (lecStats as any)?.total ?? 0;
+              const dueCount = (lecStats as any)?.due_count ?? (lecStats as any)?.due ?? 0;
+              const mastery = lecStats ? (lecStats as any).retention_pct ?? 
+                               (lecStats.total > 0 ? (lecStats.mastered / lecStats.total) * 100 : 0) : 0;
+              
+              return (
+                <motion.div
+                  key={lec.id}
+                  layout
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  whileHover={{ y: -4 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <Card className="bg-card border-border overflow-hidden group hover:border-primary/50 hover:bg-accent/50 transition-all duration-300 rounded-2xl h-full flex flex-col cursor-pointer"
+                    onClick={() => router.push(`/flashcards/${lec.id}`)}
+                  >
+                    <CardContent className="p-6 flex flex-col h-full space-y-4">
+                      <div className="flex justify-between items-start gap-4">
+                        <div className="p-3 bg-muted rounded-xl text-primary group-hover:scale-110 transition-transform shadow-inner">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        {totalCards > 0 && (
+                          <div className="flex flex-col items-end gap-1.5">
+                            <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 px-3 py-1 font-semibold">
+                              {Math.round(mastery)}% Mastery
+                            </Badge>
+                            {dueCount > 0 && (
+                              <Badge className="bg-primary/10 text-primary border-primary/20 px-2 py-0.5 text-[10px] font-bold animate-pulse">
+                                {dueCount} DUE
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                      </div>
 
-        {/* How it works - quick guide */}
-        {lectures.length > 0 && (
-          <div className="bg-muted/20 rounded-xl border border-border/40 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 text-sm">
-            <Sparkles className="w-5 h-5 text-primary shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium text-foreground">
-                <strong>How it works:</strong> Review cards due today, then browse all cards by lecture below.
-              </p>
-              <p className="text-muted-foreground text-xs mt-0.5">
-                Cards use spaced repetition — you see the right card at the right time.
+                      <div className="flex-1 space-y-2">
+                        <h3 className="text-xl font-bold text-foreground leading-tight">
+                          {lec.title}
+                        </h3>
+                        <div className="flex flex-wrap gap-x-4 gap-y-2 text-muted-foreground text-sm">
+                          <span className="flex items-center gap-1.5">
+                            <Layers className="w-4 h-4" />
+                            {totalCards} cards
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <Clock className="w-4 h-4" />
+                            {totalCards > 0 ? "5m review" : "Not started"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="pt-4 flex items-center gap-2 border-t border-border">
+                        <Button
+                          variant="secondary"
+                          className="flex-1 justify-between bg-muted hover:bg-accent text-foreground rounded-xl h-11 px-4 group/btn border-border"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/flashcards/${lec.id}`);
+                          }}
+                        >
+                          Open Workspace
+                          <ArrowRight className="w-4 h-4 text-muted-foreground group-hover/btn:translate-x-1 transition-transform" />
+                        </Button>
+                        <Button
+                          className={`rounded-xl h-11 px-4 transition-all ${
+                            dueCount > 0 
+                              ? "bg-primary text-primary-foreground hover:opacity-90 shadow-lg shadow-primary/20 scale-105" 
+                              : "bg-primary text-primary-foreground hover:opacity-90"
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/flashcards/review?document_id=${lec.id}`);
+                          }}
+                          disabled={totalCards === 0}
+                        >
+                          {dueCount > 0 && <Sparkles className="w-3.5 h-3.5 mr-1.5 animate-pulse" />}
+                          Review
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+
+        {/* Empty State */}
+        {!loading && filteredLectures.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+            <div className="p-6 bg-muted rounded-full">
+              <Sparkles className="w-12 h-12 text-muted-foreground" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-foreground">No lectures found</h2>
+              <p className="text-muted-foreground max-w-sm">
+                {searchQuery 
+                  ? "We couldn't find any lectures matching your search." 
+                  : "Upload your first lecture to start generating AI flashcards."}
               </p>
             </div>
             <Button
-              size="sm"
-              onClick={() => router.push("/flashcards/review")}
-              disabled={dueToday === 0}
+              onClick={() => router.push("/upload")}
+              className="bg-primary text-primary-foreground hover:opacity-90 rounded-xl px-8 h-12 shadow-md"
             >
-              <Play className="w-3.5 h-3.5 mr-1.5" />
-              Start Review
+              Upload Lecture
             </Button>
           </div>
         )}
-
-        {/* By Lecture */}
-        {lectures.length > 0 && (
-          <Card>
-            <CardHeader className="pb-4 border-b flex flex-row items-center justify-between">
-              <CardTitle className="text-base font-bold flex items-center gap-2">
-                <Layers className="h-4 w-4 text-primary" />
-                By Lecture
-              </CardTitle>
-              <span className="text-xs text-muted-foreground">{lectures.length} lecture{lectures.length !== 1 ? "s" : ""}</span>
-            </CardHeader>
-            <CardContent className="p-6 space-y-2">
-              {lectures.map((lec) => (
-                <div
-                  key={lec.id}
-                  className="flex items-center justify-between px-4 py-3 rounded-xl border hover:border-primary/40 hover:bg-muted/20 transition-all duration-150"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1 mr-3">
-                    <BookOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <span className="text-sm font-medium text-foreground truncate">{lec.title}</span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => router.push(`/flashcards/review?document_id=${lec.id}`)}
-                    >
-                      Review
-                    </Button>
-                    <Button variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => router.push(`/upload?section=create&lecture_id=${lec.id}`)}
-                    >
-                      Generate Flashcards
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Empty state */}
-        {!loading && lectures.length === 0 && (
-          <Card>
-            <CardContent className="p-10 flex flex-col items-center justify-center text-center">
-              <BookOpen className="h-10 w-10 text-muted-foreground mb-4" />
-              <p className="font-semibold text-foreground mb-1">No flashcards yet</p>
-              <p className="text-sm text-muted-foreground mb-2 max-w-sm">
-                Flashcards are generated after you upload and process a lecture. Here&apos;s how:
-              </p>
-              <ol className="text-sm text-left text-muted-foreground mb-5 space-y-1.5">
-                <li>1. Upload a PDF or paste your notes</li>
-                <li>2. Choose what to generate (MCQs, flashcards, etc.)</li>
-                <li>3. Come back here to review with spaced repetition</li>
-              </ol>
-              <Button asChild>
-                <Link href="/upload">
-                  <CloudUpload className="w-4 h-4 mr-2" />
-                  Upload a Lecture
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
       </main>
     </div>
   );
 }
 
-function StatCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-6 flex flex-col items-center gap-1.5">
-        {icon}
-        <div className="text-2xl font-bold text-foreground">{value}</div>
-        <div className="text-xs text-muted-foreground">{label}</div>
-      </CardContent>
-    </Card>
-  );
-}

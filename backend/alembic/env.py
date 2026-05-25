@@ -27,6 +27,9 @@ from app.models.performance import (  # noqa: F401
     LearningPattern,
     StudentAiInsight,
 )
+from app.models.flashcards import Flashcard, FlashcardReview, FlashcardFsrsCard  # noqa: F401
+from app.models.billing import Subscription, AIUsageLog  # noqa: F401
+from app.models.content import SiteContent  # noqa: F401
 
 config = context.config
 

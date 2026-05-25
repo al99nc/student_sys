@@ -194,13 +194,8 @@ function UploadContent() {
   const [pasteText, setPasteText] = useState("");
   const [pasteTitle, setPasteTitle] = useState("");
 
-  // Inline generation after upload
-  const [uploadedLectureId, setUploadedLectureId] = useState<number | null>(null);
-  const [showGenOptions, setShowGenOptions] = useState(false);
-  const [inlineGenMode, setInlineGenMode] = useState<GenMode>("mcq");
-  const [inlineGenerating, setInlineGenerating] = useState(false);
-
   // Create section state
+  const [highlightCreate, setHighlightCreate] = useState(false);
   const [genLecture, setGenLecture] = useState<LectureOut | null>(null);
   const [genMode, setGenMode] = useState<GenMode>("mcq");
   const [examType, setExamType] = useState<ExamType>("revision");
@@ -317,30 +312,29 @@ function UploadContent() {
         lectureId = res.data.id;
       }
 
-      setUploadedLectureId(lectureId);
-      setShowGenOptions(true);
-      loadLectures();
+      setFile(null);
+      setPasteText("");
+      setPasteTitle("");
+
+      // Refresh lectures list and pre-select for Create section
+      getLectures().then((res) => {
+        const data = res.data || [];
+        setLectures(data);
+        const match = data.find((l: LectureOut) => l.id === lectureId);
+        if (match) {
+          setGenLecture(match);
+          setGenError("");
+          setHighlightCreate(true);
+          setTimeout(() => setHighlightCreate(false), 5000); // Reset animation
+          scrollToSection("create");
+        }
+      }).catch(() => {});
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
       const d = axiosErr.response?.data?.detail;
       setError(typeof d === "string" ? d : (d && typeof d === "object" && "message" in d ? `${(d as {message: string}).message}`.trim() : "Upload failed"));
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleInlineGenerateNow = async () => {
-    if (!uploadedLectureId) return;
-    setInlineGenerating(true);
-    setError("");
-    try {
-      const res = await processLecture(uploadedLectureId, inlineGenMode === "essay" ? "essay" : "revision");
-      router.push(`/lap/${res.data.job_id}`);
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: unknown } } };
-      const d = axiosErr.response?.data?.detail;
-      setError(typeof d === "string" ? d : (d && typeof d === "object" && "message" in d ? `${(d as {message: string}).message}`.trim() : "Generation failed"));
-      setInlineGenerating(false);
     }
   };
 
@@ -656,120 +650,22 @@ function UploadContent() {
                   </div>
                 )}
 
-                {!showGenOptions && (
-                  <Button
-                    onClick={handleUpload}
-                    disabled={uploading || !isReady}
-                    className="w-full synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
-                  >
-                    {uploading ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />Uploading…
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <CloudUpload className="w-5 h-5" />
-                        Upload
-                      </span>
-                    )}
-                  </Button>
-                )}
-
-                {showGenOptions && uploadedLectureId && (
-                  <div className="rounded-2xl border border-primary/30 bg-primary/5 p-6 space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-foreground text-sm">Upload complete!</h3>
-                        <p className="text-xs text-muted-foreground">What would you like to generate?</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => setInlineGenMode("mcq")}
-                        className={`p-4 rounded-xl border-2 text-left transition-all ${
-                          inlineGenMode === "mcq"
-                            ? "border-primary bg-primary/10"
-                            : "border-border bg-card hover:border-primary/40"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${inlineGenMode === "mcq" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                            <Brain className="w-4 h-4" />
-                          </div>
-                          <span className={`font-bold text-sm ${inlineGenMode === "mcq" ? "text-foreground" : "text-muted-foreground"}`}>MCQs</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Multiple choice questions with explanations</p>
-                      </button>
-                      <button
-                        onClick={() => setInlineGenMode("essay")}
-                        className={`p-4 rounded-xl border-2 text-left transition-all ${
-                          inlineGenMode === "essay"
-                            ? "border-primary bg-primary/10"
-                            : "border-border bg-card hover:border-primary/40"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${inlineGenMode === "essay" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                            <FileText className="w-4 h-4" />
-                          </div>
-                          <span className={`font-bold text-sm ${inlineGenMode === "essay" ? "text-foreground" : "text-muted-foreground"}`}>Essays</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Open-ended questions with AI grading</p>
-                      </button>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={handleInlineGenerateNow}
-                        disabled={inlineGenerating}
-                        className="flex-1 bg-foreground text-background font-bold py-3 rounded-xl hover:opacity-85 transition-all"
-                      >
-                        {inlineGenerating ? (
-                          <span className="flex items-center gap-2">
-                            <Loader2 className="w-4 h-4 animate-spin" />Starting…
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-2">
-                            <Sparkles className="w-4 h-4" />
-                            Generate {inlineGenMode === "mcq" ? "MCQs" : "Essays"}
-                            <ArrowRight className="w-4 h-4" />
-                          </span>
-                        )}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => openAdvancedOptions(uploadedLectureId)}
-                        disabled={inlineGenerating}
-                        className="shrink-0"
-                        title="Advanced options"
-                      >
-                        <Settings2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                      <p className="text-xs text-muted-foreground/60">
-                        Need custom exam type, difficulty, or focus areas?{" "}
-                        <button
-                          onClick={() => openAdvancedOptions(uploadedLectureId)}
-                          className="text-primary underline underline-offset-2 hover:no-underline"
-                        >
-                          Advanced options →
-                        </button>
-                      </p>
-                      <button
-                        onClick={() => { setShowGenOptions(false); setUploadedLectureId(null); }}
-                        className="text-xs text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <Button
+                  onClick={handleUpload}
+                  disabled={uploading || !isReady}
+                  className="w-full synapse-gradient text-white font-bold py-6 rounded-xl shadow-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
+                >
+                  {uploading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />Uploading…
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <CloudUpload className="w-5 h-5" />
+                      Upload
+                    </span>
+                  )}
+                </Button>
 
                 <TelegramUploadCard />
               </div>
@@ -800,7 +696,7 @@ function UploadContent() {
                   </Card>
                 ) : (
                   <>
-                    <div>
+                    <div className={`transition-all duration-500 rounded-2xl ${highlightCreate ? "ring-4 ring-primary ring-offset-4 ring-offset-background scale-[1.02] bg-primary/5 p-4" : ""}`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <h2 className="text-xl font-extrabold text-foreground">
@@ -809,6 +705,11 @@ function UploadContent() {
                           <div className="flex items-center gap-2 text-muted-foreground mt-1">
                             <FileText className="w-4 h-4" />
                             <span className="text-sm font-medium">{genLecture.title}</span>
+                            {highlightCreate && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary text-primary-foreground animate-pulse">
+                                NEWLY UPLOADED
+                              </span>
+                            )}
                           </div>
                         </div>
                         <Button

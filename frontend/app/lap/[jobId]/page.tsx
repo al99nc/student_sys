@@ -64,7 +64,7 @@ export default function JobWaitingRoom() {
         setStatus(data.status as JobStatus);
 
         if (data.status === "done") {
-          setTimeout(() => router.push(`/results/${data.lecture_id}`), 800);
+          setTimeout(() => router.push(`/results/${data.lecture_id}?processed=true`), 800);
         }
         if (data.status === "failed") {
           setError(data.error_message ?? "Generation failed. Please try again.");

@@ -172,6 +172,39 @@ def _update_field_interest(
     return secondary
 
 
+async def _generate_title_ai(user_msg: str, ai_reply: str) -> str:
+    """Generate a short (3-5 word) title for a conversation based on the first exchange."""
+    prompt = (
+        "Based on the following first exchange, generate a short (2-5 words) "
+        "descriptive title for this study session. Return ONLY the title text, "
+        "no quotes, no preamble.\n\n"
+        f"Student: {user_msg}\nCoach: {ai_reply}"
+    )
+    try:
+        # Use Groq (Llama 3) for fast, free title generation
+        if not settings.CHAT_AI_API_KEY:
+            return user_msg[:40] + "..."
+            
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.CHAT_AI_API_KEY}"},
+                json={
+                    "model": "meta-llama/llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.5,
+                    "max_tokens": 20,
+                }
+            )
+            if resp.status_code == 200:
+                title = resp.json()["choices"][0]["message"]["content"].strip()
+                title = re.sub(r'["\*\.]', '', title).replace("Title:", "").strip()
+                return title[:60]
+    except Exception:
+        pass
+    return user_msg[:40] + "..."
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _serialize_message(msg: CoachMessage) -> dict:
@@ -573,9 +606,9 @@ async def send_message(
     conv.message_count = (conv.message_count or 0) + 2
     conv.updated_at = datetime.now(timezone.utc)
 
-    # Auto-title on first user message
-    if conv.title == "New Conversation" and text:
-        conv.title = text[:60] + ("…" if len(text) > 60 else "")
+    # Auto-title using AI after first exchange
+    if conv.title == "New Conversation" and text and ai_text:
+        conv.title = await _generate_title_ai(text, ai_text)
 
     db.commit()
 

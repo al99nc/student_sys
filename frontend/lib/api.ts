@@ -668,10 +668,20 @@ export interface FlashcardOut {
   memory_tip: string | null;
   card_type: string;
   difficulty: string;
+  is_starred: boolean;
   fsrs_state: number | null;
   days_overdue: number | null;
   lapses: number | null;
 }
+
+export const updateFlashcard = (id: string, data: Partial<FlashcardOut>) =>
+  api.patch<FlashcardOut>(`/api/v1/flashcards/${id}`, data);
+
+export const createManualFlashcard = (documentId: number, data: Partial<FlashcardOut>) =>
+  api.post<FlashcardOut>(`/api/v1/flashcards/?document_id=${documentId}`, data);
+
+export const deleteFlashcard = (id: string) =>
+  api.delete(`/api/v1/flashcards/${id}`);
 
 export interface DueCardsResponse {
   due_count: number;
@@ -734,6 +744,9 @@ export const getFlashcardStats = () =>
 
 export const getFlashcardSchedule = () =>
   api.get<{ topics: FlashcardScheduleTopic[] }>("/api/v1/flashcards/schedule");
+
+export const updateStudyTime = (lectureId: number, seconds: number) =>
+  api.post(`/lectures/${lectureId}/study-time`, { seconds });
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 

@@ -368,6 +368,9 @@ function LapContent() {
         setLectures(data);
         const match = data.find((l: LectureOut) => l.id === lectureId);
         if (match) {
+          setFile(null);
+          setPasteText("");
+          setPasteTitle("");
           setGenLecture(match);
           setGenError("");
           setHighlightCreate(true);

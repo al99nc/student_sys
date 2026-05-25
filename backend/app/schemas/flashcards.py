@@ -13,11 +13,21 @@ class FlashcardOut(BaseModel):
     memory_tip: Optional[str] = None
     card_type: str
     difficulty: str
+    is_starred: bool = False
     fsrs_state: Optional[int] = None
     days_overdue: Optional[int] = None
     lapses: Optional[int] = None
 
     model_config = {"from_attributes": True}
+
+
+class FlashcardUpdate(BaseModel):
+    front: Optional[str] = None
+    back: Optional[str] = None
+    memory_tip: Optional[str] = None
+    card_type: Optional[str] = None
+    difficulty: Optional[str] = None
+    is_starred: Optional[bool] = None
 
 
 class ReviewRequest(BaseModel):

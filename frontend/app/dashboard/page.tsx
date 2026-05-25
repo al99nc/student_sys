@@ -383,7 +383,7 @@ export default function DashboardPage() {
                       {flashcardStats.cards_mastered} mastered · {flashcardStats.total_reviews} reviews
                     </p>
 
-                    <Button size="sm" className="w-full" asChild>
+                    <Button size="sm" className={`w-full ${flashcardStats.cards_due_today > 0 ? "animate-pulse shadow-md shadow-primary/20" : ""}`} asChild>
                       <Link href="/flashcards" prefetch={false}>
                         <Sparkles className="h-3.5 w-3.5 mr-1.5" />
                         Review Flashcards

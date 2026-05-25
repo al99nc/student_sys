@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db, SessionLocal
 from datetime import datetime, timezone
 from app.models.models import Lecture, Result, QuizSession, ProcessingJob
-from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave, SolvedLectureOut, SolvedEssayOut, SolvedEssayQuestion, SolvedOut, SolvedMCQ
+from app.schemas.lecture import LectureOut, ResultOut, ProcessStatus, ShareTokenOut, ViewersOut, SharedResultOut, QuizSessionOut, QuizSessionSave, StudyTimeUpdate, SolvedLectureOut, SolvedEssayOut, SolvedEssayQuestion, SolvedOut, SolvedMCQ
 from app.api.deps import get_current_user
 from app.models.models import User
 from app.services.pdf_service import extract_text_from_pdf
@@ -234,24 +234,6 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
                 db.add(q)
         
         db.commit()
-
-        # ── Integration with Flashcard System ──
-        if not is_essay_mode and mcq_data.get("mcqs"):
-            job.progress_pct = 90
-            job.progress_label = "Generating flashcards..."
-            db.commit()
-
-            from app.services.flashcard_service import generate_and_save_flashcards
-            from app.db.database import SessionLocal
-            # Use a helper that opens its own DB session
-            try:
-                generate_and_save_flashcards(
-                    document_id=job.lecture_id,
-                    mode=job.mode if job.mode in ("revision", "exam", "quick_review") else "revision",
-                    db_session_factory=SessionLocal
-                )
-            except Exception as fe:
-                logger.warning("Auto-flashcard generation failed: %s", fe)
 
         ai_title = mcq_data.get("_meta", {}).get("ai_title", "") if not is_essay_mode else ""
         if ai_title:
@@ -603,14 +585,19 @@ def get_lectures(
 ):
     lectures = db.query(Lecture).filter(Lecture.user_id == current_user.id).order_by(Lecture.created_at.desc()).all()
     lecture_ids = [l.id for l in lectures]
-    results_map = {
-        r.lecture_id: r
-        for r in db.query(Result).filter(Result.lecture_id.in_(lecture_ids)).all()
-    }
-    active_jobs = db.query(ProcessingJob).filter(
-        ProcessingJob.lecture_id.in_(lecture_ids),
-        ProcessingJob.status.in_(["pending", "processing"])
-    ).all()
+    results_map = {}
+    if lecture_ids:
+        results_map = {
+            r.lecture_id: r
+            for r in db.query(Result).filter(Result.lecture_id.in_(lecture_ids)).all()
+        }
+
+    active_jobs = []
+    if lecture_ids:
+        active_jobs = db.query(ProcessingJob).filter(
+            ProcessingJob.lecture_id.in_(lecture_ids),
+            ProcessingJob.status.in_(["pending", "processing"])
+        ).all()
     
     jobs_map = {j.lecture_id: j for j in active_jobs}
 
@@ -1064,6 +1051,24 @@ def retake_quiz_session(
         db.add(session)
         db.commit()
         return QuizSessionOut(answers={}, retake_count=1)
+
+
+@router.post("/lectures/{lecture_id}/study-time")
+def update_study_time(
+    lecture_id: int,
+    data: StudyTimeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id, Lecture.user_id == current_user.id
+    ).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+    
+    lecture.study_time_seconds = (lecture.study_time_seconds or 0) + data.seconds
+    db.commit()
+    return {"study_time_seconds": lecture.study_time_seconds}
 
 
 @router.get("/stats")
