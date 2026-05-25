@@ -15,6 +15,8 @@ class LectureOut(BaseModel):
     is_processed: bool = False
     has_essays: bool = False
     pending_job_id: Optional[str] = None
+    progress_pct: Optional[int] = None
+    progress_label: Optional[str] = None
 
     class Config:
         from_attributes = True

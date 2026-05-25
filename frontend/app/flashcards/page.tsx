@@ -28,6 +28,8 @@ import {
   LectureOut,
 } from "@/lib/api";
 
+import { FlashcardsSkeleton } from "./FlashcardsSkeleton";
+
 export default function FlashcardsPage() {
   const router = useRouter();
   const [stats, setStats] = useState<FlashcardStats | null>(null);
@@ -50,6 +52,10 @@ export default function FlashcardsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [router]);
+
+  if (loading) {
+    return <FlashcardsSkeleton />;
+  }
 
   const dueToday = stats?.cards_due_today ?? 0;
 
@@ -93,18 +99,7 @@ export default function FlashcardsPage() {
         </div>
 
         {/* Stats */}
-        {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i}>
-                <CardContent className="p-6 animate-pulse space-y-2">
-                  <div className="h-4 bg-muted rounded w-1/2 mx-auto" />
-                  <div className="h-6 bg-muted rounded w-3/4 mx-auto" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : stats ? (
+        {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <StatCard
               icon={<Flame className="h-4 w-4 text-orange-500" />}
@@ -127,10 +122,10 @@ export default function FlashcardsPage() {
               value={stats.total_reviews}
             />
           </div>
-        ) : null}
+        )}
 
         {/* Retention by Topic */}
-        {!loading && schedule.length > 0 && (
+        {schedule.length > 0 && (
           <Card>
             <CardHeader className="pb-4 border-b">
               <CardTitle className="text-base font-bold flex items-center gap-2">
@@ -163,7 +158,7 @@ export default function FlashcardsPage() {
         )}
 
         {/* How it works - quick guide */}
-        {!loading && lectures.length > 0 && (
+        {lectures.length > 0 && (
           <div className="bg-muted/20 rounded-xl border border-border/40 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 text-sm">
             <Sparkles className="w-5 h-5 text-primary shrink-0" />
             <div className="flex-1">
@@ -186,7 +181,7 @@ export default function FlashcardsPage() {
         )}
 
         {/* By Lecture */}
-        {!loading && lectures.length > 0 && (
+        {lectures.length > 0 && (
           <Card>
             <CardHeader className="pb-4 border-b flex flex-row items-center justify-between">
               <CardTitle className="text-base font-bold flex items-center gap-2">

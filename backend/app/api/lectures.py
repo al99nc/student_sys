@@ -80,8 +80,41 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
             db.commit()
             return
 
+        # ── Robust File Path Resolution ──
+        file_path = lecture.file_path
+        if not os.path.exists(file_path):
+            basename = os.path.basename(file_path)
+            upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+            
+            # Try to find the file in the current uploads directory
+            # This handles cases where the absolute path stored in DB is no longer valid
+            alt_path = os.path.join(upload_dir, basename)
+            if os.path.exists(alt_path):
+                file_path = alt_path
+            else:
+                # Try finding a file with the same suffix (e.g. "_Metrology lab.pdf")
+                # This handles cases where the user ID prefix changed (e.g. integer to UUID)
+                if "_" in basename:
+                    raw_suffix = basename.split("_", 1)[1]
+                    found = False
+                    for f in os.listdir(upload_dir):
+                        if f.endswith(raw_suffix):
+                            file_path = os.path.join(upload_dir, f)
+                            found = True
+                            break
+                    if not found:
+                        # Final attempt: exact match if it was stored without prefix
+                        exact_path = os.path.join(upload_dir, basename)
+                        if os.path.exists(exact_path):
+                            file_path = exact_path
+
+            # Update DB with the working path if it changed
+            if file_path != lecture.file_path and os.path.exists(file_path):
+                lecture.file_path = file_path
+                db.commit()
+
         try:
-            text = extract_text_from_pdf(lecture.file_path)
+            text = extract_text_from_pdf(file_path)
         except Exception as e:
             if spent and cost > 0:
                 user = db.query(User).filter(User.id == job.user_id).first()
@@ -162,7 +195,6 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
                 existing.essays = json.dumps(essay_data.get("questions", []))
             existing.custom_context = saved_context
             existing.mode = job.mode
-            db.commit()
         else:
             result = Result(
                 lecture_id=job.lecture_id,
@@ -174,7 +206,52 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
                 mode=job.mode,
             )
             db.add(result)
+
+        # ── Integration with Performance System (McqQuestion table) ──
+        if not is_essay_mode and mcq_data.get("mcqs"):
+            from app.models.performance import McqQuestion
+            from uuid import uuid4
+
+            # Clear old questions for this lecture to prevent duplicates/ghost data
+            db.query(McqQuestion).filter(McqQuestion.document_id == job.lecture_id).delete()
+
+            for mcq in mcq_data["mcqs"]:
+                opts = mcq.get("options", [])
+                q = McqQuestion(
+                    id=str(uuid4()),
+                    document_id=job.lecture_id,
+                    topic=mcq.get("topic") or lecture.topic_area or "General",
+                    question_text=mcq.get("question", ""),
+                    option_a=opts[0] if len(opts) > 0 else "",
+                    option_b=opts[1] if len(opts) > 1 else "",
+                    option_c=opts[2] if len(opts) > 2 else "",
+                    option_d=opts[3] if len(opts) > 3 else "",
+                    correct_answer=mcq.get("answer", "A").upper(),
+                    explanation=mcq.get("explanation") or "",
+                    mode=job.mode if job.mode in ("revision", "exam", "quick_review") else "revision",
+                    difficulty_type=mcq.get("difficulty_type", "recall"),
+                )
+                db.add(q)
+        
+        db.commit()
+
+        # ── Integration with Flashcard System ──
+        if not is_essay_mode and mcq_data.get("mcqs"):
+            job.progress_pct = 90
+            job.progress_label = "Generating flashcards..."
             db.commit()
+
+            from app.services.flashcard_service import generate_and_save_flashcards
+            from app.db.database import SessionLocal
+            # Use a helper that opens its own DB session
+            try:
+                generate_and_save_flashcards(
+                    document_id=job.lecture_id,
+                    mode=job.mode if job.mode in ("revision", "exam", "quick_review") else "revision",
+                    db_session_factory=SessionLocal
+                )
+            except Exception as fe:
+                logger.warning("Auto-flashcard generation failed: %s", fe)
 
         ai_title = mcq_data.get("_meta", {}).get("ai_title", "") if not is_essay_mode else ""
         if ai_title:
@@ -530,19 +607,25 @@ def get_lectures(
         r.lecture_id: r
         for r in db.query(Result).filter(Result.lecture_id.in_(lecture_ids)).all()
     }
-    active_jobs_map = {
-        j.lecture_id: j.id
-        for j in db.query(ProcessingJob)
-            .filter(ProcessingJob.lecture_id.in_(lecture_ids), ProcessingJob.status.in_(["pending", "processing"]))
-            .all()
-    }
+    active_jobs = db.query(ProcessingJob).filter(
+        ProcessingJob.lecture_id.in_(lecture_ids),
+        ProcessingJob.status.in_(["pending", "processing"])
+    ).all()
+    
+    jobs_map = {j.lecture_id: j for j in active_jobs}
+
     out = []
     for lec in lectures:
         result = results_map.get(lec.id)
+        job = jobs_map.get(lec.id)
+        
         d = LectureOut.model_validate(lec)
         d.is_processed = result is not None
         d.has_essays = bool(result and result.essays)
-        d.pending_job_id = active_jobs_map.get(lec.id)
+        if job:
+            d.pending_job_id = job.id
+            d.progress_pct = job.progress_pct
+            d.progress_label = job.progress_label
         out.append(d)
     return out
 

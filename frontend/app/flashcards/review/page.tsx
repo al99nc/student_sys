@@ -25,6 +25,36 @@ const CARD_TYPE_COLORS: Record<string, string> = {
   clinical:   "bg-red-500/20 text-red-300 border-red-500/30",
 };
 
+import { Skeleton } from "@/components/ui/skeleton";
+
+function ReviewSkeleton() {
+  return (
+    <div className="min-h-screen bg-background flex flex-col pb-32 md:pb-0 animate-pulse">
+      <AppHeader activePage="Flashcards" />
+      <div className="px-4 py-3 flex items-center gap-4 border-b border-border">
+        <div className="h-8 w-8 bg-muted rounded-md" />
+        <div className="h-2 flex-1 bg-muted rounded-full" />
+        <div className="h-4 w-12 bg-muted rounded-md" />
+      </div>
+      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6">
+        <div className="w-full max-w-2xl min-h-[340px] flex flex-col p-6 sm:p-8 border border-border rounded-xl">
+          <div className="flex items-center justify-between mb-6">
+            <div className="h-5 w-20 bg-muted rounded-full" />
+            <div className="h-4 w-32 bg-muted" />
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+            <div className="h-6 w-3/4 bg-muted rounded" />
+            <div className="h-6 w-1/2 bg-muted rounded" />
+          </div>
+          <div className="mt-6 flex justify-center">
+            <div className="h-10 w-40 bg-muted rounded-md" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FlashcardReviewContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -101,14 +131,7 @@ function FlashcardReviewContent() {
   }, [flipped, handleShowAnswer, handleRate]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-border border-t-foreground/60 animate-spin" />
-          <p className="text-sm">Loading cards...</p>
-        </div>
-      </div>
-    );
+    return <ReviewSkeleton />;
   }
 
   if (error) {
@@ -324,11 +347,7 @@ function FlashcardReviewContent() {
 
 export default function FlashcardReviewPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">
-        Loading...
-      </div>
-    }>
+    <Suspense fallback={<ReviewSkeleton />}>
       <FlashcardReviewContent />
     </Suspense>
   );

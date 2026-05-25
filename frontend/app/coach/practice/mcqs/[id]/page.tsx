@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Brain,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface QuizMCQ {
   question: string;
@@ -104,8 +105,21 @@ export default function CoachPracticeMCQPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="min-h-screen bg-background text-foreground animate-pulse">
+        <div className="max-w-2xl mx-auto p-4">
+          <div className="flex items-center justify-between mb-4">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-12" />
+          </div>
+          <Skeleton className="h-4 w-24 mb-2" />
+          <Skeleton className="h-16 w-full rounded-xl mb-6" />
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-16 w-full rounded-xl" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

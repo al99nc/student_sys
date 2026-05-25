@@ -24,6 +24,8 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   hard:   "text-red-400 border-red-400/30",
 };
 
+import { Skeleton } from "@/components/ui/skeleton";
+
 export default function BrowseFlashcardsPage() {
   const router = useRouter();
   const params = useParams();
@@ -101,11 +103,11 @@ export default function BrowseFlashcardsPage() {
           </Button>
           <div className="flex-1">
             <h1 className="text-2xl font-bold text-white">Browse Flashcards</h1>
-            <p className="text-white/40 text-sm">{filtered.length} cards</p>
+            <p className="text-white/40 text-sm">{loading ? "..." : `${filtered.length} cards`}</p>
           </div>
           <Button
             onClick={handleGenerate}
-            disabled={generating}
+            disabled={generating || loading}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm"
           >
             {generating ? (
@@ -127,27 +129,47 @@ export default function BrowseFlashcardsPage() {
               className="pl-9 bg-white/5 border-white/10 text-white placeholder:text-white/30"
             />
           </div>
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="bg-white/5 border border-white/10 text-white/70 text-sm rounded-md px-3 py-2 focus:outline-none"
-          >
-            <option value="">All types</option>
-            {cardTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <select
-            value={filterDiff}
-            onChange={(e) => setFilterDiff(e.target.value)}
-            className="bg-white/5 border border-white/10 text-white/70 text-sm rounded-md px-3 py-2 focus:outline-none"
-          >
-            <option value="">All difficulty</option>
-            {difficulties.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
+          <Skeleton className={loading ? "h-10 w-24 bg-white/5" : "hidden"} />
+          <Skeleton className={loading ? "h-10 w-32 bg-white/5" : "hidden"} />
+          {!loading && (
+            <>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="bg-white/5 border border-white/10 text-white/70 text-sm rounded-md px-3 py-2 focus:outline-none"
+              >
+                <option value="">All types</option>
+                {cardTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select
+                value={filterDiff}
+                onChange={(e) => setFilterDiff(e.target.value)}
+                className="bg-white/5 border border-white/10 text-white/70 text-sm rounded-md px-3 py-2 focus:outline-none"
+              >
+                <option value="">All difficulty</option>
+                {difficulties.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </>
+          )}
         </div>
 
         {/* Card list */}
         {loading ? (
-          <div className="text-center py-12 text-white/30">Loading...</div>
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Card key={i} className="bg-[#0f0f1f] border-white/10">
+                <CardContent className="p-4 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-5 w-16 bg-white/10" />
+                    <Skeleton className="h-5 w-16 bg-white/10" />
+                    <Skeleton className="h-4 w-24 bg-white/10" />
+                  </div>
+                  <Skeleton className="h-4 w-full bg-white/10" />
+                  <Skeleton className="h-4 w-2/3 bg-white/10" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-12 text-white/30">
             <p className="mb-4">No flashcards yet for this lecture.</p>

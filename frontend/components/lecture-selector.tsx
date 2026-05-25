@@ -4,7 +4,7 @@ import { uploadLecture, uploadText, getLectures, LectureOut } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   CloudUpload, FileText, Loader2, CheckCircle2,
-  ClipboardPaste, XCircle, ChevronRight, Search,
+  ClipboardPaste, XCircle, ChevronRight, Search, Trash2,
 } from "lucide-react";
 
 type InputMode = "file" | "paste";
@@ -218,9 +218,10 @@ interface LectureSelectorProps {
   preselectedId?: number;
   onLectureSelected: (lecture: LectureOut) => void;
   onUploadRequested?: () => void;
+  onDelete?: (lecture: LectureOut) => void;
 }
 
-export function LectureSelector({ preselectedId, onLectureSelected, onUploadRequested }: LectureSelectorProps) {
+export function LectureSelector({ preselectedId, onLectureSelected, onUploadRequested, onDelete }: LectureSelectorProps) {
   const [lectures, setLectures] = useState<LectureOut[]>([]);
   const [loadingLectures, setLoadingLectures] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -313,29 +314,42 @@ export function LectureSelector({ preselectedId, onLectureSelected, onUploadRequ
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredLectures.map((lecture) => (
-              <button
-                key={lecture.id}
-                onClick={() => onLectureSelected(lecture)}
-                className="text-left p-4 rounded-xl border border-border bg-card hover:border-primary/40 hover:-translate-y-0.5 transition-all duration-150"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-primary" />
+              <div key={lecture.id} className="relative group">
+                <button
+                  onClick={() => onLectureSelected(lecture)}
+                  className="w-full text-left p-4 rounded-xl border border-border bg-card hover:border-primary/40 hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-foreground truncate">{lecture.title}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(lecture.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-foreground truncate">{lecture.title}</p>
-                    <p className="text-xs text-muted-foreground">{new Date(lecture.created_at).toLocaleDateString()}</p>
+                  <div className="flex items-center gap-2">
+                    {lecture.file_path?.toLowerCase().endsWith(".pdf") ? (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">PDF</span>
+                    ) : (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Text</span>
+                    )}
                   </div>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                </div>
-                <div className="flex items-center gap-2">
-                  {lecture.file_path?.toLowerCase().endsWith(".pdf") ? (
-                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">PDF</span>
-                  ) : (
-                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Text</span>
-                  )}
-                </div>
-              </button>
+                </button>
+                {onDelete && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(lecture);
+                    }}
+                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-background/80 text-destructive border border-border opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:bg-destructive/10"
+                    title="Delete file"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </>

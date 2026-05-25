@@ -28,6 +28,9 @@ import {
 
 
 
+import { Skeleton } from "@/components/ui/skeleton";
+import { DashboardSkeleton } from "./DashboardSkeleton";
+
 interface Lecture {
   id: number;
   title: string;
@@ -97,6 +100,10 @@ export default function DashboardPage() {
       .then((res) => { if (res?.data?.cards?.length) setPreviewFlashcard(res.data.cards[0]); })
       .catch(() => {});
   };
+
+  if (loadingDash && loadingLectures && loadingDailyTest && loadingFlashcards) {
+    return <DashboardSkeleton />;
+  }
 
   // Determine user onboarding status
   const isNewUser = !loadingLectures && lectures.length === 0 && !loadingDash && stats.total_lectures === 0;
@@ -214,14 +221,14 @@ export default function DashboardPage() {
 
                 {/* loading skeleton */}
                 {loadingDailyTest ? (
-                  <div className="animate-pulse space-y-3">
-                    <div className="h-4 bg-muted rounded w-1/2" />
-                    <div className="h-16 bg-muted rounded-xl" />
-                    <div className="h-3 bg-muted rounded w-3/4" />
+                  <div className="space-y-3">
+                    <Skeleton className="h-4 w-1/2" />
+                    <Skeleton className="h-16 w-full rounded-xl" />
+                    <Skeleton className="h-3 w-3/4" />
                     {[1,2,3,4].map(i => (
                       <div key={i} className="flex items-center gap-2 mt-1">
-                        <div className="h-8 w-8 bg-muted rounded-lg flex-shrink-0" />
-                        <div className="h-3 bg-muted rounded flex-1" />
+                        <Skeleton className="h-8 w-8 rounded-lg shrink-0" />
+                        <Skeleton className="h-3 flex-1" />
                       </div>
                     ))}
                   </div>
@@ -323,10 +330,10 @@ export default function DashboardPage() {
 
                 {/* loading skeleton */}
                 {loadingFlashcards ? (
-                  <div className="animate-pulse space-y-2.5">
-                    <div className="h-3 bg-muted rounded w-full" />
-                    <div className="h-3 bg-muted rounded w-3/4" />
-                    <div className="h-16 bg-muted rounded-xl mt-2" />
+                  <div className="space-y-2.5">
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-3 w-3/4" />
+                    <Skeleton className="h-16 w-full rounded-xl mt-2" />
                   </div>
 
                 ) : !flashcardStats || flashcardStats.total_cards_seen === 0 ? (

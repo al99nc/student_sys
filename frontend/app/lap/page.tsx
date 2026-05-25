@@ -17,6 +17,9 @@ import {
   Target, Clock, X,
 } from "lucide-react";
 
+import { useToast } from "@/hooks/use-toast";
+import { LapSkeleton } from "./LapSkeleton";
+
 const PdfViewer = dynamic(() => import("@/components/pdf-viewer").then((m) => ({ default: m.PdfViewer })), {
   ssr: false,
   loading: () => (
@@ -178,6 +181,7 @@ function TelegramUploadCard() {
 
 function LapContent() {
   const router = useRouter();
+  const { toast } = useToast();
   const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -227,7 +231,15 @@ function LapContent() {
   const [showCoachBtn, setShowCoachBtn] = useState(false);
   const [coachBtnPos, setCoachBtnPos] = useState({ x: 0, y: 0 });
 
-  const scrollToSection = (section: SectionId, immediate = false) => {
+  const loadLectures = useCallback(() => {
+    setLoadingLectures(true);
+    getLectures()
+      .then((res) => setLectures(res.data || []))
+      .catch(() => {})
+      .finally(() => setLoadingLectures(false));
+  }, []);
+
+  const scrollToSection = useCallback((section: SectionId, immediate = false) => {
     const el = scrollRef.current;
     if (!el) return;
     const idx = SECTION_IDS.indexOf(section);
@@ -244,7 +256,7 @@ function LapContent() {
     
     // Reset scrolling flag after animation
     setTimeout(() => setIsScrolling(false), 600);
-  };
+  }, []);
 
   useEffect(() => {
     setMcqPage(1);
@@ -275,8 +287,8 @@ function LapContent() {
 
     if (lectureIdParam) {
       getLectures().then((res) => {
-        const lectures = res.data || [];
-        const found = lectures.find((l: LectureOut) => l.id === parseInt(lectureIdParam));
+        const lecturesData = res.data || [];
+        const found = lecturesData.find((l: LectureOut) => l.id === parseInt(lectureIdParam));
         if (found) {
           setGenLecture(found);
           setTimeout(() => scrollToSection("create"), 100);
@@ -291,7 +303,28 @@ function LapContent() {
     }
 
     loadLectures();
-  }, [router, searchParams]);
+  }, [router, searchParams, loadLectures, scrollToSection]);
+
+  // ── Polling for active jobs ──
+  useEffect(() => {
+    const hasActiveJobs = lectures.some(l => !!l.pending_job_id);
+    if (!hasActiveJobs) return;
+
+    const interval = setInterval(() => {
+      // Refresh lectures in the background to detect when processing finishes
+      getLectures()
+        .then((res) => {
+          const data = res.data || [];
+          setLectures(data);
+          if (!data.some((l: LectureOut) => !!l.pending_job_id)) {
+            clearInterval(interval);
+          }
+        })
+        .catch(() => {});
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [lectures]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -304,17 +337,7 @@ function LapContent() {
     }
   }, [currentSection, isScrolling]);
 
-  const loadLectures = () => {
-    setLoadingLectures(true);
-    getLectures()
-      .then((res) => setLectures(res.data || []))
-      .catch(() => {})
-      .finally(() => setLoadingLectures(false));
-  };
-
-  // ── Lap handlers ──
-
-  const handleLap = async () => {
+  const handleLap = useCallback(async () => {
     setError("");
 
     if (inputMode === "file") {
@@ -360,9 +383,9 @@ function LapContent() {
     } finally {
       setUploading(false);
     }
-  };
+  }, [file, inputMode, pasteText, pasteTitle, scrollToSection, loadLectures]);
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const dropped = e.dataTransfer.files[0];
@@ -370,24 +393,27 @@ function LapContent() {
     const v = validatePDF(dropped);
     if (v.valid) { setFile(dropped); setError(""); }
     else setError(v.error!);
-  };
+  }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
     const v = validatePDF(selected);
     if (v.valid) { setFile(selected); setError(""); }
     else setError(v.error!);
-  };
+  }, []);
 
-  const isReady = inputMode === "file"
-    ? !!file
-    : pasteText.trim().length >= 100;
+  const handleDelete = useCallback(async (e: React.MouseEvent | LectureOut, lectureArg?: LectureOut) => {
+    let lecture: LectureOut;
+    if (lectureArg) {
+      // Called with (e, lecture)
+      (e as React.MouseEvent).stopPropagation();
+      lecture = lectureArg;
+    } else {
+      // Called with (lecture)
+      lecture = e as LectureOut;
+    }
 
-  // ── Study handlers ──
-
-  const handleDelete = async (e: React.MouseEvent, lecture: LectureOut) => {
-    e.stopPropagation();
     if (!confirm(`Delete "${lecture.title}"? This cannot be undone.`)) return;
     setDeletingId(lecture.id);
     try {
@@ -399,14 +425,14 @@ function LapContent() {
     } finally {
       setDeletingId(null);
     }
-  };
+  }, [studyLecture, loadLectures]);
 
-  const handleLectureClick = (lecture: LectureOut) => {
+  const handleLectureClick = useCallback((lecture: LectureOut) => {
     setStudyLecture(lecture);
     setNumPages(null);
     setSelectionText("");
     setShowCoachBtn(false);
-  };
+  }, []);
 
   const handleTextSelection = useCallback(() => {
     const sel = window.getSelection();
@@ -425,33 +451,29 @@ function LapContent() {
     }
   }, []);
 
-  const handleDiscussWithCoach = () => {
+  const handleDiscussWithCoach = useCallback(() => {
     const token = getToken();
     if (!token) { router.push("/auth"); return; }
     router.push(`/coach?q=${encodeURIComponent(selectionText)}`);
     setShowCoachBtn(false);
-  };
+  }, [router, selectionText]);
 
-  // ── Create handlers ──
-
-  const handleLectureSelected = (lecture: LectureOut) => {
+  const handleLectureSelected = useCallback((lecture: LectureOut) => {
     setGenLecture(lecture);
     setGenError("");
-  };
+  }, []);
 
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     if (!genLecture) return;
     setGenError("");
     setIsGenerating(true);
 
     try {
+      let jobId: string;
       if (genMode === "essay") {
         const res = await processLecture(genLecture.id, "essay");
-        router.push(`/lap/${res.data.job_id}`);
-        return;
-      }
-
-      if (examType === "custom") {
+        jobId = res.data.job_id;
+      } else if (examType === "custom") {
         const customContext: CustomContext = {
           exam_type: customExamType,
           time_to_exam: timeToExam,
@@ -461,10 +483,22 @@ function LapContent() {
           weak_topics: weakTopics.trim(),
         };
         const res = await processLecture(genLecture.id, "revision", customContext, focusInstruction.trim() || undefined);
-        router.push(`/lap/${res.data.job_id}`);
+        jobId = res.data.job_id;
       } else {
         const res = await processLecture(genLecture.id, examType, undefined, focusInstruction.trim() || undefined);
-        router.push(`/lap/${res.data.job_id}`);
+        jobId = res.data.job_id;
+      }
+
+      if (jobId) {
+        toast({
+          title: "Generation Started",
+          description: `AI is now processing "${genLecture.title}". Redirecting to waiting room...`,
+        });
+        
+        // Restore direct redirect to the waiting room so user sees the progress ring
+        setTimeout(() => {
+          router.push(`/lap/${jobId}`);
+        }, 800);
       }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
@@ -473,26 +507,25 @@ function LapContent() {
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [customExamType, difficulty, examType, focusInstruction, genLecture, genMode, mcqCount, priorKnowledge, timeToExam, weakTopics, toast, loadLectures, scrollToSection]);
 
-  const canGenerate = genMode === "mcq"
-    ? examType !== "custom" || (!!customExamType && !!difficulty && mcqCount >= 10)
-    : true;
-
-  const openAdvancedOptions = (lectureId: number) => {
+  const openAdvancedOptions = useCallback((lectureId: number) => {
     getLectures().then((res) => {
-      const lectures = res.data || [];
-      const found = lectures.find((l: LectureOut) => l.id === lectureId);
+      const lecturesData = res.data || [];
+      const found = lecturesData.find((l: LectureOut) => l.id === lectureId);
       if (found) setGenLecture(found);
     }).catch(() => {});
     scrollToSection("create");
-  };
+  }, [scrollToSection]);
 
-  const filteredLectures = lectures.filter((l) =>
-    !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
+  const isReady = inputMode === "file" ? !!file : pasteText.trim().length >= 100;
+  const canGenerate = genMode === "mcq" ? examType !== "custom" || (!!customExamType && !!difficulty && mcqCount >= 10) : true;
+  const filteredLectures = lectures.filter((l) => !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase()));
   const isPdf = studyLecture?.file_path?.toLowerCase().endsWith(".pdf");
+
+  if (loadingLectures) {
+    return <LapSkeleton />;
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -725,6 +758,7 @@ function LapContent() {
                         preselectedId={searchParams.get("lecture_id") ? parseInt(searchParams.get("lecture_id")!) : undefined}
                         onLectureSelected={handleLectureSelected}
                         onUploadRequested={() => scrollToSection("upload")}
+                        onDelete={handleDelete}
                       />
                     </CardContent>
                   </Card>
@@ -750,7 +784,7 @@ function LapContent() {
                           variant="ghost"
                           size="sm"
                           onClick={() => setGenLecture(null)}
-                          className="text-xs text-muted-foreground"
+                          className="text-xs text-destructive border border-destructive hover:bg-destructive/10"
                         >
                           Change file
                         </Button>
@@ -956,7 +990,7 @@ function LapContent() {
                       >
                         {isGenerating ? (
                           <span className="flex items-center gap-2">
-                            <Loader2 className="w-5 h-5 animate-spin" />
+                            <Loader2 className="w-4 h-4 animate-spin" />
                             Starting generation…
                           </span>
                         ) : (
@@ -1071,28 +1105,45 @@ function LapContent() {
                             }
 
                             return (
-                              <button
-                                key={upload.id}
-                                onClick={(e) => {
-                                  const btn = e.currentTarget;
-                                  btn.style.transform = "scale(0.95)";
-                                  btn.style.opacity = "0";
-                                  setTimeout(() => router.push(href), 100);
-                                }}
-                                className="w-full h-[56px] flex items-center gap-3 px-4 rounded-xl border border-border/40 bg-card hover:bg-muted/30 transition-all duration-150 text-left group"
-                              >
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isReady ? "bg-emerald-500/10" : hasJob ? "bg-amber-500/10" : "bg-primary/10"}`}>
-                                  {isReady ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : hasJob ? <Clock className="w-4 h-4 text-amber-500" /> : <Sparkles className="w-4 h-4 text-primary" />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-bold text-foreground truncate">{upload.title}</p>
-                                  <p className="text-[10px] text-muted-foreground">{new Date(upload.created_at).toLocaleDateString()}</p>
-                                </div>
-                                <Badge variant="outline" className={`flex-shrink-0 px-2 h-5 text-[9px] font-bold ${statusColor}`}>
-                                  {statusLabel}
-                                </Badge>
-                                <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-colors" />
-                              </button>
+                              <div key={upload.id} className="space-y-1">
+                                <button
+                                  onClick={(e) => {
+                                    const btn = e.currentTarget;
+                                    btn.style.transform = "scale(0.95)";
+                                    btn.style.opacity = "0";
+                                    setTimeout(() => router.push(href), 100);
+                                  }}
+                                  className="w-full h-[56px] flex items-center gap-3 px-4 rounded-xl border border-border/40 bg-card hover:bg-muted/30 transition-all duration-150 text-left group"
+                                >
+                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isReady ? "bg-emerald-500/10" : hasJob ? "bg-amber-500/10" : "bg-primary/10"}`}>
+                                    {isReady ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : hasJob ? <Clock className="w-4 h-4 text-amber-500" /> : <Sparkles className="w-4 h-4 text-primary" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-bold text-foreground truncate">{upload.title}</p>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {hasJob && upload.progress_label ? (
+                                        <span className="text-amber-500 font-medium animate-pulse">{upload.progress_label}</span>
+                                      ) : (
+                                        new Date(upload.created_at).toLocaleDateString()
+                                      )}
+                                    </p>
+                                  </div>
+                                  <Badge variant="outline" className={`flex-shrink-0 px-2 h-5 text-[9px] font-bold ${statusColor}`}>
+                                    {hasJob && upload.progress_pct !== null ? `${upload.progress_pct}%` : statusLabel}
+                                  </Badge>
+                                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-colors" />
+                                </button>
+                                {hasJob && (
+                                  <div className="px-1">
+                                    <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+                                      <div 
+                                        className="h-full bg-amber-500/50 transition-all duration-500 rounded-full" 
+                                        style={{ width: `${upload.progress_pct ?? 0}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             );
                           });
                         })()}
@@ -1260,6 +1311,15 @@ export default function LapPage() {
       </div>
     }>
       <LapContent />
+      <style jsx global>{`
+        @keyframes progress-fast {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        .animate-progress-fast {
+          animation: progress-fast 1.5s infinite linear;
+        }
+      `}</style>
     </Suspense>
   );
 }

@@ -841,8 +841,16 @@ function CoachPageInner({ initialConvId }: { initialConvId?: string } = {}) {
             )}
 
             {loadingConv && (
-              <div className="flex justify-center py-12">
-                <div className="w-6 h-6 rounded-full border-2 border-border border-t-foreground/60 animate-spin" />
+              <div className="space-y-8 animate-pulse">
+                <div className="flex justify-end pl-[12%]">
+                  <div className="h-12 w-2/3 bg-muted rounded-2xl rounded-tr-sm" />
+                </div>
+                <div className="flex gap-2 pr-[4%]">
+                  <div className="w-6 h-6 rounded-lg bg-muted shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-20 w-3/4 bg-muted rounded-2xl rounded-tl-sm" />
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1815,13 +1823,11 @@ function QuickReplies({ action, topicFocus, onSelect }: {
 
 // ── Page export ────────────────────────────────────────────────────────────────
 
+import { CoachSkeleton } from "./CoachSkeleton";
+
 export default function CoachPage({ initialConvId }: { initialConvId?: string } = {}) {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
-      </div>
-    }>
+    <Suspense fallback={<CoachSkeleton />}>
       <CoachPageInner initialConvId={initialConvId} />
     </Suspense>
   );

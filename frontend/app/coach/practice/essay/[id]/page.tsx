@@ -13,6 +13,7 @@ import {
   XCircle,
   Loader2,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function scoreColor(score: number) {
   if (score >= 80) return "text-emerald-400";
@@ -78,8 +79,21 @@ export default function CoachPracticeEssayPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="min-h-screen bg-background text-foreground animate-pulse">
+        <div className="max-w-2xl mx-auto p-4">
+          <div className="flex items-center justify-between mb-4">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <Skeleton className="h-4 w-12" />
+          </div>
+          <div className="mb-6 space-y-3">
+            <Skeleton className="h-6 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+          <Skeleton className="w-full h-40 rounded-xl" />
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2">
+            <Skeleton className="h-12 w-40 rounded-full" />
+          </div>
+        </div>
       </div>
     );
   }
