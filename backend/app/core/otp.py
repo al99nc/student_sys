@@ -52,20 +52,28 @@ async def send_otp_email(to_email: str, code: str) -> None:
         raise RuntimeError("RESEND_API_KEY is not configured")
 
     html_body = f"""
-    <div style="font-family:sans-serif;max-width:400px;margin:auto;padding:32px;">
-      <h2 style="color:#6366f1;">CortexQ</h2>
-      <p>Your verification code is:</p>
-      <div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#111;padding:16px 0;">{code}</div>
-      <p style="color:#666;font-size:13px;">Expires in 10 minutes. Do not share this code.</p>
-    </div>
+    <body style="font-family: sans-serif; background: #000; color: #fff; padding: 40px 20px; text-align: center;">
+      <div style="max-width: 500px; margin: 0 auto;">
+        <div style="font-size: 24px; font-weight: 900; margin-bottom: 32px; letter-spacing: -1px;">
+          the<span style="color: #22c55e;">mcq</span>
+        </div>
+        <p style="font-size: 16px; color: #ccc; margin-bottom: 24px;">
+          Enter this code in the Telegram app to sign in:
+        </p>
+        <div style="font-size: 48px; font-weight: 900; letter-spacing: 12px; color: #fff; margin: 32px 0; font-family: monospace;">{code}</div>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">
+          This code expires in 10 minutes. If you didn't request this, you can safely ignore this email.
+        </p>
+      </div>
+    </body>
     """
 
-    text_body = f"Your CortexQ verification code is: {code}\n\nThis code expires in 10 minutes.\nDo not share it with anyone."
+    text_body = f"Your themcq verification code is: {code}\n\nEnter this code in the Telegram app to sign in. The code expires in 10 minutes."
 
     payload = {
         "from": settings.SMTP_FROM or "noreply@themcq.xyz",
         "to": [to_email],
-        "subject": "Your CortexQ verification code",
+        "subject": f"{code} is your themcq verification code",
         "text": text_body,
         "html": html_body,
     }

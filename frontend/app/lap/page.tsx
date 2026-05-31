@@ -2,13 +2,15 @@
 import { useState, useRef, useEffect, Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { uploadLecture, uploadText, processLecture, getLectures, deleteLecture, LectureOut, CustomContext } from "@/lib/api";
+import { uploadLecture, uploadText, processLecture, getLectures, deleteLecture, getMe, LectureOut, CustomContext, UserOut } from "@/lib/api";
 import { isAuthenticated, getToken } from "@/lib/auth";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { LectureSelector } from "@/components/lecture-selector";
+import { ModelSelector } from "@/components/model-selector";
+import { McqGeneratingLabel } from "@/components/McqGeneratingLabel";
 import {
   CloudUpload, FileText, Loader2, CheckCircle2,
   ClipboardPaste, XCircle, ArrowLeft, BookOpen,
@@ -213,6 +215,9 @@ function LapContent() {
   const [focusInstruction, setFocusInstruction] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState("");
+  const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">("free");
+  const [selectedModelId, setSelectedModelId] = useState("google/gemini-2.5-flash");
+  const [entitlements, setEntitlements] = useState<any>(null);
 
   // Study section state
   const [lectures, setLectures] = useState<LectureOut[]>([]);
@@ -303,6 +308,17 @@ function LapContent() {
     }
 
     loadLectures();
+
+    // Fetch user info for plan and entitlements
+    getMe().then(res => {
+      setUserPlan(res.data.plan);
+    }).catch(() => {});
+
+    import("@/lib/api").then(api => {
+      api.getEntitlements().then(res => {
+        setEntitlements(res.data);
+      }).catch(() => {});
+    });
   }, [router, searchParams, loadLectures, scrollToSection]);
 
   // ── Polling for active jobs ──
@@ -474,7 +490,7 @@ function LapContent() {
     try {
       let jobId: string;
       if (genMode === "essay") {
-        const res = await processLecture(genLecture.id, "essay");
+        const res = await processLecture(genLecture.id, "essay", undefined, undefined, selectedModelId);
         jobId = res.data.job_id;
       } else if (examType === "custom") {
         const customContext: CustomContext = {
@@ -485,22 +501,25 @@ function LapContent() {
           mcq_count: mcqCount,
           weak_topics: weakTopics.trim(),
         };
-        const res = await processLecture(genLecture.id, "revision", customContext, focusInstruction.trim() || undefined);
+        const res = await processLecture(genLecture.id, "revision", customContext, focusInstruction.trim() || undefined, selectedModelId);
         jobId = res.data.job_id;
       } else {
-        const res = await processLecture(genLecture.id, examType, undefined, focusInstruction.trim() || undefined);
+        const res = await processLecture(genLecture.id, examType, undefined, focusInstruction.trim() || undefined, selectedModelId);
         jobId = res.data.job_id;
       }
 
       if (jobId) {
         toast({
           title: "Generation Started",
-          description: `AI is now processing "${genLecture.title}". Redirecting to waiting room...`,
+          description: `AI is now processing "${genLecture.title}". You can track progress in the Study section.`,
         });
         
-        // Restore direct redirect to the waiting room so user sees the progress ring
+        // Refresh lectures to show the new pending job
+        loadLectures();
+
+        // Redirect to Study section to see the inline progress
         setTimeout(() => {
-          router.push(`/lap/${jobId}`);
+          scrollToSection("study");
         }, 800);
       }
     } catch (err: unknown) {
@@ -783,14 +802,22 @@ function LapContent() {
                             )}
                           </div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setGenLecture(null)}
-                          className="text-xs text-destructive border border-destructive hover:bg-destructive/10"
-                        >
-                          Change file
-                        </Button>
+                        <div className="flex items-center gap-3">
+                          <ModelSelector
+                            isPaid={userPlan === "pro" || userPlan === "enterprise"}
+                            selectedModelId={selectedModelId}
+                            onModelChange={setSelectedModelId}
+                            freeModelName={process.env.NEXT_PUBLIC_AI_MODEL || "Gemini 1.5 Flash"}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setGenLecture(null)}
+                            className="text-xs text-destructive border border-destructive hover:bg-destructive/10 h-8 px-3 rounded-full"
+                          >
+                            Change file
+                          </Button>
+                        </div>
                       </div>
                     </div>
 
@@ -1078,6 +1105,13 @@ function LapContent() {
                       <div className="space-y-2">
                         {(() => {
                           const mcqLectures = filteredLectures.filter(l => l.is_processed || !!l.pending_job_id);
+                          
+                          // Determine which job is active (earliest created_at among pending)
+                          const pendingJobs = mcqLectures
+                            .filter(l => !!l.pending_job_id)
+                            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                          const activeJobId = pendingJobs.length > 0 ? pendingJobs[0].pending_job_id : null;
+
                           const paginated = mcqLectures.slice((mcqPage - 1) * ITEMS_PER_PAGE, mcqPage * ITEMS_PER_PAGE);
                           
                           if (paginated.length === 0) return (
@@ -1089,6 +1123,16 @@ function LapContent() {
                           return paginated.map((upload) => {
                             const isReady = upload.is_processed;
                             const hasJob = !!upload.pending_job_id;
+                            const isActive = hasJob && upload.pending_job_id === activeJobId;
+                            const isQueued = hasJob && !isActive;
+
+                            let genStatus: "generating" | "timeout_soft" | "timeout_hard" = "generating";
+                            if (isActive) {
+                              const elapsedMs = Date.now() - new Date(upload.created_at).getTime();
+                              if (elapsedMs > 8 * 60 * 1000) genStatus = "timeout_hard";
+                              else if (elapsedMs > 3 * 60 * 1000) genStatus = "timeout_soft";
+                            }
+
                             let href: string;
                             let statusLabel: string;
                             let statusColor: string;
@@ -1098,7 +1142,7 @@ function LapContent() {
                               statusLabel = "Ready";
                               statusColor = "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
                             } else if (hasJob) {
-                              href = `/lap/${upload.pending_job_id}`;
+                              href = "#"; // Disable navigation while processing
                               statusLabel = "Processing";
                               statusColor = "text-amber-500 bg-amber-500/10 border-amber-500/20";
                             } else {
@@ -1111,41 +1155,39 @@ function LapContent() {
                               <div key={upload.id} className="space-y-1">
                                 <button
                                   onClick={(e) => {
+                                    if (hasJob) return;
                                     const btn = e.currentTarget;
                                     btn.style.transform = "scale(0.95)";
                                     btn.style.opacity = "0";
                                     setTimeout(() => router.push(href), 100);
                                   }}
-                                  className="w-full h-[56px] flex items-center gap-3 px-4 rounded-xl border border-border/40 bg-card hover:bg-muted/30 transition-all duration-150 text-left group"
+                                  className={`w-full h-[56px] flex items-center gap-3 px-4 rounded-xl border border-border/40 bg-card transition-all duration-150 text-left group ${hasJob ? "cursor-default" : "hover:bg-muted/30"} ${genStatus === "timeout_hard" ? "opacity-60" : ""}`}
                                 >
                                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isReady ? "bg-emerald-500/10" : hasJob ? "bg-amber-500/10" : "bg-primary/10"}`}>
                                     {isReady ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : hasJob ? <Clock className="w-4 h-4 text-amber-500" /> : <Sparkles className="w-4 h-4 text-primary" />}
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-bold text-foreground truncate">{upload.title}</p>
-                                    <p className="text-[10px] text-muted-foreground">
-                                      {hasJob && upload.progress_label ? (
-                                        <span className="text-amber-500 font-medium animate-pulse">{upload.progress_label}</span>
-                                      ) : (
-                                        new Date(upload.created_at).toLocaleDateString()
-                                      )}
-                                    </p>
+                                    {isQueued ? (
+                                      <div className="mt-1">
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-900/30 text-amber-400 border border-amber-500/10">
+                                          In Queue
+                                        </span>
+                                      </div>
+                                    ) : !hasJob && !isReady ? (
+                                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                                        {new Date(upload.created_at).toLocaleDateString()}
+                                      </p>
+                                    ) : null}
                                   </div>
+                                  {isActive && (
+                                    <McqGeneratingLabel status={genStatus} />
+                                  )}
                                   <Badge variant="outline" className={`flex-shrink-0 px-2 h-5 text-[9px] font-bold ${statusColor}`}>
                                     {hasJob && upload.progress_pct !== null ? `${upload.progress_pct}%` : statusLabel}
                                   </Badge>
-                                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-colors" />
+                                  <ChevronRight className={`w-4 h-4 text-muted-foreground/30 transition-colors ${hasJob ? "opacity-0" : "group-hover:text-foreground"}`} />
                                 </button>
-                                {hasJob && (
-                                  <div className="px-1">
-                                    <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
-                                      <div 
-                                        className="h-full bg-amber-500/50 transition-all duration-500 rounded-full" 
-                                        style={{ width: `${upload.progress_pct ?? 0}%` }}
-                                      />
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             );
                           });

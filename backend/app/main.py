@@ -122,12 +122,9 @@ with engine.connect() as _conn:
         "ALTER TABLE user_sessions ALTER COLUMN last_seen_at TYPE TIMESTAMP WITH TIME ZONE USING last_seen_at AT TIME ZONE 'UTC'",
         bot_sessions_sql,
         "ALTER TABLE daily_test_cache ADD COLUMN answers TEXT",
+        "ALTER TABLE processing_jobs ADD COLUMN model_preference VARCHAR",
+        "ALTER TABLE users ADD COLUMN hashed_password VARCHAR(255)",
     ]
-    if engine.dialect.name == "postgresql":
-        migrations.insert(
-            migrations.index("CREATE TABLE IF NOT EXISTS magic_link_tokens (id VARCHAR(36) PRIMARY KEY, email VARCHAR NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, used INTEGER NOT NULL DEFAULT 0, created_at DATETIME)") + 3,
-            "ALTER TABLE users DROP COLUMN IF EXISTS hashed_password",
-        )
 
     for _stmt in migrations:
         try:

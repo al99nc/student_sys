@@ -104,13 +104,13 @@ async def cmd_start(message: Message) -> None:
     saved = await _get_session(chat_id)
     if saved and saved.get("state") == "verified":
         await message.answer(
-            "Forward your PDFs and I'll upload them to your account."
+            "تمام 👌 هسه بس دز الـ PDF وراح نرفعه عل حسابك"
         )
         return
 
     await _set_session(chat_id, {"state": "waiting_email"})
     await message.answer(
-        "Enter your themcq.xyz account email to get started."
+        "يا اهلا وسهلا 👋 بس محتاجين ايميلك الي سويت بيه الحساب، وراح نرفع الك الفايلات"
     )
 
 
@@ -126,14 +126,14 @@ async def handle_text(message: Message) -> None:
     if message.from_user and message.from_user.id == OWNER_ID:
         match = _TG_LINK_RE.search(text)
         if match:
-            status_msg = await message.reply("Working on it...")
+            status_msg = await message.reply("دا نشتغل عليه...")
             result = await join_and_add_bot(match.group(0))
             await status_msg.edit_text(result, parse_mode="Markdown")
             return
 
     # -- No active session -> prompt to start -------------------------------
     if not session:
-        await message.answer("Send /start to begin.")
+        await message.answer("دز /start حتى نبدي")
         return
 
     state = session.get("state")
@@ -144,7 +144,7 @@ async def handle_text(message: Message) -> None:
 
         if not _EMAIL_RE.match(email):
             await message.answer(
-                "That doesn't look like a valid email. Try again."
+                "هذا الايميل مو صحيح عيني، تأكد منه ودزه مرة ثانية"
             )
             return
 
@@ -158,13 +158,13 @@ async def handle_text(message: Message) -> None:
                     if resp.status != 200:
                         body = await resp.json()
                         await message.answer(
-                            f"Something went wrong: {body.get('detail', 'please try again')}."
+                            f"صارت مشكلة: {body.get('detail', 'جرب مرة ثانية عيني')}."
                         )
                         return
         except Exception as exc:
             log.error("send-code request failed: %s", exc)
             await message.answer(
-                "Could not reach the server. Try again in a moment."
+                "ما كدرنا نوصل للسيرفر، جرب مرة ثانية ورا شوية"
             )
             return
 
@@ -173,7 +173,7 @@ async def handle_text(message: Message) -> None:
         await _set_session(chat_id, session)
 
         await message.answer(
-            "We sent a code to your email. Paste it here."
+            "تمام 👌 هسه دز الرمز ابو الـ٦ أرقام الي دزيناه عل ايميلك"
         )
         return
 
@@ -183,7 +183,7 @@ async def handle_text(message: Message) -> None:
 
         if not _CODE_RE.match(code):
             await message.answer(
-                "That doesn't look right. The code is 6 digits. Try again."
+                "لا اخويه الرمز لازم يكون ٦ أرقام، تأكد منه"
             )
             return
 
@@ -202,13 +202,13 @@ async def handle_text(message: Message) -> None:
                 ) as resp:
                     if resp.status == 401:
                         await message.answer(
-                            "That code is wrong or expired. Try again, or send /start to restart."
+                            "اخ، الرمز هذا لو غلط لو انتهت مدته 😅 جرب مرة ثانية او دز /start حتى نبدي من جديد"
                         )
                         return
                     if resp.status != 200:
                         body = await resp.json()
                         await message.answer(
-                            f"Something went wrong: {body.get('detail', 'please try again')}."
+                            f"صارت مشكلة: {body.get('detail', 'جرب مرة ثانية عيني')}."
                         )
                         return
 
@@ -217,7 +217,7 @@ async def handle_text(message: Message) -> None:
         except Exception as exc:
             log.error("verify-code request failed: %s", exc)
             await message.answer(
-                "Could not reach the server. Try again in a moment."
+                "ما كدرنا نوصل للسيرفر، جرب مرة ثانية ورا شوية"
             )
             return
 
@@ -226,14 +226,14 @@ async def handle_text(message: Message) -> None:
         await _set_session(chat_id, session)
 
         await message.answer(
-            "You're all set. Just forward your PDFs and we can start cooking."
+            "عاشت ايدك، هسه كلشي تمام ✅ بس دز الـ PDFs وخل نبلش"
         )
         return
 
     # -- Verified but sent text, not a PDF ----------------------------------
     if state == "verified":
         await message.answer(
-            "Send me a PDF and I'll upload it to your account."
+            "دزلي ملف PDF وراح ارفعه عل حسابك"
         )
         return
 
@@ -251,24 +251,24 @@ async def handle_document(message: Message) -> None:
 
     is_pdf = doc.file_name.lower().endswith(".pdf") or doc.mime_type == "application/pdf"
     if not is_pdf:
-        await message.reply("Only PDF files are supported. Send a PDF.")
+        await message.reply("بس نقبل ملفات PDF اخويه، مو هذا النوع")
         return
 
     if not session or session.get("state") != "verified":
         await message.reply(
-            "You need to link your account first. Send /start."
+            "محتاج تربط حسابك اول، دز /start"
         )
         return
 
     jwt = session.get("jwt")
     if not jwt:
         await message.reply(
-            "Your session expired. Send /start to reconnect."
+            "انتهت مدة الجلسة مالتك، دز /start حتى ترجع تربط الحساب"
         )
         await _del_session(chat_id)
         return
 
-    loading_msg = await message.reply("Processing your file, please wait...")
+    loading_msg = await message.reply("صبرك شوية، الذكاء الاصطناعي يشتغل 🧠")
 
     try:
         tg_file    = await bot.get_file(doc.file_id)
@@ -276,7 +276,7 @@ async def handle_document(message: Message) -> None:
         pdf_data   = file_bytes.read()
     except Exception as exc:
         log.error("Telegram download failed: %s", exc)
-        await loading_msg.edit_text("Couldn't download the file from Telegram. Try again.")
+        await loading_msg.edit_text("ما كدرنا ننزل الملف من تليجرام، جرب مرة ثانية")
         return
 
     lecture_id = None
@@ -299,39 +299,39 @@ async def handle_document(message: Message) -> None:
             ) as resp:
                 if resp.status == 401:
                     await loading_msg.edit_text(
-                        "Your session expired. Send /start to reconnect."
+                        "انتهت مدة الجلسة مالتك، دز /start حتى ترجع تربط الحساب"
                     )
                     await _del_session(chat_id)
                     return
                 if resp.status == 413:
-                    await loading_msg.edit_text("That file is too large (max 50MB).")
+                    await loading_msg.edit_text("هذا الفايل كبير وياه شوية، حاول ترسل شي أصغر (ماكس ٥٠ ميجا)")
                     return
                 if resp.status == 400:
                     body = await resp.json()
                     await loading_msg.edit_text(
-                        f"Couldn't process the file: {body.get('detail', 'unknown error')}."
+                        f"ما كدرنا نعالج الملف: {body.get('detail', 'مشكلة ما نعرفها')}."
                     )
                     return
                 if resp.status != 200:
-                    await loading_msg.edit_text("Upload failed. Try again in a moment.")
+                    await loading_msg.edit_text("فشل الرفع، جرب مرة ثانية ورا شوية")
                     return
 
                 data       = await resp.json()
                 lecture_id = data.get("lecture_id")
     except Exception as exc:
         log.error("Bot upload-pdf failed: %s", exc)
-        await loading_msg.edit_text("Server error during upload. Try again.")
+        await loading_msg.edit_text("صارت مشكلة بالسيرفر اثناء الرفع، جرب ثاني")
         return
 
     if not lecture_id:
-        await loading_msg.edit_text("Upload failed -- no lecture ID returned. Try again.")
+        await loading_msg.edit_text("فشل الرفع، ما رجعلنا رقم للمحاضرة، جرب ثاني")
         return
 
     deep_link = f"{MINI_APP_URL}?lecture={lecture_id}"
 
     await loading_msg.edit_text(
-        "Got it. Tap below to use your file",
-        reply_markup=_open_app_button("Open in CortexQ", deep_link),
+        "خلصنا ✅ روح عل الموقع، الملف راح يكون جاهز هناك",
+        reply_markup=_open_app_button("افتح بـ CortexQ", deep_link),
     )
 
 

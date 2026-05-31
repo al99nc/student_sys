@@ -42,6 +42,8 @@ class User(Base):
     monthly_reset_month = Column(String(7), nullable=True)
     # Admin flag — only set via direct DB update, never via API
     is_admin = Column(Integer, default=0, server_default="0", nullable=False)
+    # Password — only used for admins (standard users use magic links)
+    hashed_password = Column(String(255), nullable=True)
     # IP address at signup — used to prevent trial abuse
     signup_ip = Column(String(45), nullable=True, index=True)
     # Telegram chat ID linked via bot OTP verification
@@ -206,6 +208,7 @@ class ProcessingJob(Base):
 
     error_message    = Column(Text, nullable=True)
     custom_context   = Column(Text, nullable=True)
+    model_preference = Column(String, nullable=True)
 
     total_chunks     = Column(Integer, nullable=True)
     completed_chunks = Column(Integer, default=0)

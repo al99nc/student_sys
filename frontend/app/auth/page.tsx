@@ -2,7 +2,7 @@
 import { Suspense } from "react";
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { requestMagicLink, saveOnboarding, verifyCode, getMe } from "@/lib/api";
+import { requestMagicLink, saveOnboarding, verifyCode, getMe, checkEmail } from "@/lib/api";
 import { saveToken } from "@/lib/auth";
 import { useTelegram } from "@/lib/useTelegram";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,52 @@ const DOMAIN_SUGGESTIONS = [
   "@live.com",
   "@uottawa.ca",
 ];
+
+function ConsentModal({ 
+  onAgree, 
+  onCancel 
+}: { 
+  onAgree: () => void; 
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <Card className="w-full max-w-sm shadow-2xl border-primary/20 bg-card/95 backdrop-blur-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl font-black">Welcome to CortexQ</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6">
+          <p className="text-sm text-muted-foreground text-center leading-relaxed">
+            By creating an account, you agree to our{" "}
+            <a 
+              href="/legal" 
+              target="_blank" 
+              className="text-primary hover:underline font-semibold"
+            >
+              Privacy Policy
+            </a>{" "}
+            and Terms of Service.
+          </p>
+          <div className="flex flex-col gap-2">
+            <Button 
+              onClick={onAgree} 
+              className="w-full h-11 bg-foreground text-background hover:bg-foreground/90 font-bold"
+            >
+              Create Account & Agree
+            </Button>
+            <Button 
+              variant="ghost" 
+              onClick={onCancel} 
+              className="w-full h-11 text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 function EmailInputWithSuggestions({
   value,
@@ -152,10 +198,64 @@ function AuthPageInner() {
   const [otpError, setOtpError]   = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendDisabled, setResendDisabled] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
   const resendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (resendCountdown > 0) {
+      interval = setInterval(() => {
+        setResendCountdown((prev) => prev - 1);
+      }, 1000);
+    } else if (resendCountdown === 0 && resendDisabled) {
+      setResendDisabled(false);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [resendCountdown, resendDisabled]);
+
   const verifyOtpRef = useRef<() => void>(() => {});
   const otpDigitsRef = useRef(otpDigits);
   const emailRef = useRef<HTMLInputElement>(null);
+
+  // Email check state
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  const [emailExists, setEmailExists] = useState<boolean | null>(null);
+  const [emailConfident, setEmailConfident] = useState(false);
+  const [showConsent, setShowConsent] = useState(false);
+  const checkEmailTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const trimmed = email.trim().toLowerCase();
+    // Only search if email contains "@"
+    if (!trimmed || !trimmed.includes("@")) {
+      setEmailExists(null);
+      setEmailConfident(false);
+      setCheckingEmail(false);
+      return;
+    }
+
+    setCheckingEmail(true);
+    if (checkEmailTimeoutRef.current) clearTimeout(checkEmailTimeoutRef.current);
+
+    checkEmailTimeoutRef.current = setTimeout(async () => {
+      try {
+        const { data } = await (checkEmail(trimmed) as Promise<{ data: { exists: boolean; confident: boolean } }>);
+        setEmailExists(data.exists);
+        setEmailConfident(data.confident);
+      } catch {
+        setEmailExists(null);
+        setEmailConfident(false);
+      } finally {
+        setCheckingEmail(false);
+      }
+    }, 400); // 400ms
+
+    return () => {
+      if (checkEmailTimeoutRef.current) clearTimeout(checkEmailTimeoutRef.current);
+    };
+  }, [email]);
 
   // Onboarding state
   const SAVED_ONBOARDING_KEY = "onboarding_progress";
@@ -177,6 +277,10 @@ function AuthPageInner() {
   useEffect(() => {
     if (searchParams.get("error") === "invalid_link") {
       setError("That sign-in link is invalid or has expired. Request a new one below.");
+    }
+    const msg = searchParams.get("message");
+    if (msg) {
+      setError(msg); // Using error state to show the message
     }
     if (searchParams.get("onboarding") === "true") {
       const saved = localStorage.getItem(SAVED_ONBOARDING_KEY);
@@ -200,16 +304,17 @@ function AuthPageInner() {
     if (screen === "form") emailRef.current?.focus();
   }, [screen]);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const triggerMagicLink = async (targetEmail: string) => {
     setError("");
     setLoading(true);
     try {
-      await requestMagicLink(email.trim().toLowerCase());
-      setSentEmail(email.trim().toLowerCase());
+      await requestMagicLink(targetEmail);
+      setSentEmail(targetEmail);
       setOtpDigits(["", "", "", "", "", ""]);
       setOtpError("");
       setScreen("otp");
+      setResendCountdown(60);
+      setResendDisabled(true);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string }; status?: number } };
       if (axiosErr.response?.status === 429) {
@@ -222,6 +327,29 @@ function AuthPageInner() {
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) return;
+
+    if (resendCountdown > 0) {
+      setError(`Please wait ${resendCountdown}s before requesting a new link.`);
+      return;
+    }
+
+    if (emailExists === false) {
+      setShowConsent(true);
+    } else {
+      triggerMagicLink(trimmed);
+    }
+  };
+
+  const handleConsentAgree = () => {
+    localStorage.setItem("cortexq_agreed_terms", "true");
+    setShowConsent(false);
+    triggerMagicLink(email.trim().toLowerCase());
+  };
+
   const handleResend = async () => {
     if (resendDisabled) return;
     setLoading(true);
@@ -229,12 +357,17 @@ function AuthPageInner() {
     try {
       await requestMagicLink(sentEmail);
       setOtpError("");
-    } catch {
-      // silently ignore on resend
+      setResendCountdown(60);
+    } catch (err: unknown) {
+      setResendDisabled(false);
+      const axiosErr = err as { response?: { data?: { detail?: string }; status?: number } };
+      if (axiosErr.response?.status === 429) {
+        setOtpError("Too many requests — wait a few minutes before trying again.");
+      } else {
+        setOtpError(axiosErr.response?.data?.detail || "Failed to resend. Please try again.");
+      }
     } finally {
       setLoading(false);
-      if (resendTimerRef.current) clearTimeout(resendTimerRef.current);
-      resendTimerRef.current = setTimeout(() => setResendDisabled(false), 60000);
     }
   };
 
@@ -586,7 +719,15 @@ function AuthPageInner() {
               <Mail className="w-7 h-7 text-primary" />
             </div>
 
-            <h1 className="text-2xl font-black tracking-tight mb-2">Check your email</h1>
+            <h1 className="text-2xl font-black tracking-tight mb-2">
+              {!checkingEmail && emailExists === true && emailConfident ? (
+                <span className="text-[#e0fff0]">
+                  Welcome back!
+                </span>
+              ) : (
+                "Check your email"
+              )}
+            </h1>
             <p className="text-sm text-muted-foreground leading-relaxed mb-1">
               We sent a sign-in link and a code to
             </p>
@@ -645,18 +786,20 @@ function AuthPageInner() {
             <button
               onClick={handleResend}
               disabled={loading || resendDisabled}
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors bg-transparent border-0 cursor-pointer font-[inherit] disabled:opacity-50"
+              className="inline-flex items-center gap-2 text-sm text-foreground hover:text-foreground/80 transition-colors bg-transparent border-0 cursor-pointer font-[inherit] disabled:opacity-50"
             >
               {loading
                 ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <RefreshCw className="w-3.5 h-3.5" />}
-              {resendDisabled ? "Resend available in 60s" : "Didn't receive it? Resend"}
+                : (resendDisabled && resendCountdown > 57) ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              {resendDisabled 
+                ? (resendCountdown > 57 ? "sent" : `Resend available in ${resendCountdown}s`) 
+                : "Didn't receive it? Resend"}
             </button>
 
-            <div className="mt-8">
+            <div className="mt-12">
               <button
                 onClick={() => { setScreen("form"); setError(""); setOtpDigits(["", "", "", "", "", ""]); setOtpError(""); }}
-                className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors bg-transparent border-0 cursor-pointer font-[inherit]"
+                className="w-full py-3 rounded-lg border border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10 transition-all text-xs font-bold uppercase tracking-widest cursor-pointer"
               >
                 Use a different email
               </button>
@@ -671,6 +814,12 @@ function AuthPageInner() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {showConsent && (
+        <ConsentModal 
+          onAgree={handleConsentAgree} 
+          onCancel={() => setShowConsent(false)} 
+        />
+      )}
       <main className="min-h-screen flex flex-col items-center justify-center px-6 py-12">
 
         <div className="text-3xl font-black tracking-tight mb-8">
@@ -716,7 +865,15 @@ function AuthPageInner() {
 
               <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
             <div className="flex flex-col gap-1.5 relative">
-              <label className="text-xs font-semibold text-muted-foreground">Email address</label>
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-semibold text-muted-foreground">Email address</label>
+                {emailExists === false && emailConfident && (
+                  <span className="flex items-center gap-1.5 text-[10px] text-primary font-medium animate-in fade-in slide-in-from-right-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_5px_rgba(var(--color-primary),0.5)]" />
+                    New account will be created
+                  </span>
+                )}
+              </div>
               <EmailInputWithSuggestions
                 ref={emailRef}
                 value={email}

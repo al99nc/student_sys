@@ -1,0 +1,214 @@
+{
+  "meta": {
+    "lastUpdated": "2026-05-31",
+    "siteName": "themcq",
+    "siteUrl": "https://themcq.xyz",
+    "contactEmail": "support@themcq.xyz"
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "sections": [
+      {
+        "id": "p1",
+        "num": "01",
+        "heading": "What information we collect",
+        "content": [
+          "When you use themcq, we collect information necessary to provide you with our AI-powered study tools:",
+          "• Account information — your email address used for magic link authentication.",
+          "• Uploaded content — PDF lecture files and study materials you upload to generate MCQs, flashcards, and essays.",
+          "• Study activity — your quiz attempts, flashcard reviews, confidence ratings, and performance data used to power spaced repetition (FSRS) and analytics.",
+          "• Payment information — transaction records processed via Wayl.io (ZainCash / FIB). We do not store your full payment credentials.",
+          "• Device information — basic technical data like browser type and IP address for security and analytics purposes.",
+          "We do not require your name, phone number, or any government ID to use themcq. Your email is the only personal identifier we need."
+        ]
+      },
+      {
+        "id": "p2",
+        "num": "02",
+        "heading": "How we use your information",
+        "content": [
+          "We use the data we collect strictly to operate and improve themcq:",
+          "• Generating AI-powered MCQs, flashcards, and study materials from your uploaded PDFs.",
+          "• Tracking your study performance and powering spaced repetition scheduling.",
+          "• Processing subscription payments and managing your billing status.",
+          "• Sending authentication links to your email. We do not send marketing spam.",
+          "• Improving our AI models and question quality based on aggregated, anonymized usage patterns.",
+          "• Detecting and preventing fraud or abuse of the platform.",
+          "We do not use your content to train third-party AI models without your explicit consent."
+        ]
+      },
+      {
+        "id": "p3",
+        "num": "03",
+        "heading": "Data storage & security",
+        "content": [
+          "themcq is hosted on a VPS server. Your data is stored in a PostgreSQL database and transmitted over encrypted HTTPS connections via Cloudflare.",
+          "• All traffic is encrypted in transit using TLS.",
+          "• Authentication uses secure magic links — no passwords are stored.",
+          "• Payment webhooks are verified using HMAC signatures.",
+          "• We retain your uploaded PDFs only as long as necessary to generate your study materials.",
+          "Honest note: themcq is an early-stage product. While we follow security best practices, we are not a large enterprise with a dedicated security team. We will notify you promptly in the event of any data breach affecting your account."
+        ]
+      },
+      {
+        "id": "p4",
+        "num": "04",
+        "heading": "Sharing your data",
+        "content": [
+          "We do not sell your personal data. Ever. We share limited information only with:",
+          "• AI providers (e.g. OpenRouter, Groq) — your uploaded content is sent to generate study materials. These providers have their own privacy policies.",
+          "• Wayl.io — our payment processor for handling ZainCash and FIB transactions in Iraq.",
+          "• Cloudflare — for CDN and DDoS protection.",
+          "• Legal authorities — only if required by applicable law and with proper legal process."
+        ]
+      },
+      {
+        "id": "p5",
+        "num": "05",
+        "heading": "Your rights",
+        "content": [
+          "You have control over your data on themcq:",
+          "• Access — you can request a copy of the data we hold about you.",
+          "• Deletion — you can request full deletion of your account and associated data at any time.",
+          "• Export — you can export your flashcards and study history.",
+          "• Correction — you can update your account information.",
+          "To exercise any of these rights, contact us at support@themcq.xyz."
+        ]
+      },
+      {
+        "id": "p6",
+        "num": "06",
+        "heading": "Cookies & tracking",
+        "content": [
+          "themcq uses minimal cookies necessary for authentication and session management. We do not use third-party advertising cookies or behavioral tracking pixels.",
+          "We may use basic, privacy-respecting analytics to understand how the platform is used in aggregate — not individual user profiling."
+        ]
+      },
+      {
+        "id": "p7",
+        "num": "07",
+        "heading": "Age & eligibility",
+        "content": [
+          "themcq is intended for university students aged 18 and above.",
+          "We do not knowingly collect data from users under 13. If we become aware that a user is under 13, we will delete their account and data immediately.",
+          "We do not verify age at registration. By creating an account, you confirm you meet the eligibility requirement."
+        ]
+      },
+      {
+        "id": "p8",
+        "num": "08",
+        "heading": "Changes to this policy",
+        "content": [
+          "We may update this Privacy Policy as themcq evolves. When we make significant changes, we will notify you via the email associated with your account.",
+          "Continued use of themcq after changes constitutes acceptance of the updated policy."
+        ]
+      }
+    ]
+  },
+  "terms": {
+    "title": "Terms of Service",
+    "sections": [
+      {
+        "id": "t1",
+        "num": "01",
+        "heading": "Acceptance of terms",
+        "content": [
+          "By accessing or using themcq (available at themcq.xyz), you agree to be bound by these Terms of Service. If you do not agree, do not use the platform.",
+          "These terms apply to all users, including free and paid subscribers."
+        ]
+      },
+      {
+        "id": "t2",
+        "num": "02",
+        "heading": "Description of service",
+        "content": [
+          "themcq is an AI-powered study platform that allows university students to:",
+          "• Upload PDF lecture materials and exam papers.",
+          "• Generate multiple choice questions (MCQs), flashcards, and essay questions using AI.",
+          "• Track study performance with spaced repetition and analytics.",
+          "• Access an AI study coach for personalized guidance.",
+          "• Participate in shared study sessions.",
+          "We reserve the right to modify, suspend, or discontinue any part of the service at any time with reasonable notice."
+        ]
+      },
+      {
+        "id": "t3",
+        "num": "03",
+        "heading": "Account registration",
+        "content": [
+          "You must provide a valid email address to create an account. You are responsible for:",
+          "• Keeping your magic link emails secure and not sharing access to your account.",
+          "• All activity that occurs under your account.",
+          "• Notifying us immediately of any unauthorized use of your account.",
+          "You may not create accounts for others without their consent, or create multiple accounts to circumvent subscription limits."
+        ]
+      },
+      {
+        "id": "t4",
+        "num": "04",
+        "heading": "Acceptable use",
+        "content": [
+          "You agree to use themcq only for lawful educational purposes. You may not:",
+          "• Upload content you do not have the right to share.",
+          "• Attempt to reverse-engineer, scrape, or extract our AI models or generated content at scale.",
+          "• Use the platform to generate materials intended to deceive your institution.",
+          "• Attempt to hack, disrupt, or abuse the platform or its infrastructure.",
+          "• Share your subscription access with others. Each subscription is for one user.",
+          "Using AI-generated MCQs and flashcards to study for your own exams is exactly what themcq is for. We support your learning."
+        ]
+      },
+      {
+        "id": "t5",
+        "num": "05",
+        "heading": "Payments & subscriptions",
+        "content": [
+          "themcq offers paid subscription plans processed via Wayl.io using ZainCash or FIB.",
+          "• Billing — subscriptions are billed on a recurring basis as specified at checkout.",
+          "• Refunds — due to the nature of digital AI services, we generally do not offer refunds for completed billing periods. If you experience a significant technical issue preventing access, contact us within 48 hours.",
+          "• Cancellation — you may cancel your subscription at any time. Access continues until the end of your paid period.",
+          "• Price changes — we will notify you at least 14 days before any price increase takes effect."
+        ]
+      },
+      {
+        "id": "t6",
+        "num": "06",
+        "heading": "Intellectual property",
+        "content": [
+          "Your content: You retain ownership of any PDFs and study materials you upload. By uploading content, you grant themcq a limited license to process it solely for generating your study materials.",
+          "Our content: The themcq platform, its design, code, branding, and AI-generated outputs are the intellectual property of themcq. You may use generated MCQs and flashcards for personal study but may not redistribute them commercially.",
+          "AI outputs: Study materials generated from your uploaded content are yours to use for personal educational purposes."
+        ]
+      },
+      {
+        "id": "t7",
+        "num": "07",
+        "heading": "Disclaimers & limitations",
+        "content": [
+          "themcq is provided as is. We are an early-stage startup and cannot guarantee 100% uptime or that AI-generated content is always accurate.",
+          "themcq does not guarantee the accuracy of AI-generated content and is not responsible for academic penalties resulting from its use.",
+          "AI-generated MCQs and study materials may occasionally contain errors. Always verify critical information against your official course materials. themcq is a study aid, not a replacement for your lectures or professors.",
+          "To the maximum extent permitted by applicable law, themcq shall not be liable for any indirect, incidental, or consequential damages arising from your use of the service."
+        ]
+      },
+      {
+        "id": "t8",
+        "num": "08",
+        "heading": "Termination",
+        "content": [
+          "We reserve the right to suspend or terminate your account if you violate these Terms of Service, engage in fraud or abuse, or for any other reason with reasonable notice.",
+          "You may delete your account at any time by contacting us. Upon deletion, your data will be removed within 30 days, except where retention is required by law."
+        ]
+      },
+      {
+        "id": "t9",
+        "num": "09",
+        "heading": "Governing law",
+        "content": [
+          "These Terms of Service are governed by the laws of the Republic of Iraq.",
+          "Any disputes shall be resolved through good-faith negotiation first. If unresolved, disputes shall be subject to the jurisdiction of Iraqi courts.",
+          "If you have any questions about these terms, contact us at support@themcq.xyz before using the service."
+        ]
+      }
+    ]
+  }
+}

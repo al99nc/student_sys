@@ -17,7 +17,7 @@ from app.api.deps import get_current_user
 from app.schemas.auth import SessionOut
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.core.security import create_access_token, create_session
+from app.core.security import create_access_token, create_session, verify_password
 from app.db.database import get_db
 from app.models.models import MagicLinkToken, User, UserSession
 from app.schemas.auth import (
@@ -28,6 +28,7 @@ from app.schemas.auth import (
     Token,
     UserOut,
     VerifyCodeRequest,
+    LoginRequest,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -41,42 +42,99 @@ def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-async def _send_magic_link_email(email: str, token: str, code: str | None = None) -> None:
+async def _send_magic_link_email(email: str, token: str, code: str | None = None, is_telegram: bool = False) -> None:
     if not settings.RESEND_API_KEY:
         raise HTTPException(status_code=503, detail="Email service not configured")
     link = f"{settings.APP_PUBLIC_URL}/api/auth/verify?token={token}"
 
-    otp_block = ""
-    if code:
-        otp_block = (
-            "<div style=\"margin-top:24px;padding:16px;background:#f5f5f5;border-radius:8px;text-align:center;\">"
-            "<p style=\"margin:0 0 8px;font-size:14px;color:#666;\">Or enter this code in the Telegram app:</p>"
-            f"<p style=\"margin:0;font-size:32px;font-weight:bold;letter-spacing:8px;color:#111;\">{code}</p>"
-            "<p style=\"margin:8px 0 0;font-size:12px;color:#999;\">Expires in 10 minutes</p>"
+    if is_telegram and code:
+        # Telegram-only view: just the code, no link/button
+        subject = f"{code} is your themcq verification code"
+        text = f"Your verification code is: {code}\n\nEnter this code in the Telegram app to sign in. The code expires in 10 minutes."
+        
+        html_content = (
+            "<html>"
+            "<body style=\"font-family: sans-serif; background: #000; color: #fff; padding: 40px 20px; text-align: center;\">"
+            "<div style=\"max-width: 500px; margin: 0 auto;\">"
+            "<div style=\"font-size: 24px; font-weight: 900; margin-bottom: 32px; letter-spacing: -1px;\">"
+            "the<span style=\"color: #22c55e;\">mcq</span>"
             "</div>"
+            "<p style=\"font-size: 16px; color: #ccc; margin-bottom: 24px;\">"
+            "Enter this code in the Telegram app to sign in:"
+            "</p>"
+            f"<div style=\"font-size: 48px; font-weight: 900; letter-spacing: 12px; color: #fff; margin: 32px 0; font-family: monospace;\">{code}</div>"
+            "<p style=\"font-size: 14px; color: #666; margin-top: 32px;\">"
+            "This code expires in 10 minutes. If you didn't request this, you can safely ignore this email."
+            "</p>"
+            "</div>"
+            "</body>"
+            "</html>"
         )
+    else:
+        # Standard Web view: Big button + optional code
+        subject = "Your themcq sign-in link"
+        otp_block = ""
+        if code:
+            otp_block = (
+                "<div style=\"margin-top:24px;padding:16px;background:#111;border:1px solid #333;border-radius:12px;text-align:center;\">"
+                "<p style=\"margin:0 0 8px;font-size:14px;color:#999;\">Or enter this code in the app:</p>"
+                f"<p style=\"margin:0;font-size:32px;font-weight:bold;letter-spacing:8px;color:#fff;\">{code}</p>"
+                "</div>"
+            )
 
-    text = (
-        f"Click the link below to sign in. The link expires in 10 minutes.\n\n"
-        f"{link}\n\n"
-        f"If you didn't request this, you can safely ignore this email."
-    )
-    if code:
-        text += f"\n\nOr enter this code in the app: {code}\nThis code expires in 10 minutes."
+        text = (
+            f"Click the link below to sign in. The link expires in 10 minutes.\n\n"
+            f"If you didn't request this, you can safely ignore this email."
+        )
+        if code:
+            text += f"\n\nOr enter this code in the app: {code}"
+
+        html_content = (
+            "<html>"
+            "<head>"
+            "<style>"
+            "  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }"
+            "  .magic-button:hover { filter: brightness(0.9); }"
+            "</style>"
+            "</head>"
+            "<body style=\"font-family: sans-serif; background: #000; color: #fff; padding: 20px;\">"
+            "<div style=\"max-width: 500px; margin: 0 auto;\">"
+            "<p style=\"font-size: 16px; margin-bottom: 24px; color: #ccc; text-align: center;\">"
+            "Click the button below to sign in. The link expires in 10 minutes."
+            "</p>"
+            f"<a href=\"{link}\" class=\"magic-button\" style=\""
+            "display: block; "
+            "width: 100%; "
+            "background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 50%, #ffffff 100%); "
+            "color: #000000; "
+            "padding: 24px 0; "
+            "text-align: center; "
+            "text-decoration: none; "
+            "font-weight: 900; "
+            "font-size: 22px; "
+            "border-radius: 16px; "
+            "text-transform: uppercase; "
+            "letter-spacing: 2px; "
+            "box-shadow: 0 10px 30px rgba(255,255,255,0.2); "
+            "animation: pulse 2s infinite ease-in-out; "
+            "\">"
+            "<span style=\"animation: pulse 2s infinite ease-in-out;\">Sign in to themcq</span>"
+            "</a>"
+            f"{otp_block}"
+            "<p style=\"font-size: 14px; margin-top: 32px; color: #666; text-align: center;\">"
+            "If you didn't request this, you can safely ignore this email."
+            "</p>"
+            "</div>"
+            "</body>"
+            "</html>"
+        )
 
     payload = {
         "from": "noreply@themcq.xyz",
         "to": [email],
-        "subject": "Your themcq sign-in link",
+        "subject": subject,
         "text": text,
-        "html": (
-            "<p>Click the button below to sign in. The link expires in 10 minutes.</p>"
-            f'<p><a href="{link}" style="background:#6366f1;color:#fff;padding:12px 24px;'
-            f'border-radius:6px;text-decoration:none;font-weight:bold;">Sign in to themcq</a></p>'
-            f'<p>Or paste this URL into your browser:<br>{link}</p>'
-            f"{otp_block}"
-            "<p>If you didn't request this, you can safely ignore this email.</p>"
-        ),
+        "html": html_content,
     }
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(
@@ -86,6 +144,40 @@ async def _send_magic_link_email(email: str, token: str, code: str | None = None
         )
     if resp.status_code >= 400:
         raise HTTPException(status_code=502, detail="Failed to send email")
+
+
+@router.get("/check-email")
+def check_email(
+    email: str = Query(..., description="Email to check (partial or full)"),
+    db: Session = Depends(get_db),
+):
+    search_term = email.lower().strip()
+    if not search_term:
+        return {"exists": False, "confident": False}
+    
+    # starts-with match, case insensitive
+    matches = db.query(User).filter(User.email.ilike(f"{search_term}%")).limit(2).all()
+    count = len(matches)
+    
+    if count == 0:
+        return {"exists": False, "confident": True}
+    elif count == 1:
+        return {"exists": True, "confident": True}
+    else:
+        # count >= 2, ambiguous
+        return {"exists": True, "confident": False}
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # This will cascade delete sessions, results, etc. if relationships are set up,
+    # or we might need to manually clean up some things depending on model definitions.
+    db.delete(current_user)
+    db.commit()
+    return
 
 
 @router.get("/me", response_model=UserOut)
@@ -215,7 +307,10 @@ async def request_magic_link(
     ))
     db.commit()
 
-    await _send_magic_link_email(email, raw_token, code=otp_code)
+    # Note: We now use is_telegram=True if the request came from the bot.
+    # For now, I'll update the request_magic_link to accept an optional telegram flag.
+    is_telegram_request = body.is_telegram if hasattr(body, "is_telegram") else False
+    await _send_magic_link_email(email, raw_token, code=otp_code, is_telegram=is_telegram_request)
 
     return MagicLinkResponse(
         message="Check your email — we sent a sign-in link.",
@@ -484,3 +579,39 @@ async def google_callback(
         url=f"{settings.APP_PUBLIC_URL}/auth/callback?token={jwt_token}&is_new_user={'true' if is_new else 'false'}",
         status_code=302,
     )
+
+
+@router.post("/login", response_model=Token)
+@limiter.limit("5/minute")
+def login(
+    request: Request,
+    body: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    email = body.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    
+    if not user or not user.is_admin or not user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+    
+    if not verify_password(body.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    # Invalidate old sessions
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+
+    # Create new session
+    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    ua = request.headers.get("User-Agent", "")[:500]
+    sid, stk = create_session(db, user.id, ip, ua)
+    db.commit()
+
+    jwt_token = create_access_token({"sub": str(user.id), "sid": sid, "stk": stk})
+    return {"access_token": jwt_token, "token_type": "bearer", "is_new_user": False}

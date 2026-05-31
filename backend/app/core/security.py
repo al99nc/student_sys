@@ -1,11 +1,22 @@
 import hashlib
 import secrets
+import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.models import UserSession
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if not hashed_password:
+        return False
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+
+def get_password_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def create_session(db: Session, user_id: str, ip_address: str | None = None, user_agent: str | None = None) -> tuple[str, str]:

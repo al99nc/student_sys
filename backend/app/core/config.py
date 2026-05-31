@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     # ── OpenRouter (preferred for premium — no billing region issues) ─────────
     open_rout_PAID_API_KEY: str = ""
-    open_rout_PAID_MODEL: str = "google/gemini-2.5-flash"
+    open_rout_PAID_MODELS: str = "google/gemini-2.5-flash"
 
     # Legacy default used if code paths omit explicit tier; prefer FREE_* / PREMIUM_* below.
     AI_MODEL: str = "llama-3.3-70b-versatile"
@@ -185,7 +185,7 @@ class Settings(BaseSettings):
 
     def get_premium_chat_model(self) -> str:
         if self.open_rout_PAID_API_KEY:
-            return self.open_rout_PAID_MODEL
+            return self.open_rout_PAID_MODELS
         return self.GEMINI_PAID_MODEL
 
     def get_all_api_keys(self) -> list[str]:

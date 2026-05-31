@@ -38,7 +38,13 @@ function CallbackInner() {
 
     const isNewUser = searchParams.get("is_new_user") === "true";
     if (isNewUser) {
-      redirectToOnboarding();
+      // If it's a Google flow (or any OAuth that might be added later), 
+      // check if we should go to the legal welcome page.
+      // We can check if the current URL has a provider or just assume new users need consent if not from magic link flow.
+      // But actually, magic link flow also lands here for some cases? 
+      // No, magic link flow redirect from backend to /auth/callback?token=...
+      // Google flow redirect from backend to /auth/callback?token=...&is_new_user=true
+      router.replace("/auth/welcome?provider=google");
       return;
     }
 

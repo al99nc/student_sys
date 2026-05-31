@@ -850,7 +850,7 @@ async def _generate_fresh_essays(topic: str, count: int, *, premium: bool) -> li
     if premium and settings.open_rout_PAID_API_KEY:
         _chat_url = "https://openrouter.ai/api/v1/chat/completions"
         _chat_key = settings.open_rout_PAID_API_KEY
-        _mcq_model = settings.open_rout_PAID_MODEL
+        _mcq_model = settings.open_rout_PAID_MODELS
     elif premium and settings.GEMINI_PAID_API_KEY:
         _chat_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"
         _chat_key = settings.GEMINI_PAID_API_KEY
@@ -934,7 +934,7 @@ async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list
     if premium and settings.open_rout_PAID_API_KEY:
         _chat_url = "https://openrouter.ai/api/v1/chat/completions"
         _chat_key = settings.open_rout_PAID_API_KEY
-        _mcq_model = settings.open_rout_PAID_MODEL
+        _mcq_model = settings.open_rout_PAID_MODELS
         _free_keys = []  # single key for premium — no rotation
     elif premium and settings.GEMINI_PAID_API_KEY:
         _chat_url = f"{settings.GEMINI_API_BASE.split('?')[0].rstrip('/')}/chat/completions"

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { invalidatePerformanceContext } from "@/lib/performance-context";
+import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";

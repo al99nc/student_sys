@@ -54,6 +54,7 @@ export interface CustomContext {
   difficulty: string;
   mcq_count: number;
   weak_topics: string;
+  model?: string;
 }
 
 // ── Response types ────────────────────────────────────────────────────────────
@@ -130,6 +131,9 @@ export interface ViewersOut {
 }
 
 // Auth (passwordless)
+export const checkEmail = (email: string) =>
+  api.get<{ exists: boolean }>("/auth/check-email", { params: { email } });
+
 export const requestMagicLink = (email: string) =>
   api.post<{ message: string; email: string }>("/auth/request-link", { email });
 
@@ -137,6 +141,8 @@ export const verifyCode = (email: string, code: string) =>
   api.post<TokenOut>("/auth/verify-code", { email, code });
 
 export const getMe = () => api.get<UserOut>("/auth/me");
+
+export const deleteMe = () => api.delete("/auth/me");
 
 export interface BillingConfig {
   credit_price_cents: number;
@@ -247,6 +253,7 @@ export const processLecture = (
   difficulty: Difficulty = "revision",
   customContext?: CustomContext,
   focus?: string,
+  model?: string,
 ) => {
   const modeParam =
     difficulty === "essay"
@@ -254,9 +261,13 @@ export const processLecture = (
       : customContext ? "custom" : difficulty;
   const params = new URLSearchParams({ mode: modeParam });
   if (focus && focus.trim()) params.append("focus", focus.trim());
+
+  // Merge model into customContext or create a partial object
+  const body = customContext ? { ...customContext, model } : (model ? { model } : null);
+
   return api.post(
     `/process/${lectureId}?${params.toString()}`,
-    customContext ?? null,
+    body,
     { timeout: 600_000 },
   );
 };

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { getToken } from "@/lib/auth";
+import { McqLoadingWaiter } from "@/components/McqLoadingWaiter";
 
 type JobStatus = "pending" | "processing" | "done" | "failed";
 
@@ -128,104 +129,20 @@ export default function JobWaitingRoom() {
           Generating your questions
         </h1>
 
-        {/* Central card */}
-        <div className="w-full max-w-sm rounded-2xl border border-border/60 bg-card shadow-xl overflow-hidden">
-
-          {/* Progress ring + time remaining */}
-          <div className="flex flex-col items-center pt-8 pb-6 px-6 bg-gradient-to-b from-primary/5 to-transparent">
-
-            {/* Ring */}
-            <div className="relative flex items-center justify-center mb-6">
-              <svg width="180" height="180" viewBox="0 0 180 180">
-                {/* Track */}
-                <circle cx="90" cy="90" r={RADIUS} fill="none" stroke="hsl(var(--border))" strokeWidth="9" />
-                {/* Progress */}
-                <circle
-                  cx="90" cy="90" r={RADIUS} fill="none"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth="9"
-                  strokeLinecap="round"
-                  strokeDasharray={CIRCUMFERENCE}
-                  strokeDashoffset={strokeDashoffset}
-                  transform="rotate(-90 90 90)"
-                  style={{ transition: "stroke-dashoffset 0.6s ease" }}
-                />
-                {/* Glow ring */}
-                <circle
-                  cx="90" cy="90" r={RADIUS} fill="none"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeDasharray={CIRCUMFERENCE}
-                  strokeDashoffset={strokeDashoffset}
-                  transform="rotate(-90 90 90)"
-                  opacity="0.25"
-                  style={{ transition: "stroke-dashoffset 0.6s ease", filter: "blur(4px)" }}
-                />
-                {/* Percentage inside ring */}
-                <text
-                  x="90" y="86" textAnchor="middle" dominantBaseline="middle"
-                  fontSize="30" fontWeight="800" fill="hsl(var(--foreground))"
-                >
-                  {progress}%
-                </text>
-                <text
-                  x="90" y="108" textAnchor="middle" dominantBaseline="middle"
-                  fontSize="10" fill="hsl(var(--muted-foreground))"
-                >
-                  {status === "done" ? "Complete!" : "processing"}
-                </text>
-              </svg>
+        {/* Central Component */}
+        <div className="w-full max-w-sm">
+          {status === "done" ? (
+            <div className="flex flex-col items-center justify-center min-h-[140px] text-center space-y-4">
+              <div className="text-5xl font-black text-emerald-500 animate-in zoom-in duration-300">Done!</div>
+              <div className="text-sm font-semibold text-muted-foreground uppercase tracking-widest animate-pulse">redirecting…</div>
             </div>
-
-            {/* ── TIME REMAINING — big bold display ── */}
-            {status !== "done" && (
-              <div className="text-center mb-2">
-                <div className="text-6xl sm:text-7xl font-black tabular-nums leading-none tracking-tight text-foreground">
-                  {timeDisplay.value}
-                </div>
-                <div className="text-sm font-semibold text-muted-foreground mt-2 uppercase tracking-widest">
-                  {timeDisplay.unit}
-                </div>
-              </div>
-            )}
-
-            {status === "done" && (
-              <div className="text-center mb-2">
-                <div className="text-5xl font-black text-emerald-500">Done!</div>
-                <div className="text-sm font-semibold text-muted-foreground mt-2 uppercase tracking-widest">redirecting…</div>
-              </div>
-            )}
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-border/40 mx-6" />
-
-          {/* Status + label */}
-          <div className="px-6 py-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusBadge.color}`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                {statusBadge.label}
-              </span>
-              <span className="text-xs text-muted-foreground font-medium">{progress}% done</span>
-            </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {label}
-            </p>
-
-            {/* Progress bar */}
-            <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full rounded-full bg-primary transition-all duration-500"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
+          ) : (
+            <McqLoadingWaiter />
+          )}
         </div>
 
         {/* Rotating tip */}
-        <div className="w-full max-w-sm mt-5 rounded-xl border border-border/40 bg-muted/20 px-5 py-4 min-h-[72px] flex items-center gap-3">
+        <div className="w-full max-w-sm mt-12 rounded-xl border border-border/40 bg-muted/20 px-5 py-4 min-h-[72px] flex items-center gap-3">
           <svg className="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -235,8 +152,18 @@ export default function JobWaitingRoom() {
           </p>
         </div>
 
+        {/* Status indicators for dev/debug visibility (subtle) */}
+        <div className="mt-8 flex items-center gap-4 opacity-30 hover:opacity-100 transition-opacity">
+           <span className={`text-[10px] font-bold uppercase tracking-widest ${statusBadge.color} px-2 py-0.5 rounded-full border`}>
+             {statusBadge.label}
+           </span>
+           <span className="text-[10px] font-bold text-muted-foreground tabular-nums">
+             {progress}% COMPLETED
+           </span>
+        </div>
+
         {/* Close-tab info */}
-        <p className="mt-5 text-xs text-muted-foreground/50 text-center max-w-xs leading-relaxed">
+        <p className="mt-12 text-xs text-muted-foreground/50 text-center max-w-xs leading-relaxed">
           You can close this tab — generation continues in the background.
         </p>
       </main>

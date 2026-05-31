@@ -79,6 +79,7 @@ class SessionOut(BaseModel):
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr
+    is_telegram: Optional[bool] = False
 
 
 class MagicLinkResponse(BaseModel):
@@ -89,3 +90,8 @@ class MagicLinkResponse(BaseModel):
 class VerifyCodeRequest(BaseModel):
     email: str
     code: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str

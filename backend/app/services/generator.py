@@ -844,10 +844,12 @@ async def generate_study_content(
     is_premium: bool = False,
     custom_context: dict | None = None,
     focus_instruction: str = "",
+    model: str | None = None,
 ) -> Dict[str, Any]:
     if is_premium:
         if settings.open_rout_PAID_API_KEY:
-            ai_model = settings.open_rout_PAID_MODEL
+            # Use user preferred model if pro, otherwise default pro model
+            ai_model = model if model else settings.open_rout_PAID_MODELS
             available_keys = [settings.open_rout_PAID_API_KEY]
         else:
             ai_model = settings.FREE_AI_MODEL
@@ -1201,10 +1203,11 @@ async def generate_essay_content(
     *,
     is_premium: bool = False,
     custom_context: dict | None = None,
+    model: str | None = None,
 ) -> Dict[str, Any]:
     """Generate open-ended essay questions with ideal answers from lecture text."""
     if is_premium and settings.open_rout_PAID_API_KEY:
-        ai_model = settings.open_rout_PAID_MODEL
+        ai_model = model if model else settings.open_rout_PAID_MODELS
         api_key = settings.open_rout_PAID_API_KEY
     else:
         ai_model = settings.FREE_AI_MODEL

@@ -147,6 +147,7 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
             if is_essay_mode:
                 ai_data = await generate_essay_content(
                     text, is_premium=use_premium, custom_context=context_dict,
+                    model=job.model_preference,
                 )
                 essay_data = ai_data
                 mcq_data = {"mcqs": [], "summary": "", "key_concepts": []}
@@ -154,12 +155,14 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
                 ai_data = await generate_study_content(
                     text, mode=job.mode, is_premium=use_premium, custom_context=context_dict,
                     focus_instruction=focus_instruction,
+                    model=job.model_preference,
                 )
                 mcq_data = ai_data
                 # Also generate essay questions alongside MCQs
                 try:
                     essay_data = await generate_essay_content(
                         text, is_premium=use_premium, custom_context=context_dict,
+                        model=job.model_preference,
                     )
                 except Exception as ese:
                     logger.warning("Essay generation failed (non-fatal): %s", ese)
@@ -273,6 +276,7 @@ class CustomContext(BaseModel):
     difficulty: str = "medium"     # easy|medium|hard|brutal
     mcq_count: int = 20            # 10–40
     weak_topics: str = ""
+    model: Optional[str] = None
 
 router = APIRouter(tags=["lectures"])
 
@@ -746,12 +750,17 @@ async def process_lecture(
         total_chunks = 1
 
     context_json = None
+    model_preference = None
     if custom_context is not None:
         context_dict = custom_context.model_dump()
         context_dict["field_of_study"] = " ".join(filter(None, [
             current_user.college, current_user.subject,
         ])) or "General Studies"
         context_json = json.dumps(context_dict)
+        
+        # Pro users can choose their model
+        if plan_tier(current_user) in ("pro", "enterprise") and custom_context.model:
+            model_preference = custom_context.model
 
     job_id = _generate_job_id()
     job = ProcessingJob(
@@ -766,6 +775,7 @@ async def process_lecture(
         total_chunks=total_chunks,
         completed_chunks=0,
         custom_context=context_json,
+        model_preference=model_preference,
     )
     db.add(job)
     db.commit()
