@@ -49,6 +49,9 @@ async def lifespan(_app: FastAPI):
             db,
             redis_url=settings.REDIS_URL or None,
         )
+    except Exception as e:
+        logger.error("Failed to initialize global token guard: %s", e)
+        db.rollback()
     finally:
         db.close()
 
@@ -86,6 +89,7 @@ with engine.connect() as _conn:
         )
 
     migrations = [
+        "ALTER TABLE lectures ADD COLUMN study_time_seconds INTEGER DEFAULT 0",
         "ALTER TABLE results ADD COLUMN share_token VARCHAR",
         "ALTER TABLE results ADD COLUMN view_count INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN uuid VARCHAR(36)",
@@ -111,23 +115,32 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN monthly_credit_limit INTEGER",
         "ALTER TABLE users ADD COLUMN monthly_credits_used INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN monthly_reset_month VARCHAR(7)",
+        "ALTER TABLE users ADD COLUMN extra_usage_enabled INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN signup_ip VARCHAR(45)",
+        "ALTER TABLE results ADD COLUMN custom_context TEXT",
         "CREATE TABLE IF NOT EXISTS processing_jobs (id VARCHAR(16) PRIMARY KEY, user_id VARCHAR(36), lecture_id INTEGER, mode VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'pending', progress_pct INTEGER DEFAULT 0, progress_label VARCHAR(100), estimated_seconds_remaining INTEGER, created_at DATETIME, started_at DATETIME, completed_at DATETIME, error_message TEXT, custom_context TEXT, total_chunks INTEGER, completed_chunks INTEGER DEFAULT 0)",
         "CREATE TABLE IF NOT EXISTS magic_link_tokens (id VARCHAR(36) PRIMARY KEY, email VARCHAR NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE, expires_at DATETIME NOT NULL, used INTEGER NOT NULL DEFAULT 0, created_at DATETIME)",
         "ALTER TABLE magic_link_tokens ADD COLUMN otp_code VARCHAR(6)",
         "ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(32)",
         "ALTER TABLE users ADD COLUMN profile_picture VARCHAR(255)",
         "CREATE TABLE IF NOT EXISTS user_sessions (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL, token_hash VARCHAR(64) NOT NULL, ip_address VARCHAR(45), user_agent VARCHAR(500), created_at DATETIME, last_seen_at DATETIME, expires_at DATETIME NOT NULL)",
-        "ALTER TABLE user_sessions ALTER COLUMN expires_at TYPE TIMESTAMP WITH TIME ZONE USING expires_at AT TIME ZONE 'UTC'",
-        "ALTER TABLE user_sessions ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'UTC'",
-        "ALTER TABLE user_sessions ALTER COLUMN last_seen_at TYPE TIMESTAMP WITH TIME ZONE USING last_seen_at AT TIME ZONE 'UTC'",
+        "ALTER TABLE user_sessions ADD COLUMN previous_token_hash VARCHAR(64)",
         bot_sessions_sql,
         "ALTER TABLE daily_test_cache ADD COLUMN answers TEXT",
         "ALTER TABLE processing_jobs ADD COLUMN model_preference VARCHAR",
         "ALTER TABLE users ADD COLUMN hashed_password VARCHAR(255)",
     ]
 
+    if engine.dialect.name != "sqlite":
+        migrations.extend([
+            "ALTER TABLE user_sessions ALTER COLUMN expires_at TYPE TIMESTAMP WITH TIME ZONE USING expires_at AT TIME ZONE 'UTC'",
+            "ALTER TABLE user_sessions ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'UTC'",
+            "ALTER TABLE user_sessions ALTER COLUMN last_seen_at TYPE TIMESTAMP WITH TIME ZONE USING last_seen_at AT TIME ZONE 'UTC'",
+        ])
+
     for _stmt in migrations:
         try:
+            logger.info("Attempting manual migration: %s", _stmt)
             _conn.execute(text(_stmt))
             _conn.commit()
         except (sa_exc.OperationalError, sa_exc.ProgrammingError) as _e:
@@ -244,6 +257,7 @@ def health():
     except Exception as exc:
         logger.error("Health check DB query failed: %s", exc)
         db_status = "error"
+        db.rollback()
     finally:
         db.close()
     return {"status": "ok" if db_status == "ok" else "degraded", "db": db_status}

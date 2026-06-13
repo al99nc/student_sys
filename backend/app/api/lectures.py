@@ -250,6 +250,7 @@ async def _run_processing_job(job_id: str, use_premium: bool, spent: bool, cost:
         db.commit()
 
     except Exception as e:
+        db.rollback()
         try:
             job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
             if job and job.status not in ("done", "failed"):
@@ -617,6 +618,7 @@ def get_lectures(
             d.pending_job_id = job.id
             d.progress_pct = job.progress_pct
             d.progress_label = job.progress_label
+            d.generation_started_at = job.created_at
         out.append(d)
     return out
 
@@ -703,11 +705,12 @@ async def process_lecture(
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
 
-    # Return existing active job to prevent duplicate submissions
+    # Return existing active job for THIS lecture to prevent duplicate submissions for the same file
     existing_active = db.query(ProcessingJob).filter(
         ProcessingJob.user_id == current_user.id,
+        ProcessingJob.lecture_id == lecture_id,
         ProcessingJob.status.in_(["pending", "processing"]),
-    ).order_by(ProcessingJob.created_at.desc()).first()
+    ).first()
 
     if existing_active:
         return {

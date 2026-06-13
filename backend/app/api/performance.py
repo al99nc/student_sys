@@ -1504,7 +1504,7 @@ async def _background_regenerate_insight(
             db=db,
         )
     except Exception:
-        pass   # background task — never crash the app; log here if you have a logger
+        db.rollback()
     finally:
         db.close()
 

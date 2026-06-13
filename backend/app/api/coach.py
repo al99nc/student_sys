@@ -880,7 +880,7 @@ async def _generate_fresh_essays(topic: str, count: int, *, premium: bool) -> li
             raw = resp.json()["choices"][0]["message"]["content"]
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-            parsed = json.loads(raw)
+            parsed = json.loads(raw, strict=False)
             questions = parsed.get("questions", [])
             
             valid = []
@@ -968,7 +968,7 @@ async def _generate_fresh_mcqs(topic: str, count: int, *, premium: bool) -> list
             raw = resp.json()["choices"][0]["message"]["content"]
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-            parsed = json.loads(raw)
+            parsed = json.loads(raw, strict=False)
             questions = parsed.get("questions", [])
             valid = []
             for q in questions:
@@ -1160,7 +1160,7 @@ RESPONSE SCHEMA:
             raw = resp.json()["choices"][0]["message"]["content"]
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-            parsed = json.loads(raw)
+            parsed = json.loads(raw, strict=False)
             parsed = sanitize_nulls(parsed)
             required = ["response", "action", "topic_focus", "next_step", "confidence_tip", "urgency", "encouraging_note", "loop_phase", "mcq_questions"]
             for key in required:

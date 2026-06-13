@@ -90,6 +90,7 @@ export interface LectureOut {
   is_processed?: boolean;
   has_essays?: boolean;
   pending_job_id?: string | null;
+  generation_started_at?: string | null;
 }
 
 export interface McqItem {

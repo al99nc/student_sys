@@ -17,6 +17,7 @@ class LectureOut(BaseModel):
     pending_job_id: Optional[str] = None
     progress_pct: Optional[int] = None
     progress_label: Optional[str] = None
+    generation_started_at: Optional[datetime] = None
     study_time_seconds: int = 0
 
     class Config:

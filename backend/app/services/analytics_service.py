@@ -21,13 +21,14 @@ from app.models.performance import (
 
 def get_lecture_stats(user: User, db: Session) -> dict:
     """Total lectures, processed lectures, and avg quiz score from quiz sessions."""
-    total_lectures = db.query(Lecture).filter(Lecture.user_id == user.id).count()
+    from sqlalchemy import func
+    total_lectures = db.query(func.count(Lecture.id)).filter(Lecture.user_id == user.id).scalar() or 0
 
     processed_lectures = (
-        db.query(Result)
+        db.query(func.count(Result.id))
         .join(Lecture, Result.lecture_id == Lecture.id)
         .filter(Lecture.user_id == user.id)
-        .count()
+        .scalar() or 0
     )
 
     sessions = (

@@ -517,6 +517,19 @@ function LapContent() {
         // Refresh lectures to show the new pending job
         loadLectures();
 
+        // Reset Create section state to defaults
+        setGenLecture(null);
+        setGenMode("mcq");
+        setExamType("revision");
+        setCustomExamType("final");
+        setTimeToExam("today");
+        setPriorKnowledge("first_time");
+        setDifficulty("medium");
+        setMcqCount(20);
+        setWeakTopics("");
+        setFocusInstruction("");
+        setGenError("");
+
         // Redirect to Study section to see the inline progress
         setTimeout(() => {
           scrollToSection("study");
@@ -1128,7 +1141,8 @@ function LapContent() {
 
                             let genStatus: "generating" | "timeout_soft" | "timeout_hard" = "generating";
                             if (isActive) {
-                              const elapsedMs = Date.now() - new Date(upload.created_at).getTime();
+                              const startTime = upload.generation_started_at ? new Date(upload.generation_started_at).getTime() : new Date(upload.created_at).getTime();
+                              const elapsedMs = Date.now() - startTime;
                               if (elapsedMs > 8 * 60 * 1000) genStatus = "timeout_hard";
                               else if (elapsedMs > 3 * 60 * 1000) genStatus = "timeout_soft";
                             }
