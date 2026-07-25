@@ -282,12 +282,6 @@ export default function FlashcardWorkspacePage() {
                 )}
               </div>
             </div>
-
-            <div className="flex flex-wrap gap-3">
-              <Button variant="outline" className="bg-muted border-border h-12 w-12 p-0 rounded-2xl hover:bg-accent transition-all shadow-sm">
-                <Settings2 className="w-5 h-5" />
-              </Button>
-            </div>
           </div>
 
           {stats && (
@@ -368,9 +362,6 @@ export default function FlashcardWorkspacePage() {
           </div>
         </div>
       </main>
-
-      {/* Floating AI Tools Panel */}
-      <AIToolsSidebar />
 
       {/* Mobile Sticky Review Button */}
       <div className="fixed bottom-6 left-4 right-4 md:hidden z-40">
@@ -460,55 +451,55 @@ function FlashcardListItem({
         isExpanded ? "bg-accent/50 border-primary/30" : "bg-card border-border hover:border-primary/30 hover:bg-accent/20"
       }`}
     >
-      <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={onToggleExpand}>
-        <div className="flex-1 min-w-0 flex items-center gap-4">
-          <Badge variant="outline" className={`hidden sm:flex shrink-0 font-medium ${CARD_TYPE_COLORS[card.card_type] || "bg-muted text-muted-foreground border-border"}`}>
-            {card.card_type}
-          </Badge>
-          <p className="text-foreground/90 font-semibold group-hover:text-foreground transition-colors">
-            {card.front}
-          </p>
-        </div>
+        <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={onToggleExpand}>
+          <div className="flex-1 min-w-0 flex items-center gap-4">
+            <Badge variant="outline" className={`hidden sm:flex shrink-0 font-medium ${CARD_TYPE_COLORS[card.card_type] || "bg-muted text-muted-foreground border-border"}`}>
+              {card.card_type}
+            </Badge>
+            <p className="text-foreground/90 font-semibold group-hover:text-foreground transition-colors">
+              {card.topic || card.front.substring(0, 60) + (card.front.length > 60 ? '...' : '')}
+            </p>
+          </div>
 
-        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleStar();
-            }}
-            className={`p-2 rounded-xl transition-all ${
-              card.is_starred ? "text-yellow-500 bg-yellow-500/10" : "text-muted-foreground/30 hover:text-yellow-500 hover:bg-yellow-500/5"
-            }`}
-          >
-            <Star className={`w-5 h-5 ${card.is_starred ? "fill-current" : ""}`} />
-          </button>
-          
-          <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 sm:gap-3 shrink-0">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onSetEditing();
+                onToggleStar();
               }}
-              className="p-2 text-muted-foreground/40 hover:text-foreground hover:bg-muted rounded-xl transition-all"
+              className={`p-2 rounded-xl transition-all ${
+                card.is_starred ? "text-yellow-500 bg-yellow-500/10" : "text-muted-foreground/30 hover:text-yellow-500 hover:bg-yellow-500/5"
+              }`}
             >
-              <Edit2 className="w-4 h-4" />
+              <Star className={`w-5 h-5 ${card.is_starred ? "fill-current" : ""}`} />
             </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm("Delete this card?")) onDelete();
-              }}
-              className="p-2 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 rounded-xl transition-all"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
+            
+            <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSetEditing();
+                }}
+                className="p-2 text-muted-foreground/40 hover:text-foreground hover:bg-muted rounded-xl transition-all"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm("Delete this card?")) onDelete();
+                }}
+                className="p-2 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 rounded-xl transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
 
-          <div className="p-2 text-muted-foreground/30 group-hover:text-foreground transition-colors">
-            {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+            <div className="p-2 text-muted-foreground/30 group-hover:text-foreground transition-colors">
+              {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+            </div>
           </div>
         </div>
-      </div>
 
       <AnimatePresence>
         {isExpanded && (
@@ -753,30 +744,4 @@ function AIContentGenerator({
   );
 }
 
-function AIToolsSidebar() {
-  const tools = [
-    { label: "Simplify", icon: <Brain className="w-5 h-5" />, color: "text-blue-500" },
-    { label: "Make Harder", icon: <Zap className="w-5 h-5" />, color: "text-orange-500" },
-    { label: "Add Mnemonic", icon: <Sparkles className="w-5 h-5" />, color: "text-yellow-500" },
-    { label: "Explain", icon: <PlusCircle className="w-5 h-5" />, color: "text-emerald-500" },
-  ];
-
-  return (
-    <div className="fixed right-6 top-1/2 -translate-y-1/2 hidden xl:flex flex-col gap-3">
-      {tools.map((tool) => (
-        <motion.button
-          key={tool.label}
-          whileHover={{ x: -8 }}
-          className="group flex items-center gap-3 bg-card/80 backdrop-blur-xl border border-border p-3 rounded-2xl hover:border-primary/50 transition-all hover:bg-accent shadow-lg"
-        >
-          <div className={`${tool.color} bg-muted p-2 rounded-xl group-hover:bg-background transition-colors`}>
-            {tool.icon}
-          </div>
-          <span className="text-sm font-bold text-muted-foreground group-hover:text-foreground transition-colors pr-4">
-            {tool.label}
-          </span>
-        </motion.button>
-      ))}
-    </div>
-  );
-}
+// Removed AIToolsSidebar function as requested

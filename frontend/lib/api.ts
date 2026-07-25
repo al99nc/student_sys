@@ -783,9 +783,7 @@ export const getAdminStats = () => api.get<AdminStats>("/admin/stats");
 export const adminSetCredits = (email: string, credits: number) =>
   api.post<SetCreditsResponse>("/admin/set-credits", { email, credits });
 
-// ── Companion widget ──────────────────────────────────────────────────────────
 
-export const companionAsk = (question: string, currentPage: string) =>
   api.post<{ answer: string | null; escalate: boolean; escalate_reason: string | null }>(
     "/api/v1/coach/companion/ask",
     { question, current_page: currentPage },

@@ -4,7 +4,6 @@ import { Analytics } from '@vercel/analytics/next'
 import { TelegramProvider } from '@/lib/TelegramProvider'
 import { MaterialSymbolsFont } from '@/components/material-symbols-font'
 import { ErrorBoundary } from '@/components/error-boundary'
-import { CompanionWidget } from '@/components/companion-widget'
 import './globals.css'
 
 const plusJakarta = localFont({
@@ -44,7 +43,6 @@ export default function RootLayout({
         <ErrorBoundary>
           <TelegramProvider>
             {children}
-            <CompanionWidget />
           </TelegramProvider>
         </ErrorBoundary>
         {process.env.NODE_ENV === 'production' && <Analytics />}

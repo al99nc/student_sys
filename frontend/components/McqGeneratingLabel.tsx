@@ -17,9 +17,11 @@ type Status = "generating" | "queued" | "timeout_soft" | "timeout_hard";
 
 interface McqGeneratingLabelProps {
   status: Status;
+  progressPct: number | null;
+  elapsedMs: number;
 }
 
-export function McqGeneratingLabel({ status }: McqGeneratingLabelProps) {
+export function McqGeneratingLabel({ status, progressPct, elapsedMs }: McqGeneratingLabelProps) {
   const [index, setIndex] = useState(() => Math.floor(Math.random() * MESSAGES.length));
   const [opacity, setOpacity] = useState(1);
 
@@ -55,10 +57,14 @@ export function McqGeneratingLabel({ status }: McqGeneratingLabelProps) {
   let text = MESSAGES[index];
   let colorClass = "text-muted-foreground";
 
-  if (status === "timeout_soft") {
-    text = "Taking longer than usual...";
+  // Check if we've crossed the timeout thresholds
+  const hasTimedOutSoft = elapsedMs > 3 * 60 * 1000;
+  const hasTimedOutHard = elapsedMs > 8 * 60 * 1000;
+
+  if (hasTimedOutSoft) {
+    text = "Finishing up…";
     colorClass = "text-amber-500/80";
-  } else if (status === "timeout_hard") {
+  } else if (hasTimedOutHard) {
     text = "Still working... check back soon";
     colorClass = "text-amber-600/70";
   }

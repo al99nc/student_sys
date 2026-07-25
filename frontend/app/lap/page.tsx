@@ -1195,7 +1195,35 @@ function LapContent() {
                                     ) : null}
                                   </div>
                                   {isActive && (
-                                    <McqGeneratingLabel status={genStatus} />
+                                    <div className="flex flex-col items-end gap-1.5">
+                                      <div className="w-24 h-1.5 rounded-xl bg-border/40 overflow-hidden">
+                                        {upload.progress_pct !== null ? (
+                                          <div 
+                                            className="h-full bg-primary rounded-xl"
+                                            style={{ width: `${upload.progress_pct}%` }}
+                                          />
+                                        ) : (
+                                          <div className="h-full bg-primary rounded-xl animate-progress-fast" />
+                                        )}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground">
+                                        {upload.progress_pct !== null && upload.progress_pct > 5 ? (
+                                          (() => {
+                                            const elapsedSec = Math.floor(elapsedMs / 1000);
+                                            const remainingSec = Math.floor(elapsedSec * (100 - upload.progress_pct) / upload.progress_pct);
+                                            if (remainingSec < 60) {
+                                              return "less than a minute left";
+                                            } else if (remainingSec < 300) {
+                                              return `about ${Math.ceil(remainingSec / 60)} minutes left`;
+                                            } else {
+                                              return `about ${Math.ceil(remainingSec / 60)} minutes left`;
+                                            }
+                                          })()
+                                        ) : (
+                                          hasTimedOutSoft ? "Finishing up…" : "Usually takes 2–4 minutes"
+                                        )}
+                                      </div>
+                                    </div>
                                   )}
                                   <Badge variant="outline" className={`flex-shrink-0 px-2 h-5 text-[9px] font-bold ${statusColor}`}>
                                     {hasJob && upload.progress_pct !== null ? `${upload.progress_pct}%` : statusLabel}
