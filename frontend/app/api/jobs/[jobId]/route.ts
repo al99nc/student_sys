@@ -7,9 +7,22 @@ export async function GET(
   { params }: { params: { jobId: string } }
 ) {
   const auth = request.headers.get("Authorization") || "";
-  const res = await fetch(`${BACKEND}/jobs/${params.jobId}`, {
-    headers: { Authorization: auth },
-  });
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(`${BACKEND}/jobs/${params.jobId}`, {
+      headers: { Authorization: auth },
+      signal: controller.signal,
+    });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch (error: any) {
+    if (error.name === "AbortError") {
+      return NextResponse.json({ error: "Backend request timed out" }, { status: 504 });
+    }
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

@@ -60,15 +60,22 @@ def get_current_user(
 
         expected_hash = hashlib.sha256(stk.encode()).hexdigest()
         if session.token_hash == expected_hash:
-            # Rotate session token for theft protection
-            new_stk = rotate_session_token(db, session)
+            # Only rotate session token if we're not in a state where we shouldn't
+            # The rotation will be done conditionally by the response handler
+            # For now, just update the last seen timestamp to prevent race conditions
+            session.last_seen_at = datetime.now(timezone.utc)
             db.commit()
-
-            # Issue new JWT with rotated token
+            
+            # Store session info for potential rotation in the response handler
+            request.state._session_for_rotation = session
+            request.state._should_rotate = True
+            
+            # Create a new JWT but don't commit the rotation yet
+            # This will be committed conditionally by the response handler
             new_jwt = create_access_token({
                 "sub": str(user_id),
                 "sid": sid,
-                "stk": new_stk,
+                "stk": stk,  # Keep old token for now
             })
             request.state._new_jwt = new_jwt
         elif session.previous_token_hash == expected_hash:

@@ -227,6 +227,7 @@ export const uploadLecture = (file: File) => {
   form.append("file", file);
   return api.post("/lap", form, {
     headers: { "Content-Type": "multipart/form-data" },
+    timeout: 180000, // 3 minutes - sufficient for slow mobile uploads
   });
 };
 
